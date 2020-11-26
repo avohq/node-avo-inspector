@@ -1,0 +1,24 @@
+{
+  "name": "node-avo-inspector",
+  "version": "0.1.0",
+  "description": "Avo Inspector for Node.js",
+  "main": "dist/index.js",
+  "repository": "https://github.com/avohq/node-avo-inspector",
+  "author": "Avo (https://www.avo.app)",
+  "license": "MIT",
+  "private": false,
+  "bugs": {
+    "url": "https://github.com/avohq/node-avo-inspector/issues"
+  },
+  "homepage": "https://github.com/avohq/node-avo-inspector#readme",
+  "scripts": {
+    "build": "tsc --outDir dist",
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^14.14.10",
+    "typescript": "^4.1.2"
+  },
+  "dependencies": {}
+}
