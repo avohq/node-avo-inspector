@@ -7,7 +7,7 @@ export interface BaseBody {
   appVersion: string;
   libVersion: string;
   env: string;
-  libPlatform: "web";
+  libPlatform: "node";
   messageId: string;
   trackingId: string;
   createdAt: string;
@@ -170,7 +170,7 @@ export class AvoNetworkCallsHandler {
       appVersion: this.appVersion,
       libVersion: this.libVersion,
       env: this.envName,
-      libPlatform: "web",
+      libPlatform: "node",
       messageId: AvoGuid.newGuid(),
       trackingId: "",
       createdAt: new Date().toISOString(),

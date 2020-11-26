@@ -4,7 +4,8 @@ const defaultOptions = {
   apiKey: "api-key-xxx",
   env: AvoInspectorEnv.Dev,
   version: "1",
-  shouldLog: true
+  shouldLog: true,
+  appName: "my-test-app",
 };
 
 const error = {
