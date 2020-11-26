@@ -1,10 +1,5 @@
-import { AvoBatcher } from "../AvoBatcher";
 import { AvoInspector } from "../AvoInspector";
-import {
-  AvoNetworkCallsHandler,
-  EventSchemaBody,
-  SessionStartedBody,
-} from "../AvoNetworkCallsHandler";
+import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
 
 import { defaultOptions } from "./constants";
 
