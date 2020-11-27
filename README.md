@@ -1,42 +1,28 @@
-# Avo Inspector
+# Avo Inspector SDK for Node.js
 
-# Avo documentation
-
-This is a quick start guide.
-For more information about the Inspector project please read [Avo documentation](TODO).
+This is a quick start guide. For more information about the Inspector project please read [Avo Inspector SDK Reference](https://www.avo.app/docs/implementation/avo-inspector-sdk-reference) and the [Avo Inspector Setup Guide](https://www.avo.app/docs/implementation/setup-inspector-sdk).
 
 # Installation
 
-> If you are looking for React Native library please switch to [this branch](https://github.com/avohq/js-avo-inspector/tree/react-native-node-package) and use `react-native-avo-inspector` npm package.
-
-The library is distributed with npm
-
+The library is distributed with npm, install with npm:
 ```
     npm i node-avo-inspector
 ```
 
-or
-
+or yarn:
 ```
     yarn add node-avo-inspector
 ```
 
 # Initialization
 
-Obtain the API key at [Avo.app](https://www.avo.app/welcome)
+Obtain the API key from the Inspector tab (Inspector > Manage Sources) in your [Avo workspace](https://www.avo.app/welcome)
 
-# Enabling logs
-
-Logs are enabled by default in the dev mode and disabled in prod mode.
-
-```javascript
-inspector.enableLogging(true);
-```
 
 # Sending event schemas
 
 Whenever you send tracking event call the following method:
-Read more in the [Avo documentation](https://www.avo.app/docs/inspector/sdk/js#event-tracking)
+Read more in the [Avo documentation](https://www.avo.app/docs/implementation/inspector/sdk/node)
 
 This method gets actual tracking event parameters, extracts schema automatically and sends it to the Avo Inspector backend.
 It is the easiest way to use the library, just call this method at the same place you call your analytics tools' track methods with the same parameters.
@@ -49,22 +35,16 @@ inspector.trackSchemaFromEvent("Event name", {
 });
 ```
 
-# Extracting event schema manually
+# Enabling logs
+
+Logs are enabled by default in the dev mode and disabled in prod mode. You can enable and disable logs by calling the `enableLogging` method:
 
 ```javascript
-let schema = inspector.extractSchema({
-  "String Prop": "Prop Value",
-  "Float Prop": 1.0,
-  "Boolean Prop": true,
-});
+inspector.enableLogging(true | false);
 ```
 
-You can experiment with this method to see how more complex schemas look, for example with nested lists and objects.
-
 ## Author
-
-Avo (https://www.avo.app), friends@avo.app
+Avo (https://www.avo.app), hi@avo.app
 
 ## License
-
 AvoInspector is available under the MIT license.
