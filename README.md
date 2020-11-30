@@ -18,6 +18,16 @@ or yarn:
 
 Obtain the API key from the Inspector tab (Inspector > Manage Sources) in your [Avo workspace](https://www.avo.app/welcome)
 
+```javascript
+import * as Inspector from "node-avo-inspector";
+
+let inspector = new Inspector.AvoInspector({
+  apiKey: "your api key",
+  env: Inspector.AvoInspectorEnv.Dev,
+  version: "1.0.0",
+  appName: "My app",
+});
+```
 
 # Sending event schemas
 
