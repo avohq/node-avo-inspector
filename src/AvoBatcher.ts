@@ -51,20 +51,6 @@ export class AvoBatcher implements AvoBatcherType {
           ),
         ]);
       })
-      .then(() => {
-        if (AvoInspector.shouldLog) {
-          console.log("Avo Inspector: schema sent successfully.");
-        }
-        this.networkCallsHandler.callInspectorWithBatchBody([
-          this.networkCallsHandler.bodyForEventSchemaCall(
-            seeionId,
-            eventName,
-            schema,
-            eventId,
-            eventHash
-          ),
-        ]);
-      })
       .catch((err) => {
         if (AvoInspector.shouldLog) {
           console.log("Avo Inspector: schema sending failed: " + err + ".");

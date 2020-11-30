@@ -3,6 +3,7 @@ import { deepEquals } from "./utils";
 export class AvoDeduplicator {
   avoFunctionsEvents: { [time: number]: string } = {};
   manualEvents: { [time: number]: string } = {};
+  private msToConsiderOld = 500;
 
   avoFunctionsEventsParams: {
     [eventName: string]: { [propName: string]: any };
@@ -110,12 +111,11 @@ export class AvoDeduplicator {
 
   private clearOldEvents() {
     const now = Date.now();
-    const msToConsiderOld = 300;
 
     for (const time in this.avoFunctionsEvents) {
       if (this.avoFunctionsEvents.hasOwnProperty(time)) {
         const timestamp = Number(time) || 0;
-        if (now - timestamp > msToConsiderOld) {
+        if (now - timestamp > this.msToConsiderOld) {
           const eventName = this.avoFunctionsEvents[time];
           delete this.avoFunctionsEvents[time];
           delete this.avoFunctionsEventsParams[eventName];
@@ -126,7 +126,7 @@ export class AvoDeduplicator {
     for (const time in this.manualEvents) {
       if (this.manualEvents.hasOwnProperty(time)) {
         const timestamp = Number(time) || 0;
-        if (now - timestamp > msToConsiderOld) {
+        if (now - timestamp > this.msToConsiderOld) {
           const eventName = this.manualEvents[time];
           delete this.manualEvents[time];
           delete this.manualEventsParams[eventName];
