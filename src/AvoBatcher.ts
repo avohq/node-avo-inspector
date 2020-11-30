@@ -1,6 +1,6 @@
 import { AvoNetworkCallsHandler } from "./AvoNetworkCallsHandler";
 import { AvoInspector } from "./AvoInspector";
-import AvoGuid from "./AvoGuid";
+import { AvoGuid } from "./AvoGuid";
 
 export interface AvoBatcherType {
   handleTrackSchema(

@@ -1,11 +1,9 @@
-import AvoGuid from "../AvoGuid";
+import { AvoGuid } from "../AvoGuid";
 import { AvoNetworkCallsHandler, BaseBody } from "../AvoNetworkCallsHandler";
 
 import {
   defaultOptions,
   mockedReturns,
-  requestMsg,
-  trackingEndpoint,
 } from "./constants";
 
 const inspectorVersion = process.env.npm_package_version || "";
