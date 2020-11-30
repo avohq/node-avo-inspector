@@ -75,8 +75,6 @@ export class AvoNetworkCallsHandler {
     }
 
     if (AvoInspector.shouldLog) {
-      console.log("Avo Inspector: events", events);
-
       events.forEach(function (event) {
         if (event.type === "sessionStarted") {
           console.log("Avo Inspector: sending session started event.");
