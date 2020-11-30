@@ -1,4 +1,4 @@
-export default class AvoGuid {
+export class AvoGuid {
   static newGuid(): string {
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
       var r = (Math.random() * 16) | 0,

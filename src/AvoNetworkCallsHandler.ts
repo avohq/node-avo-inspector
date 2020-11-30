@@ -1,4 +1,4 @@
-import AvoGuid from "./AvoGuid";
+import { AvoGuid } from "./AvoGuid";
 import { AvoInspector } from "./AvoInspector";
 
 export interface BaseBody {
