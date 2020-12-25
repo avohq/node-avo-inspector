@@ -39,7 +39,7 @@ Every event sent with Avo Function after this integration will automatically be 
 
 # Sending event schemas for events reported outside of Avo Functions
 
-Whenever you send tracking event call one of the following methods:
+Whenever you send tracking event call the following methods:
 
 Read more in the [Avo documentation](https://www.avo.app/docs/implementation/devs-101#inspecting-events)
 
