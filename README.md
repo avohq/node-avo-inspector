@@ -31,10 +31,17 @@ let inspector = new Inspector.AvoInspector({
 });
 ```
 
-# Sending event schemas
+# Integrating with Avo Functions (Avo generated code)
 
-Whenever you send tracking event call the following method:
-Read more in the [Avo documentation](https://www.avo.app/docs/implementation/inspector/sdk/node)
+The setup is lightweight and is covered [in this guide](https://www.avo.app/docs/implementation/start-using-inspector-with-avo-functions).
+
+Every event sent with Avo Function after this integration will automatically be sent to the Avo Inspector.
+
+# Sending event schemas for events reported outside of Avo Functions
+
+Whenever you send tracking event call one of the following methods:
+
+Read more in the [Avo documentation](https://www.avo.app/docs/implementation/devs-101#inspecting-events)
 
 This method gets actual tracking event parameters, extracts schema automatically and sends it to the Avo Inspector backend.
 It is the easiest way to use the library, just call this method at the same place you call your analytics tools' track methods with the same parameters.
