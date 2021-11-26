@@ -1,9 +1,28 @@
 import { AvoInspector } from "../AvoInspector";
 import { AvoInspectorEnv } from "../AvoInspectorEnv";
 
-import { error } from "./constants";
+import { error, defaultOptions } from "./constants";
+import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
+
+jest.mock("../AvoNetworkCallsHandler");
 
 describe("Initialization", () => {
+
+  test("Network Handler is initialized on Inspector init", () => {
+    const inspectorVersion = process.env.npm_package_version || "";
+    const { apiKey, env, version, appName } = defaultOptions;
+
+    let inspector = new AvoInspector(defaultOptions);
+    inspector.enableLogging(true);
+
+    expect(AvoNetworkCallsHandler).toHaveBeenCalledTimes(1);
+    expect(AvoNetworkCallsHandler).toHaveBeenCalledWith(apiKey,
+      env,
+      "my-test-app",
+      version,
+      inspectorVersion);
+  });
+
   test("Api Key is set", () => {
     // Given
     const apiKey = "api-key-xxx";
