@@ -2,7 +2,7 @@
 
 [![npm version](https://badge.fury.io/js/node-avo-inspector.svg)](https://badge.fury.io/js/node-avo-inspector)
 
-This is a quick start guide. For more information about the Inspector project please read [Avo Inspector SDK Reference](https://www.avo.app/docs/implementation/avo-inspector-sdk-reference) and the [Avo Inspector Setup Guide](https://www.avo.app/docs/implementation/setup-inspector-sdk).
+This is a quick start guide. For more information about the Inspector project please read the [Inspector SDK Reference](https://www.avo.app/docs/implementation/avo-inspector-sdk-reference) and the [Inspector Setup Guide](https://www.avo.app/docs/implementation/setup-inspector-sdk).
 
 # Installation
 
@@ -31,19 +31,19 @@ let inspector = new Inspector.AvoInspector({
 });
 ```
 
-# Integrating with Avo Functions (Avo generated code)
+# Integrating with Avo Codegen
 
 The setup is lightweight and is covered [in this guide](https://www.avo.app/docs/implementation/start-using-inspector-with-avo-functions).
 
-Every event sent with Avo Function after this integration will automatically be sent to the Avo Inspector.
+Every event sent with your Codegen after this integration will automatically be sent to Inspector.
 
-# Sending event schemas for events reported outside of Avo Functions
+# Sending event schemas for events reported outside of Codegen
 
 Whenever you send tracking event call the following methods:
 
 Read more in the [Avo documentation](https://www.avo.app/docs/implementation/devs-101#inspecting-events)
 
-This method gets actual tracking event parameters, extracts schema automatically and sends it to the Avo Inspector backend.
+This method gets actual tracking event parameters, extracts schema automatically and sends it to the Inspector backend.
 It is the easiest way to use the library, just call this method at the same place you call your analytics tools' track methods with the same parameters.
 
 ```javascript
