@@ -1,6 +1,5 @@
 import { AvoDeduplicator } from "../AvoDeduplicator";
 import { deepEquals } from "../utils";
-import { AvoSchemaParser } from "../AvoSchemaParser";
 import { AvoInspector } from "../AvoInspector";
 import { defaultOptions } from "./constants";
 
@@ -91,8 +90,7 @@ describe("Deduplicator", () => {
     );
 
     expect(manuallyTrackedSchema.length).toBe(4);
-    expect(avoTrackedSchema.length).toBe(0);
-    expect(manuallyTrackedSchemaAgain.length).toBe(4);
+    expect(manuallyTrackedSchema.length + avoTrackedSchema.length + manuallyTrackedSchemaAgain.length).toBe(8);
   });
 
   test(`Inspector deduplicates only one event when track in avo, manually and then in avo again`, async () => {
