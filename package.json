@@ -1,6 +1,6 @@
 {
   "name": "node-avo-inspector",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Avo Inspector for Node.js",
   "main": "dist/index.js",
   "repository": "https://github.com/avohq/node-avo-inspector",
