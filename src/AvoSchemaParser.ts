@@ -71,7 +71,8 @@ export class AvoSchemaParser {
     });
   }
 
-  private static getPropValueType(propValue: any): string {
+
+  private static getBasicPropType(propValue: any): string {
     let propType = typeof propValue;
     if (propValue == null) {
       return "null";
@@ -86,13 +87,29 @@ export class AvoSchemaParser {
     } else if (propType === "boolean") {
       return "boolean";
     } else if (propType === "object") {
-      if (isArray(propValue)) {
-        return "list";
-      } else {
-        return "object";
+      return "object"
+  }
+  else {
+  return "unknown";
+  }
+}
+
+  private static getPropValueType(propValue: any): string {
+    if (isArray(propValue)){
+
+      //we now know that propValue is an array. get first element in propValue array
+      let propElement = propValue[0];
+
+      if (propElement == null) {
+        return "list(string)"; // Default to list(string) if the list is empty.
       }
-    } else {
-      return "unknown";
+      else {
+      let propElementType = this.getBasicPropType(propElement);
+      return `list(${propElementType})`
+      }
+    }
+    else {
+      return this.getBasicPropType(propValue);
     }
   }
 }
