@@ -1,5 +1,6 @@
 import { AvoGuid } from "./AvoGuid";
 import { AvoInspector } from "./AvoInspector";
+import { request } from "https";
 
 export interface BaseBody {
   apiKey: string;
@@ -102,7 +103,7 @@ export class AvoNetworkCallsHandler {
           "Content-Length": Buffer.byteLength(data),
         },
       };
-      var req = require("https").request(options, (res: any) => {
+      var req = request(options, (res: any) => {
         const chunks: any = [];
         res.on("data", (data: any) => chunks.push(data));
         res.on("end", () => {
