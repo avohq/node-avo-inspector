@@ -8,6 +8,8 @@ describe("AvoNetworkCallsHandler", () => {
 
   let inspector: AvoInspector;
 
+  let inspectorCallResolvedCount = 0;
+
   const { apiKey, env, version, appName } = defaultOptions;
 
   beforeAll(() => {
@@ -19,17 +21,21 @@ describe("AvoNetworkCallsHandler", () => {
 
     inspectorCallSpy.mockImplementation(() => {
         inspector.avoNetworkCallsHandler["samplingRate"] = 0.1;
-        return Promise.resolve();
+        return new Promise<void>((resolve) => process.nextTick(() => {
+          inspectorCallResolvedCount += 1;
+          resolve();
+        }))
       });
   });
 
   afterEach(() => {
+    inspectorCallResolvedCount = 0;
     jest.clearAllMocks();
     // @ts-ignore
     inspector.avoDeduplicator._clearEvents();
   });
 
-  test("handleTrackSchema is called on trackSchemaFromEvent", async () => {
+  test("callInspectorWithBatchBody is called for sessionStarted and event types on trackSchemaFromEvent", async () => {
     const eventName = "event name";
     const properties = {
       prop0: "",
@@ -37,8 +43,6 @@ describe("AvoNetworkCallsHandler", () => {
       prop3: 0,
       prop4: 0.0,
     };
-
-    const schema = inspector.extractSchema(properties);
 
     await inspector.trackSchemaFromEvent(eventName, properties);
 
@@ -76,6 +80,8 @@ describe("AvoNetworkCallsHandler", () => {
         samplingRate: 0.1,
       }),
     ]);
+
+    expect(inspectorCallResolvedCount).toEqual(2);
   });
 
   test("handleTrackSchema is called on _avoFunctionTrackSchemaFromEvent", async () => {

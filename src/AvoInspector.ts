@@ -182,7 +182,7 @@ export class AvoInspector {
     }
   }
 
-  private trackSchemaInternal(
+  private async trackSchemaInternal(
     eventName: string,
     eventSchema: Array<{
       propertyName: string;
@@ -194,33 +194,33 @@ export class AvoInspector {
   ): Promise<void> {
     try {
       const seesionId = AvoGuid.newGuid();
-      return this.avoNetworkCallsHandler
-        .callInspectorWithBatchBody([
-          this.avoNetworkCallsHandler.bodyForSessionStartedCall(seesionId),
-        ])
-        .then(() => {
-          if (AvoInspector.shouldLog) {
-            console.log("Avo Inspector: session started sent successfully.");
-          }
-          this.avoNetworkCallsHandler.callInspectorWithBatchBody([
-            this.avoNetworkCallsHandler.bodyForEventSchemaCall(
-              seesionId,
-              eventName,
-              eventSchema,
-              eventId,
-              eventHash
-            ),
-          ]).then(() => {
-            if (AvoInspector.shouldLog) {
-              console.log("Avo Inspector: schema sent successfully.");
-            }
-          });
-        })
-        .catch((err) => {
-          if (AvoInspector.shouldLog) {
-            console.log("Avo Inspector: schema sending failed: " + err + ".");
-          }
-        });
+      try {
+        await this.avoNetworkCallsHandler
+          .callInspectorWithBatchBody([
+            this.avoNetworkCallsHandler.bodyForSessionStartedCall(seesionId),
+          ]);
+        if (AvoInspector.shouldLog) {
+          console.log("Avo Inspector: session started sent successfully.");
+        }
+
+        await this.avoNetworkCallsHandler.callInspectorWithBatchBody([
+          this.avoNetworkCallsHandler.bodyForEventSchemaCall(
+            seesionId,
+            eventName,
+            eventSchema,
+            eventId,
+            eventHash
+          ),
+        ]);
+
+        if (AvoInspector.shouldLog) {
+          console.log("Avo Inspector: schema sent successfully.");
+        }
+      } catch (err) {
+        if (AvoInspector.shouldLog) {
+          console.log("Avo Inspector: schema sending failed: " + err + ".");
+        }
+      }
     } catch (e) {
       console.error(
         "Avo Inspector: something went wrong. Please report to support@avo.app.",

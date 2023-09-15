@@ -3,6 +3,10 @@ import { deepEquals } from "../utils";
 import { AvoInspector } from "../AvoInspector";
 import { defaultOptions } from "./constants";
 
+jest
+  .useFakeTimers('modern')
+  .setSystemTime(new Date('2020-01-01'));
+
 describe("Deduplicator", () => {
   const deduplicator = new AvoDeduplicator();
 
