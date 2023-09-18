@@ -4,6 +4,9 @@
 
 This is a quick start guide. For more information about the Inspector project please read the [Inspector SDK Reference](https://www.avo.app/docs/implementation/avo-inspector-sdk-reference) and the [Inspector Setup Guide](https://www.avo.app/docs/implementation/setup-inspector-sdk).
 
+# Why was this forked?
+At the time of writing, the latest version of node-avo-inspector from the original repository has an issue where the promise returned by `trackSchemaFromEvent` gets resolved before the request to send the event metadata to the tracking endpoint completes. If this function is used in an AWS Lambda, this results in errors since the lambda function finishes before the event metadata request completes. This fork addresses the issue.
+
 # Installation
 
 The library is distributed with npm, install with npm:
