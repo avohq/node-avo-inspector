@@ -37,13 +37,18 @@ const sessionTimeMs = 5 * 60 * 1000;
 
 const type = {
   STRING: "string",
+  STRINGLIST: "list(string)",
   INT: "int",
+  INTLIST: "list(int)",
   OBJECT: "object",
+  OBJECTLIST: "list(object)",
   FLOAT: "float",
-  LIST: "list",
+  FLOATLIST: "list(float)",
   BOOL: "boolean",
+  BOOLLIST: "list(boolean)",
   NULL: "null",
   UNKNOWN: "unknown",
+  UNKNOWNLIST: "list(unknown)",
 };
 
 export {

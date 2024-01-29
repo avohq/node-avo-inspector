@@ -60,7 +60,7 @@ describe("Schema Parsing", () => {
       },
     ]);
 
-    expect(res[7].propertyType).toBe(type.LIST);
+    expect(res[7].propertyType).toBe(type.STRINGLIST);
     expect(res[7].children).toMatchObject([
       type.STRING,
       [
@@ -88,13 +88,7 @@ describe("Schema Parsing", () => {
     const res = inspector.extractSchema(eventProperties);
 
     // Then
-    expect(res[0].propertyType).toBe(type.LIST);
-    expect(res[0].children).toMatchObject([
-      type.STRING,
-      type.BOOL,
-      type.INT,
-      type.FLOAT,
-    ]);
+    expect(res[0].propertyType).toBe(type.STRINGLIST);
   });
 
   test("Empty and falsy values are set correctly", () => {
@@ -124,7 +118,36 @@ describe("Schema Parsing", () => {
     expect(res[6].propertyType).toBe(type.OBJECT);
     expect(res[6].children).toMatchObject([]);
 
-    expect(res[7].propertyType).toBe(type.LIST);
+    expect(res[7].propertyType).toBe(type.STRINGLIST);
     expect(res[7].children).toMatchObject([]);
   });
+
+  test("List of string returns list(string)", () => {
+    // Given
+    const eventProperties = {
+      prop0: ["a", "b", "c"],
+    };
+
+    // When
+    const res = inspector.extractSchema(eventProperties);
+
+    // Then
+    expect(res[0].propertyType).toBe(type.STRINGLIST);
+  });
+
+
+  test("List of multiple types returns list(`firstType`)", () => {
+    // Given
+    const eventProperties = {
+      prop0: [1.2, "two", {"three": 3}],
+    };
+
+    // When
+    const res = inspector.extractSchema(eventProperties);
+
+    // Then
+    expect(res[0].propertyType).toBe(type.FLOATLIST);
+  });
+
+
 });
