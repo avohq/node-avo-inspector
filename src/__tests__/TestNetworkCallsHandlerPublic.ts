@@ -5,23 +5,38 @@ import { defaultOptions } from "./constants";
 
 describe("AvoNetworkCallsHandler", () => {
   let inspectorCallSpy: jest.SpyInstance<any, unknown[]>;
+  let consoleLogSpy: jest.SpyInstance<any, unknown[]>;
 
   let inspector: AvoInspector;
 
   const { apiKey, env, version, appName } = defaultOptions;
 
+  const eventName = "event name";
+  const properties = {
+    prop0: "",
+    prop2: false,
+    prop3: 0,
+    prop4: 0.0,
+  };
+
+  const happyPathInspectorCall = () => {
+    inspector.avoNetworkCallsHandler["samplingRate"] = 0.1;
+    return Promise.resolve();
+  };
+
   beforeAll(() => {
     inspector = new AvoInspector(defaultOptions);
-    inspector.enableLogging(false);
+    inspector.enableLogging(true);
 
     inspectorCallSpy = jest
       .spyOn(AvoNetworkCallsHandler.prototype as any, "callInspectorWithBatchBody");
 
-    inspectorCallSpy.mockImplementation(() => {
-        inspector.avoNetworkCallsHandler["samplingRate"] = 0.1;
-        return Promise.resolve();
-      });
+    consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
   });
+
+  beforeEach(() => {
+    inspectorCallSpy.mockImplementation(happyPathInspectorCall);
+  })
 
   afterEach(() => {
     jest.clearAllMocks();
@@ -30,20 +45,10 @@ describe("AvoNetworkCallsHandler", () => {
   });
 
   test("handleTrackSchema is called on trackSchemaFromEvent", async () => {
-    const eventName = "event name";
-    const properties = {
-      prop0: "",
-      prop2: false,
-      prop3: 0,
-      prop4: 0.0,
-    };
-
-    const schema = inspector.extractSchema(properties);
-
     await inspector.trackSchemaFromEvent(eventName, properties);
 
     expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(2);
-    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toBeCalledWith([
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
       expect.objectContaining({
         type: "sessionStarted",
         apiKey: apiKey,
@@ -79,17 +84,8 @@ describe("AvoNetworkCallsHandler", () => {
   });
 
   test("handleTrackSchema is called on _avoFunctionTrackSchemaFromEvent", async () => {
-    const eventName = "event name";
-    const properties = {
-      prop0: "",
-      prop2: false,
-      prop3: 0,
-      prop4: 0.0,
-    };
     const eventId = "testId";
     const eventHash = "testHash";
-
-    const schema = inspector.extractSchema(properties);
 
     // @ts-ignore
     await inspector._avoFunctionTrackSchemaFromEvent(
@@ -133,5 +129,14 @@ describe("AvoNetworkCallsHandler", () => {
         samplingRate: 0.1,
       }),
     ]);
+  });
+
+  test("an error is logged if event schema call fails and AvoInspector.shouldLog is true", async () => {
+    inspectorCallSpy.mockImplementationOnce(happyPathInspectorCall);
+    inspectorCallSpy.mockRejectedValueOnce('Network error');
+
+    await inspector.trackSchemaFromEvent(eventName, properties);
+
+    expect(consoleLogSpy).toHaveBeenCalledWith('Avo Inspector: schema sending failed: Network error.');
   });
 });
