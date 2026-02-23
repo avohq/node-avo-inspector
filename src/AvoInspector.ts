@@ -83,7 +83,8 @@ export class AvoInspector {
       this.environment.toString(),
       options.appName || "",
       this.version,
-      libVersion
+      libVersion,
+      this.publicEncryptionKey
     );
     this.avoDeduplicator = new AvoDeduplicator();
 

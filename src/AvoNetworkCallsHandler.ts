@@ -1,5 +1,6 @@
 import { AvoGuid } from "./AvoGuid";
 import { AvoInspector } from "./AvoInspector";
+import { AvoEncryption } from "./AvoEncryption";
 import { request } from "https";
 
 export interface BaseBody {
@@ -13,16 +14,27 @@ export interface BaseBody {
   anonymousId: string;
   createdAt: string;
   samplingRate: number;
+  publicEncryptionKey?: string;
 }
+
+export interface EventPropertyEncrypted {
+  propertyName: string;
+  encryptedPropertyValue: string;
+  children?: any;
+}
+
+export interface EventPropertyPlain {
+  propertyName: string;
+  propertyType: string;
+  children?: any;
+}
+
+export type EventProperty = EventPropertyEncrypted | EventPropertyPlain;
 
 export interface EventSchemaBody extends BaseBody {
   type: "event";
   eventName: string;
-  eventProperties: Array<{
-    propertyName: string;
-    propertyType: string;
-    children?: any;
-  }>;
+  eventProperties: Array<EventProperty>;
   avoFunction: boolean;
   eventId: string | null;
   eventHash: string | null;
@@ -35,6 +47,7 @@ export class AvoNetworkCallsHandler {
   private appVersion: string;
   private libVersion: string;
   private samplingRate: number = 1.0;
+  private publicEncryptionKey?: string;
 
   private static trackingEndpoint = "/inspector/v1/track";
 
@@ -43,13 +56,15 @@ export class AvoNetworkCallsHandler {
     envName: string,
     appName: string,
     appVersion: string,
-    libVersion: string
+    libVersion: string,
+    publicEncryptionKey?: string
   ) {
     this.apiKey = apiKey;
     this.envName = envName;
     this.appName = appName;
     this.appVersion = appVersion;
     this.libVersion = libVersion;
+    this.publicEncryptionKey = publicEncryptionKey;
   }
 
   callInspectorWithBatchBody(
@@ -134,7 +149,12 @@ export class AvoNetworkCallsHandler {
     let eventSchemaBody = this.createBaseCallBody(anonymousId) as EventSchemaBody;
     eventSchemaBody.type = "event";
     eventSchemaBody.eventName = eventName;
-    eventSchemaBody.eventProperties = eventProperties;
+
+    if (AvoEncryption.shouldEncrypt(this.envName, this.publicEncryptionKey)) {
+      eventSchemaBody.eventProperties = this.encryptProperties(eventProperties);
+    } else {
+      eventSchemaBody.eventProperties = eventProperties;
+    }
 
     if (eventId != null) {
       eventSchemaBody.avoFunction = true;
@@ -149,8 +169,43 @@ export class AvoNetworkCallsHandler {
     return eventSchemaBody;
   }
 
+  private encryptProperties(
+    properties: Array<{
+      propertyName: string;
+      propertyType: string;
+      children?: any;
+    }>
+  ): Array<EventProperty> {
+    const result: Array<EventProperty> = [];
+
+    for (const prop of properties) {
+      // List-type properties: omit entirely
+      if (AvoEncryption.isListType(prop.propertyType)) {
+        continue;
+      }
+
+      const encrypted = AvoEncryption.encryptValue(
+        prop.propertyType,
+        this.publicEncryptionKey!
+      );
+
+      if (encrypted === null) {
+        // Encryption failure: omit the property (warning already logged by encryptValue)
+        continue;
+      }
+
+      result.push({
+        propertyName: prop.propertyName,
+        encryptedPropertyValue: encrypted,
+        ...(prop.children !== undefined ? { children: prop.children } : {}),
+      });
+    }
+
+    return result;
+  }
+
   private createBaseCallBody(anonymousId: string): BaseBody {
-    return {
+    const body: BaseBody = {
       apiKey: this.apiKey,
       appName: this.appName,
       appVersion: this.appVersion,
@@ -162,5 +217,11 @@ export class AvoNetworkCallsHandler {
       createdAt: new Date().toISOString(),
       samplingRate: this.samplingRate,
     };
+
+    if (this.publicEncryptionKey && this.publicEncryptionKey.length > 0) {
+      body.publicEncryptionKey = this.publicEncryptionKey;
+    }
+
+    return body;
   }
 }

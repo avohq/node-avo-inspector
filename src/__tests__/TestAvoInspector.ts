@@ -20,7 +20,8 @@ describe("Initialization", () => {
       env,
       "my-test-app",
       version,
-      inspectorVersion);
+      inspectorVersion,
+      undefined);
   });
 
   test("Api Key is set", () => {
