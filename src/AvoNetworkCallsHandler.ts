@@ -10,14 +10,9 @@ export interface BaseBody {
   env: string;
   libPlatform: "node";
   messageId: string;
-  trackingId: string;
+  anonymousId: string;
   createdAt: string;
-  sessionId: string;
   samplingRate: number;
-}
-
-export interface SessionStartedBody extends BaseBody {
-  type: "sessionStarted";
 }
 
 export interface EventSchemaBody extends BaseBody {
@@ -58,7 +53,7 @@ export class AvoNetworkCallsHandler {
   }
 
   callInspectorWithBatchBody(
-    inEvents: Array<SessionStartedBody | EventSchemaBody>
+    inEvents: Array<EventSchemaBody>
   ): Promise<void> {
     const events = inEvents.filter((x) => x != null);
 
@@ -77,9 +72,7 @@ export class AvoNetworkCallsHandler {
 
     if (AvoInspector.shouldLog) {
       events.forEach(function (event) {
-        if (event.type === "sessionStarted") {
-          console.log("Avo Inspector: sending session started event.");
-        } else if (event.type === "event") {
+        if (event.type === "event") {
           let schemaEvent: EventSchemaBody = event;
           console.log(
             "Avo Inspector: sending event " +
@@ -127,14 +120,8 @@ export class AvoNetworkCallsHandler {
     });
   }
 
-  bodyForSessionStartedCall(sessionId: string): SessionStartedBody {
-    let sessionBody = this.createBaseCallBody(sessionId) as SessionStartedBody;
-    sessionBody.type = "sessionStarted";
-    return sessionBody;
-  }
-
   bodyForEventSchemaCall(
-    sessionId: string,
+    anonymousId: string,
     eventName: string,
     eventProperties: Array<{
       propertyName: string;
@@ -144,7 +131,7 @@ export class AvoNetworkCallsHandler {
     eventId: string | null,
     eventHash: string | null
   ): EventSchemaBody {
-    let eventSchemaBody = this.createBaseCallBody(sessionId) as EventSchemaBody;
+    let eventSchemaBody = this.createBaseCallBody(anonymousId) as EventSchemaBody;
     eventSchemaBody.type = "event";
     eventSchemaBody.eventName = eventName;
     eventSchemaBody.eventProperties = eventProperties;
@@ -162,7 +149,7 @@ export class AvoNetworkCallsHandler {
     return eventSchemaBody;
   }
 
-  private createBaseCallBody(sessionId: string): BaseBody {
+  private createBaseCallBody(anonymousId: string): BaseBody {
     return {
       apiKey: this.apiKey,
       appName: this.appName,
@@ -171,9 +158,8 @@ export class AvoNetworkCallsHandler {
       env: this.envName,
       libPlatform: "node",
       messageId: AvoGuid.newGuid(),
-      trackingId: "",
+      anonymousId: anonymousId,
       createdAt: new Date().toISOString(),
-      sessionId: sessionId,
       samplingRate: this.samplingRate,
     };
   }

@@ -261,4 +261,35 @@ describe("Initialization", () => {
       });
     }).toThrow(error.VERSION);
   });
+
+  test("publicEncryptionKey is stored when provided", () => {
+    let inspector = new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+      publicEncryptionKey: "my-public-key-123",
+    });
+
+    expect(inspector.publicEncryptionKey).toBe("my-public-key-123");
+  });
+
+  test("publicEncryptionKey is undefined when not provided", () => {
+    let inspector = new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+    });
+
+    expect(inspector.publicEncryptionKey).toBeUndefined();
+  });
+
+  test("constructor works without publicEncryptionKey (backwards compatible)", () => {
+    expect(() => {
+      new AvoInspector({
+        apiKey: "api-key-xxx",
+        env: AvoInspectorEnv.Dev,
+        version: "1",
+      });
+    }).not.toThrow();
+  });
 });

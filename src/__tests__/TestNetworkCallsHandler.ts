@@ -15,7 +15,6 @@ describe("NetworkCallsHandler", () => {
   let networkHandler: AvoNetworkCallsHandler;
   let baseBody: BaseBody;
 
-  const customCallback = jest.fn();
   const now = new Date();
 
   beforeAll(() => {
@@ -42,9 +41,8 @@ describe("NetworkCallsHandler", () => {
       env,
       libPlatform: "node",
       messageId: mockedReturns.GUID,
-      trackingId: "",
+      anonymousId: "",
       createdAt: new Date().toISOString(),
-      sessionId: mockedReturns.SESSION_ID,
       samplingRate: 1.0,
     };
   });
@@ -53,23 +51,12 @@ describe("NetworkCallsHandler", () => {
     jest.clearAllMocks();
   });
 
-  test("bodyForSessionStartedCall returns base body + session started body used for session started", () => {
-    const body = networkHandler.bodyForSessionStartedCall(
-      mockedReturns.SESSION_ID
-    );
-
-    expect(body).toEqual({
-      ...baseBody,
-      type: "sessionStarted",
-    });
-  });
-
   test("bodyForEventSchemaCall returns base body + event schema used for event sending from non Codegen", () => {
     const eventName = "event name";
     const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
 
     const body = networkHandler.bodyForEventSchemaCall(
-      mockedReturns.SESSION_ID,
+      "",
       eventName,
       eventProperties,
       null,
@@ -78,6 +65,7 @@ describe("NetworkCallsHandler", () => {
 
     expect(body).toEqual({
       ...baseBody,
+      anonymousId: "",
       type: "event",
       eventName,
       eventProperties,
@@ -94,7 +82,7 @@ describe("NetworkCallsHandler", () => {
     const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
 
     const body = networkHandler.bodyForEventSchemaCall(
-      mockedReturns.SESSION_ID,
+      "",
       eventName,
       eventProperties,
       eventId,
@@ -103,6 +91,7 @@ describe("NetworkCallsHandler", () => {
 
     expect(body).toEqual({
       ...baseBody,
+      anonymousId: "",
       type: "event",
       eventName,
       eventProperties,
@@ -110,5 +99,21 @@ describe("NetworkCallsHandler", () => {
       eventId,
       eventHash,
     });
+  });
+
+  test("bodyForEventSchemaCall uses streamId as anonymousId", () => {
+    const eventName = "event name";
+    const streamId = "user-123";
+    const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
+
+    const body = networkHandler.bodyForEventSchemaCall(
+      streamId,
+      eventName,
+      eventProperties,
+      null,
+      null
+    );
+
+    expect(body.anonymousId).toBe("user-123");
   });
 });

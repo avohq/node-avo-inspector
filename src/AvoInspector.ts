@@ -2,9 +2,9 @@ import { AvoInspectorEnv, AvoInspectorEnvValueType } from "./AvoInspectorEnv";
 import { AvoSchemaParser } from "./AvoSchemaParser";
 import { AvoNetworkCallsHandler } from "./AvoNetworkCallsHandler";
 import { AvoDeduplicator } from "./AvoDeduplicator";
+import { AvoStreamId } from "./AvoStreamId";
 
 import { isValueEmpty } from "./utils";
-import { AvoGuid } from "./AvoGuid";
 
 const libVersion = require("../package.json").version;
 
@@ -14,6 +14,7 @@ export class AvoInspector {
   avoDeduplicator: AvoDeduplicator;
   apiKey: string;
   version: string;
+  publicEncryptionKey?: string;
 
   private static _shouldLog = false;
   static get shouldLog() {
@@ -28,6 +29,7 @@ export class AvoInspector {
     env: AvoInspectorEnvValueType;
     version: string;
     appName?: string;
+    publicEncryptionKey?: string;
   }) {
     // the constructor does aggressive null/undefined checking because same code paths will be accessible from JS
     if (isValueEmpty(options.env)) {
@@ -60,6 +62,8 @@ export class AvoInspector {
       this.version = options.version;
     }
 
+    this.publicEncryptionKey = options.publicEncryptionKey;
+
     if (this.environment === AvoInspectorEnv.Dev) {
       AvoInspector._shouldLog = true;
     } else {
@@ -78,7 +82,8 @@ export class AvoInspector {
 
   trackSchemaFromEvent(
     eventName: string,
-    eventProperties: { [propName: string]: any }
+    eventProperties: { [propName: string]: any },
+    streamId?: string
   ): Promise<
     Array<{
       propertyName: string;
@@ -87,6 +92,9 @@ export class AvoInspector {
     }>
   > {
     try {
+      const avoStreamId = new AvoStreamId(streamId);
+      const anonymousId = avoStreamId.streamId;
+
       if (
         this.avoDeduplicator.shouldRegisterEvent(
           eventName,
@@ -107,7 +115,8 @@ export class AvoInspector {
           eventName,
           eventSchema,
           null,
-          null
+          null,
+          anonymousId
         ).then(() => {
           return eventSchema;
         });
@@ -161,7 +170,8 @@ export class AvoInspector {
           eventName,
           eventSchema,
           eventId,
-          eventHash
+          eventHash,
+          ""
         ).then(() => {
           return eventSchema;
         });
@@ -190,41 +200,26 @@ export class AvoInspector {
       children?: any;
     }>,
     eventId: string | null,
-    eventHash: string | null
+    eventHash: string | null,
+    anonymousId: string
   ): Promise<void> {
     try {
-      const seesionId = AvoGuid.newGuid();
-      await this.avoNetworkCallsHandler
-        .callInspectorWithBatchBody([
-          this.avoNetworkCallsHandler.bodyForSessionStartedCall(seesionId),
-        ]);
-
+      await this.avoNetworkCallsHandler.callInspectorWithBatchBody([
+        this.avoNetworkCallsHandler.bodyForEventSchemaCall(
+          anonymousId,
+          eventName,
+          eventSchema,
+          eventId,
+          eventHash
+        )]);
       if (AvoInspector.shouldLog) {
-        console.log("Avo Inspector: session started sent successfully.");
+        console.log("Avo Inspector: schema sent successfully.");
       }
-      try {
-        await this.avoNetworkCallsHandler.callInspectorWithBatchBody([
-          this.avoNetworkCallsHandler.bodyForEventSchemaCall(
-            seesionId,
-            eventName,
-            eventSchema,
-            eventId,
-            eventHash
-          )]);
-        if (AvoInspector.shouldLog) {
-          console.log("Avo Inspector: schema sent successfully.");
-        }
-      } catch (err) {
-        if (AvoInspector.shouldLog) {
-          console.log("Avo Inspector: schema sending failed: " + err + ".");
-        }
+    } catch (err) {
+      console.error("Avo Inspector: schema sending failed: " + err + ".");
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: schema sending failed: " + err + ".");
       }
-    } catch (e) {
-      console.error(
-        "Avo Inspector: something went wrong. Please report to support@avo.app.",
-        e
-      );
-      return Promise.reject();
     }
   }
 

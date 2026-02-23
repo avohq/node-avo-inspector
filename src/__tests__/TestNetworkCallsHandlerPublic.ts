@@ -44,27 +44,11 @@ describe("AvoNetworkCallsHandler", () => {
     inspector.avoDeduplicator._clearEvents();
   });
 
-  test("handleTrackSchema is called on trackSchemaFromEvent", async () => {
+  test("trackSchemaFromEvent sends only event call (no sessionStarted)", async () => {
     await inspector.trackSchemaFromEvent(eventName, properties);
 
-    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(2);
-    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
-      expect.objectContaining({
-        type: "sessionStarted",
-        apiKey: apiKey,
-        appName: appName,
-        appVersion: version,
-        libVersion: expect.anything(),
-        env: env,
-        libPlatform: "node",
-        messageId: expect.anything(),
-        trackingId: "",
-        createdAt: expect.any(String),
-        sessionId: expect.anything(),
-        samplingRate: 1,
-      }),
-    ]
-    );
+    // Should be called once (event only, no sessionStarted)
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(1);
     expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
       expect.objectContaining({
         type: "event",
@@ -75,15 +59,49 @@ describe("AvoNetworkCallsHandler", () => {
         env: env,
         libPlatform: "node",
         messageId: expect.anything(),
-        trackingId: "",
-        createdAt: expect.anything(),
-        sessionId: expect.anything(),
-        samplingRate: 0.1,
+        anonymousId: "",
+        createdAt: expect.any(String),
+        samplingRate: 1,
       }),
     ]);
   });
 
-  test("handleTrackSchema is called on _avoFunctionTrackSchemaFromEvent", async () => {
+  test("trackSchemaFromEvent with streamId sets anonymousId to streamId", async () => {
+    await inspector.trackSchemaFromEvent(eventName, properties, "user-stream-123");
+
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(1);
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: "event",
+        anonymousId: "user-stream-123",
+      }),
+    ]);
+  });
+
+  test("trackSchemaFromEvent without streamId sets anonymousId to empty string", async () => {
+    await inspector.trackSchemaFromEvent(eventName, properties);
+
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(1);
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
+      expect.objectContaining({
+        anonymousId: "",
+      }),
+    ]);
+  });
+
+  test("trackSchemaFromEvent with streamId containing ':' logs warning", async () => {
+    const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    await inspector.trackSchemaFromEvent(eventName, properties, "invalid:stream");
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      "[Avo Inspector] Warning: streamId contains ':' which is not supported"
+    );
+
+    consoleWarnSpy.mockRestore();
+  });
+
+  test("_avoFunctionTrackSchemaFromEvent sends only event call (no sessionStarted)", async () => {
     const eventId = "testId";
     const eventHash = "testHash";
 
@@ -95,24 +113,8 @@ describe("AvoNetworkCallsHandler", () => {
       eventHash
     );
 
-    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(2);
-    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toBeCalledWith([
-      expect.objectContaining({
-        type: "sessionStarted",
-        apiKey: apiKey,
-        appName: appName,
-        appVersion: version,
-        libVersion: expect.anything(),
-        env: env,
-        libPlatform: "node",
-        messageId: expect.anything(),
-        trackingId: "",
-        createdAt: expect.anything(),
-        sessionId: expect.anything(),
-        samplingRate: 0.1,
-      })
-    ]
-    );
+    // Should be called once (event only, no sessionStarted)
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(1);
     expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
       expect.objectContaining({
         type: "event",
@@ -123,16 +125,13 @@ describe("AvoNetworkCallsHandler", () => {
         env: env,
         libPlatform: "node",
         messageId: expect.anything(),
-        trackingId: "",
-        createdAt: expect.anything(),
-        sessionId: expect.anything(),
-        samplingRate: 0.1,
+        anonymousId: "",
+        createdAt: expect.any(String),
       }),
     ]);
   });
 
   test("an error is logged if event schema call fails and AvoInspector.shouldLog is true", async () => {
-    inspectorCallSpy.mockImplementationOnce(happyPathInspectorCall);
     inspectorCallSpy.mockRejectedValueOnce('Network error');
 
     await inspector.trackSchemaFromEvent(eventName, properties);
