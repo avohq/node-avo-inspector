@@ -270,8 +270,10 @@ export class AvoInspector {
     const cached = cache.get(cacheKey);
 
     if (cached !== undefined) {
-      // Cache hit: synchronous validation
-      this.validateAndReport(cached, eventName, eventSchema, streamId, validator);
+      // Cache hit: synchronous validation (null means spec was intentionally stored as null)
+      if (cached !== null) {
+        this.validateAndReport(cached, eventName, eventSchema, streamId, validator);
+      }
       return;
     }
 

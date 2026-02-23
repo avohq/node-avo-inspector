@@ -10,7 +10,7 @@ function generateTestKeyPair() {
   const ecdh = crypto.createECDH("prime256v1");
   ecdh.generateKeys();
   return {
-    publicKey: ecdh.getPublicKey("base64"),
+    publicKey: ecdh.getPublicKey("hex"),
     privateKey: ecdh.getPrivateKey(),
     ecdh,
   };
@@ -76,10 +76,10 @@ describe("AvoEncryption", () => {
     test("can decrypt back to original plaintext", () => {
       const ecdh = crypto.createECDH("prime256v1");
       ecdh.generateKeys();
-      const recipientPubKeyBase64 = ecdh.getPublicKey("base64");
+      const recipientPubKeyHex = ecdh.getPublicKey("hex");
 
       const plaintext = "Hello, encryption!";
-      const encrypted = AvoEncryption.encryptValue(plaintext, recipientPubKeyBase64);
+      const encrypted = AvoEncryption.encryptValue(plaintext, recipientPubKeyHex);
       expect(encrypted).not.toBeNull();
 
       // Decrypt: parse wire format
@@ -109,7 +109,7 @@ describe("AvoEncryption", () => {
     test("different encryptions of same value produce different ciphertext", () => {
       const ecdh = crypto.createECDH("prime256v1");
       ecdh.generateKeys();
-      const pubKey = ecdh.getPublicKey("base64");
+      const pubKey = ecdh.getPublicKey("hex");
 
       const enc1 = AvoEncryption.encryptValue("same", pubKey);
       const enc2 = AvoEncryption.encryptValue("same", pubKey);
@@ -121,7 +121,7 @@ describe("AvoEncryption", () => {
   describe("encryption failure handling", () => {
     test("returns null and warns on invalid key", () => {
       const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-      const result = AvoEncryption.encryptValue("hello", "not-a-valid-base64-key");
+      const result = AvoEncryption.encryptValue("hello", "not-a-valid-hex-key");
       expect(result).toBeNull();
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining("[Avo Inspector] Warning:")
@@ -228,7 +228,7 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
   test("dev env with key: properties are encrypted with encryptedPropertyValue", () => {
     const ecdh = crypto.createECDH("prime256v1");
     ecdh.generateKeys();
-    const pubKey = ecdh.getPublicKey("base64");
+    const pubKey = ecdh.getPublicKey("hex");
 
     const handler = new AvoNetworkCallsHandler(
       "api-key",
@@ -257,7 +257,7 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
   test("prod env: no encryptedPropertyValue, propertyType kept as-is", () => {
     const ecdh = crypto.createECDH("prime256v1");
     ecdh.generateKeys();
-    const pubKey = ecdh.getPublicKey("base64");
+    const pubKey = ecdh.getPublicKey("hex");
 
     const handler = new AvoNetworkCallsHandler(
       "api-key",
@@ -284,7 +284,7 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
   test("list-type properties are omitted entirely when encryption is active", () => {
     const ecdh = crypto.createECDH("prime256v1");
     ecdh.generateKeys();
-    const pubKey = ecdh.getPublicKey("base64");
+    const pubKey = ecdh.getPublicKey("hex");
 
     const handler = new AvoNetworkCallsHandler(
       "api-key",
@@ -343,7 +343,7 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
   test("cross-SDK interop: encrypted wire format structure is correct", () => {
     const ecdh = crypto.createECDH("prime256v1");
     ecdh.generateKeys();
-    const pubKey = ecdh.getPublicKey("base64");
+    const pubKey = ecdh.getPublicKey("hex");
 
     const handler = new AvoNetworkCallsHandler(
       "api-key",

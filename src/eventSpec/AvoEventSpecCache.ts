@@ -1,7 +1,7 @@
 import { EventSpecResponse } from "./AvoEventSpecFetchTypes";
 
 interface CacheEntry {
-  value: EventSpecResponse;
+  value: EventSpecResponse | null;
   timestamp: number;
   accessCount: number;
   lastAccessed: number;
@@ -20,9 +20,15 @@ export class AvoEventSpecCache {
     return `${apiKey}:${streamId}:${eventName}`;
   }
 
-  get(key: string): EventSpecResponse | undefined {
+  get(key: string): EventSpecResponse | null | undefined {
     const entry = this.cache.get(key);
     if (entry === undefined) {
+      return undefined;
+    }
+
+    // TTL check
+    if (Date.now() - entry.timestamp > TTL_MS) {
+      this.cache.delete(key);
       return undefined;
     }
 
@@ -37,7 +43,7 @@ export class AvoEventSpecCache {
     return entry.value;
   }
 
-  set(key: string, value: EventSpecResponse): void {
+  set(key: string, value: EventSpecResponse | null): void {
     this.operationCount++;
 
     // Global sweep every 50 operations

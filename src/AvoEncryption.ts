@@ -41,10 +41,10 @@ export class AvoEncryption {
    */
   static encryptValue(
     value: string,
-    recipientPubKeyBase64: string
+    recipientPubKeyHex: string
   ): string | null {
     try {
-      const recipientPubKey = Buffer.from(recipientPubKeyBase64, "base64");
+      const recipientPubKey = Buffer.from(recipientPubKeyHex, "hex");
 
       // Generate ephemeral key pair
       const ecdh = crypto.createECDH("prime256v1");
