@@ -42,5 +42,7 @@
     "ts-jest": "^29.2.4",
     "typescript": "*"
   },
-  "dependencies": {}
+  "dependencies": {
+    "safe-regex2": "^5.0.0"
+  }
 }

@@ -3,6 +3,10 @@ import { AvoSchemaParser } from "./AvoSchemaParser";
 import { AvoNetworkCallsHandler } from "./AvoNetworkCallsHandler";
 import { AvoDeduplicator } from "./AvoDeduplicator";
 import { AvoStreamId } from "./AvoStreamId";
+import { AvoEventSpecFetcher } from "./eventSpec/AvoEventSpecFetcher";
+import { AvoEventSpecCache } from "./eventSpec/AvoEventSpecCache";
+import { EventValidator } from "./eventSpec/EventValidator";
+import { EventSpecResponse, ValidatedEventPayload } from "./eventSpec/AvoEventSpecFetchTypes";
 
 import { isValueEmpty } from "./utils";
 
@@ -15,6 +19,10 @@ export class AvoInspector {
   apiKey: string;
   version: string;
   publicEncryptionKey?: string;
+
+  private eventSpecFetcher?: AvoEventSpecFetcher;
+  private eventSpecCache?: AvoEventSpecCache;
+  private eventValidator?: EventValidator;
 
   private static _shouldLog = false;
   static get shouldLog() {
@@ -78,6 +86,16 @@ export class AvoInspector {
       libVersion
     );
     this.avoDeduplicator = new AvoDeduplicator();
+
+    // Event spec validation is only active in dev/staging, NOT in prod
+    if (
+      this.environment === AvoInspectorEnv.Dev ||
+      this.environment === AvoInspectorEnv.Staging
+    ) {
+      this.eventSpecFetcher = new AvoEventSpecFetcher(this.apiKey);
+      this.eventSpecCache = new AvoEventSpecCache();
+      this.eventValidator = new EventValidator();
+    }
   }
 
   trackSchemaFromEvent(
@@ -220,6 +238,90 @@ export class AvoInspector {
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: schema sending failed: " + err + ".");
       }
+    }
+  }
+
+  isSpecValidationEnabled(): boolean {
+    return (
+      this.environment === AvoInspectorEnv.Dev ||
+      this.environment === AvoInspectorEnv.Staging
+    );
+  }
+
+  async fetchAndValidateAsync(
+    eventName: string,
+    eventSchema: Array<{
+      propertyName: string;
+      propertyType: string;
+      children?: any;
+    }>,
+    streamId: string
+  ): Promise<void> {
+    if (!this.isSpecValidationEnabled()) {
+      return;
+    }
+
+    const cache = this.eventSpecCache!;
+    const fetcher = this.eventSpecFetcher!;
+    const validator = this.eventValidator!;
+    const cacheKey = AvoEventSpecCache.makeKey(this.apiKey, streamId, eventName);
+
+    const cached = cache.get(cacheKey);
+
+    if (cached !== undefined) {
+      // Cache hit: synchronous validation
+      this.validateAndReport(cached, eventName, eventSchema, streamId, validator);
+      return;
+    }
+
+    // Cache miss: async fetch
+    return new Promise<void>((resolve) => {
+      fetcher.fetch(eventName, streamId, (result) => {
+        if (result !== null) {
+          cache.set(cacheKey, result);
+          this.validateAndReport(result, eventName, eventSchema, streamId, validator);
+        }
+        resolve();
+      });
+    });
+  }
+
+  private validateAndReport(
+    specResponse: EventSpecResponse,
+    eventName: string,
+    eventSchema: Array<{
+      propertyName: string;
+      propertyType: string;
+      children?: any;
+    }>,
+    streamId: string,
+    validator: EventValidator
+  ): void {
+    if (specResponse.eventSpec === null) {
+      return;
+    }
+
+    const eventId = `${eventName}-${Date.now()}`;
+    const propertyResults = validator.validate(
+      specResponse.eventSpec,
+      eventSchema,
+      eventId
+    );
+
+    const payload: ValidatedEventPayload = {
+      streamId,
+      eventName,
+      eventSpecMetadata: specResponse.metadata,
+      propertyResults,
+    };
+
+    if (AvoInspector.shouldLog) {
+      console.log(
+        "Avo Inspector: validated event " +
+          eventName +
+          " with results " +
+          JSON.stringify(payload)
+      );
     }
   }
 
