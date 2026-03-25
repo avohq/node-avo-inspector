@@ -23,7 +23,6 @@ describe("AvoStreamId", () => {
 
   test("streamId containing ':' logs a warning", () => {
     const avoStreamId = new AvoStreamId("invalid:stream:id");
-    // Accessing streamId should trigger warning
     const id = avoStreamId.streamId;
 
     expect(consoleWarnSpy).toHaveBeenCalledWith(

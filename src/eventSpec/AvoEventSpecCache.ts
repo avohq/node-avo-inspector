@@ -1,26 +1,28 @@
 import { EventSpecResponse } from "./AvoEventSpecFetchTypes";
 
 interface CacheEntry {
-  value: EventSpecResponse | null;
+  value: EventSpecResponse;
   timestamp: number;
-  accessCount: number;
+  eventCount: number;
   lastAccessed: number;
 }
 
-const MAX_ENTRIES = 50;
+const MAX_EVENT_COUNT = 50;
 const TTL_MS = 60_000;
-const MAX_ACCESS_COUNT = 50;
-const SWEEP_INTERVAL = 50;
 
 export class AvoEventSpecCache {
   private cache: Map<string, CacheEntry> = new Map();
-  private operationCount = 0;
+  private globalEventCount = 0;
 
   static makeKey(apiKey: string, streamId: string, eventName: string): string {
     return `${apiKey}:${streamId}:${eventName}`;
   }
 
-  get(key: string): EventSpecResponse | null | undefined {
+  /**
+   * Returns the cached EventSpecResponse, or undefined on cache miss.
+   * A cached response with eventSpec: null means "no spec exists for this event".
+   */
+  get(key: string): EventSpecResponse | undefined {
     const entry = this.cache.get(key);
     if (entry === undefined) {
       return undefined;
@@ -32,9 +34,9 @@ export class AvoEventSpecCache {
       return undefined;
     }
 
-    // Per-entry eviction: evict after 50 accesses
-    entry.accessCount++;
-    if (entry.accessCount >= MAX_ACCESS_COUNT) {
+    // Per-entry access count eviction
+    entry.eventCount++;
+    if (entry.eventCount >= MAX_EVENT_COUNT) {
       this.cache.delete(key);
       return undefined;
     }
@@ -43,39 +45,50 @@ export class AvoEventSpecCache {
     return entry.value;
   }
 
-  set(key: string, value: EventSpecResponse | null): void {
-    this.operationCount++;
+  /**
+   * Returns true if the key exists in the cache and has not expired.
+   */
+  contains(key: string): boolean {
+    const entry = this.cache.get(key);
+    if (entry === undefined) {
+      return false;
+    }
+    if (Date.now() - entry.timestamp > TTL_MS) {
+      this.cache.delete(key);
+      return false;
+    }
+    if (entry.eventCount >= MAX_EVENT_COUNT) {
+      this.cache.delete(key);
+      return false;
+    }
+    return true;
+  }
 
-    // Global sweep every 50 operations
-    if (this.operationCount % SWEEP_INTERVAL === 0) {
-      this.sweep();
+  set(key: string, value: EventSpecResponse): void {
+    this.globalEventCount++;
+
+    // Global rotation: evict LRU entry every MAX_EVENT_COUNT operations
+    if (this.globalEventCount >= MAX_EVENT_COUNT) {
+      this.evictLRU();
+      this.globalEventCount = 0;
     }
 
     this.cache.set(key, {
       value,
       timestamp: Date.now(),
-      accessCount: 0,
+      eventCount: 0,
       lastAccessed: Date.now(),
     });
 
-    // LRU eviction when size > MAX_ENTRIES
-    if (this.cache.size > MAX_ENTRIES) {
+    // Size cap: evict oldest entries when exceeding max
+    while (this.cache.size > MAX_EVENT_COUNT) {
       this.evictLRU();
     }
   }
 
   flush(): void {
     this.cache.clear();
-    this.operationCount = 0;
-  }
-
-  private sweep(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.cache.entries()) {
-      if (now - entry.timestamp > TTL_MS) {
-        this.cache.delete(key);
-      }
-    }
+    this.globalEventCount = 0;
   }
 
   private evictLRU(): void {

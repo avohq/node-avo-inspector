@@ -7,6 +7,7 @@ import {
 interface EventProperty {
   propertyName: string;
   propertyType: string;
+  propertyValue?: string;
 }
 
 export class EventValidator {
@@ -35,16 +36,22 @@ export class EventValidator {
         // Type check
         passed = actualProp.propertyType === specProp.propertyType;
 
-        // Regex check (only if type passed and regex is defined)
-        if (passed && specProp.regex) {
+        // Regex check (only if type passed, regex is defined, and value is available)
+        if (passed && specProp.regex && actualProp.propertyValue !== undefined) {
           if (!safeRegex(specProp.regex)) {
             console.warn(
               `[Avo Inspector] Warning: Unsafe regex pattern skipped for property "${specProp.propertyName}": ${specProp.regex}`
             );
-            // Unsafe regex is skipped - property still passes type check
+          } else {
+            try {
+              const re = new RegExp(specProp.regex);
+              passed = re.test(actualProp.propertyValue);
+            } catch (e) {
+              console.warn(
+                `[Avo Inspector] Warning: Invalid regex pattern for property "${specProp.propertyName}": ${specProp.regex}`
+              );
+            }
           }
-          // Note: actual regex matching against values would happen at runtime
-          // with per-match 1s timeout. Here we only validate the spec constraints.
         }
       }
 

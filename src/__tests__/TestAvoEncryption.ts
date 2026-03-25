@@ -246,14 +246,15 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
       "test-event",
       [{ propertyName: "username", propertyType: "string" }],
       null,
-      null
+      null,
+      { username: "alice" }
     );
 
-    // Should have encryptedPropertyValue instead of propertyType
+    // Should have encryptedPropertyValue alongside propertyType
     expect(body.eventProperties.length).toBe(1);
     expect(body.eventProperties[0].propertyName).toBe("username");
     expect((body.eventProperties[0] as any).encryptedPropertyValue).toBeDefined();
-    expect((body.eventProperties[0] as any).propertyType).toBeUndefined();
+    expect((body.eventProperties[0] as any).propertyType).toBe("string");
   });
 
   test("prod env: no encryptedPropertyValue, propertyType kept as-is", () => {
@@ -306,7 +307,8 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
         { propertyName: "scores", propertyType: "list(int)" },
       ],
       null,
-      null
+      null,
+      { name: "Alice", tags: ["a", "b"], scores: [1, 2] }
     );
 
     // List types should be omitted
@@ -331,7 +333,8 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
       "test-event",
       [{ propertyName: "prop1", propertyType: "string" }],
       null,
-      null
+      null,
+      { prop1: "hello" }
     );
 
     // Property should be omitted on failure
@@ -361,7 +364,8 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
       "test-event",
       [{ propertyName: "email", propertyType: "string" }],
       null,
-      null
+      null,
+      { email: "user@example.com" }
     );
 
     const encryptedValue = (body.eventProperties[0] as any).encryptedPropertyValue;
@@ -387,6 +391,6 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
     decipher.setAuthTag(authTag);
     let decrypted = decipher.update(ciphertext);
     decrypted = Buffer.concat([decrypted, decipher.final()]);
-    expect(decrypted.toString("utf8")).toBe("string");
+    expect(decrypted.toString("utf8")).toBe('"user@example.com"');
   });
 });

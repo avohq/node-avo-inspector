@@ -79,44 +79,49 @@ describe("AvoEventSpecCache", () => {
   });
 
   test("LRU eviction when size > 50", () => {
-    // Fill cache to 50, advancing time between each to ensure distinct timestamps
+    // Use a fresh cache and fill it carefully.
+    // Global rotation fires at every 50th set, so add 50 entries first
+    // (the 50th set evicts LRU entry-0).
     for (let i = 0; i < 50; i++) {
       cache.set(`entry-${i}`, makeSpec(`event-${i}`));
       jest.advanceTimersByTime(1);
     }
 
-    // Access entry-0 to make it recently used
-    expect(cache.get("entry-0")).toBeDefined();
+    // entry-0 was evicted by global rotation at the 50th set
+    expect(cache.get("entry-0")).toBeUndefined();
+
+    // Access entry-1 to make it recently used
+    expect(cache.get("entry-1")).toBeDefined();
     jest.advanceTimersByTime(1);
 
-    // Add 51st entry - should evict LRU (entry-1, since entry-0 was recently accessed)
+    // Add entry-50 — now 50 entries again, size-cap eviction kicks in for the 51st
+    // Add entry-51 to push over 50
     cache.set("entry-50", makeSpec("event-50"));
+    jest.advanceTimersByTime(1);
+    cache.set("entry-51", makeSpec("event-51"));
 
-    // entry-1 should be evicted (oldest lastAccessed that wasn't touched by get)
-    expect(cache.get("entry-1")).toBeUndefined();
+    // entry-2 should be evicted (oldest lastAccessed that wasn't touched)
+    expect(cache.get("entry-2")).toBeUndefined();
 
-    // entry-0 should still be present (was recently accessed)
-    expect(cache.get("entry-0")).toBeDefined();
+    // entry-1 should still be present (was recently accessed via get)
+    expect(cache.get("entry-1")).toBeDefined();
 
-    // entry-50 should be present
-    expect(cache.get("entry-50")).toBeDefined();
+    // entry-51 should be present
+    expect(cache.get("entry-51")).toBeDefined();
   });
 
-  test("global sweep runs every 50 operations", () => {
-    // Add an entry that will be expired
-    cache.set("will-expire", makeSpec("expire"));
-    jest.advanceTimersByTime(61_000);
-
-    // Perform 49 operations (the first set counts as 1, so we need 49 more)
+  test("global rotation evicts LRU entry every 50 operations", () => {
+    // Add entries with distinct timestamps
     for (let i = 0; i < 49; i++) {
-      cache.set(`filler-${i}`, makeSpec(`filler-${i}`));
+      cache.set(`entry-${i}`, makeSpec(`event-${i}`));
+      jest.advanceTimersByTime(1);
     }
 
-    // The expired entry might still be "in" storage but not yet swept
-    // On the 50th operation the sweep should run and remove it
-    cache.set("trigger-sweep", makeSpec("trigger"));
+    // The 50th set triggers global rotation, evicting the LRU entry (entry-0)
+    cache.set("entry-49", makeSpec("event-49"));
 
-    expect(cache.get("will-expire")).toBeUndefined();
+    expect(cache.get("entry-0")).toBeUndefined();
+    expect(cache.get("entry-49")).toBeDefined();
   });
 
   test("flush clears all entries", () => {

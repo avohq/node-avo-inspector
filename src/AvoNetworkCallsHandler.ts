@@ -19,6 +19,7 @@ export interface BaseBody {
 
 export interface EventPropertyEncrypted {
   propertyName: string;
+  propertyType: string;
   encryptedPropertyValue: string;
   children?: any;
 }
@@ -101,7 +102,7 @@ export class AvoNetworkCallsHandler {
 
     return new Promise((resolve, reject) => {
       const data = JSON.stringify(events);
-      var options = {
+      const options = {
         hostname: "api.avo.app",
         port: 443,
         path: AvoNetworkCallsHandler.trackingEndpoint,
@@ -111,14 +112,12 @@ export class AvoNetworkCallsHandler {
           "Content-Length": Buffer.byteLength(data),
         },
       };
-      var req = request(options, (res: any) => {
+      const req = request(options, (res: any) => {
         const chunks: any = [];
         res.on("data", (data: any) => chunks.push(data));
         res.on("end", () => {
           try {
-            // @ts-ignore
             const data = JSON.parse(Buffer.concat(chunks).toString());
-            // @ts-ignore
             this.samplingRate = data.samplingRate;
           } catch (e) {}
           resolve();
@@ -146,14 +145,15 @@ export class AvoNetworkCallsHandler {
       children?: any;
     }>,
     eventId: string | null,
-    eventHash: string | null
+    eventHash: string | null,
+    rawEventProperties?: { [propName: string]: any }
   ): EventSchemaBody {
     let eventSchemaBody = this.createBaseCallBody(anonymousId) as EventSchemaBody;
     eventSchemaBody.type = "event";
     eventSchemaBody.eventName = eventName;
 
-    if (AvoEncryption.shouldEncrypt(this.envName, this.publicEncryptionKey)) {
-      eventSchemaBody.eventProperties = this.encryptProperties(eventProperties);
+    if (AvoEncryption.shouldEncrypt(this.envName, this.publicEncryptionKey) && rawEventProperties) {
+      eventSchemaBody.eventProperties = this.encryptProperties(eventProperties, rawEventProperties);
     } else {
       eventSchemaBody.eventProperties = eventProperties;
     }
@@ -176,7 +176,8 @@ export class AvoNetworkCallsHandler {
       propertyName: string;
       propertyType: string;
       children?: any;
-    }>
+    }>,
+    rawEventProperties: { [propName: string]: any }
   ): Array<EventProperty> {
     const result: Array<EventProperty> = [];
 
@@ -186,8 +187,11 @@ export class AvoNetworkCallsHandler {
         continue;
       }
 
+      const rawValue = rawEventProperties[prop.propertyName];
+      const jsonValue = JSON.stringify(rawValue);
+
       const encrypted = AvoEncryption.encryptValue(
-        prop.propertyType,
+        jsonValue,
         this.publicEncryptionKey!
       );
 
@@ -198,6 +202,7 @@ export class AvoNetworkCallsHandler {
 
       result.push({
         propertyName: prop.propertyName,
+        propertyType: prop.propertyType,
         encryptedPropertyValue: encrypted,
         ...(prop.children !== undefined ? { children: prop.children } : {}),
       });

@@ -114,7 +114,7 @@ describe("EventValidator", () => {
         ],
       };
       const eventProperties = [
-        { propertyName: "query", propertyType: "string" },
+        { propertyName: "query", propertyType: "string", propertyValue: "aaa" },
       ];
 
       const results = validator.validate(spec, eventProperties, "evt-5");
