@@ -62,6 +62,10 @@ describe("AvoEventSpecFetcher", () => {
     fetcher = new AvoEventSpecFetcher("test-api-key");
   });
 
+  afterEach(() => {
+    fetcher.destroy();
+  });
+
   test("fetches event spec via HTTPS GET", (done) => {
     const specResponse: EventSpecResponse = {
       eventSpec: {

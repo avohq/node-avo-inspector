@@ -16,6 +16,18 @@ function generateTestKeyPair() {
   };
 }
 
+function parseWireFormat(encryptedBase64: string) {
+  const wire = Buffer.from(encryptedBase64, "base64");
+  return {
+    version: wire[0],
+    ephemeralPubKey: wire.subarray(1, 66),
+    iv: wire.subarray(66, 82),
+    authTag: wire.subarray(82, 98),
+    ciphertext: wire.subarray(98),
+    wire,
+  };
+}
+
 describe("AvoEncryption", () => {
   describe("shouldEncrypt", () => {
     const dummyHexKey = "deadbeef";
@@ -85,14 +97,8 @@ describe("AvoEncryption", () => {
       expect(encrypted).not.toBeNull();
 
       // Decrypt: parse wire format
-      const wire = Buffer.from(encrypted!, "base64");
-      const version = wire[0]; // 0x00
+      const { version, ephemeralPubKey, iv, authTag, ciphertext } = parseWireFormat(encrypted!);
       expect(version).toBe(0x00);
-
-      const ephemeralPubKey = wire.subarray(1, 66);
-      const iv = wire.subarray(66, 82);
-      const authTag = wire.subarray(82, 98);
-      const ciphertext = wire.subarray(98);
 
       // Compute shared secret the same way
       const sharedSecret = ecdh.computeSecret(ephemeralPubKey);
@@ -373,11 +379,7 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
     expect(encryptedValue).toBeDefined();
 
     // Decrypt and verify the value is the JSON-stringified number "42"
-    const wire = Buffer.from(encryptedValue, "base64");
-    const ephemeralPubKey = wire.subarray(1, 66);
-    const iv = wire.subarray(66, 82);
-    const authTag = wire.subarray(82, 98);
-    const ciphertext = wire.subarray(98);
+    const { ephemeralPubKey, iv, authTag, ciphertext } = parseWireFormat(encryptedValue);
 
     const sharedSecret = ecdh.computeSecret(ephemeralPubKey);
     const aesKey = crypto.createHash("sha256").update(sharedSecret).digest();
@@ -419,11 +421,7 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
     expect(encryptedValue).toBeDefined();
 
     // Decrypt and verify the value is "null"
-    const wire = Buffer.from(encryptedValue, "base64");
-    const ephemeralPubKey = wire.subarray(1, 66);
-    const iv = wire.subarray(66, 82);
-    const authTag = wire.subarray(82, 98);
-    const ciphertext = wire.subarray(98);
+    const { ephemeralPubKey, iv, authTag, ciphertext } = parseWireFormat(encryptedValue);
 
     const sharedSecret = ecdh.computeSecret(ephemeralPubKey);
     const aesKey = crypto.createHash("sha256").update(sharedSecret).digest();
@@ -497,18 +495,13 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
     const encryptedValue = (body.eventProperties[0] as any).encryptedPropertyValue;
     expect(encryptedValue).toBeDefined();
 
-    const wire = Buffer.from(encryptedValue, "base64");
+    const { version, ephemeralPubKey, iv, authTag, ciphertext, wire } = parseWireFormat(encryptedValue);
     // Verify wire format: [0x00][65-byte ephemeral pubkey][16-byte IV][16-byte auth tag][ciphertext]
     expect(wire.length).toBeGreaterThanOrEqual(99);
-    expect(wire[0]).toBe(0x00); // version
-    expect(wire[1]).toBe(0x04); // uncompressed pubkey marker
+    expect(version).toBe(0x00); // version
+    expect(ephemeralPubKey[0]).toBe(0x04); // uncompressed pubkey marker
 
     // Verify we can decrypt it
-    const ephemeralPubKey = wire.subarray(1, 66);
-    const iv = wire.subarray(66, 82);
-    const authTag = wire.subarray(82, 98);
-    const ciphertext = wire.subarray(98);
-
     const sharedSecret = ecdh.computeSecret(ephemeralPubKey);
     const aesKey = crypto.createHash("sha256").update(sharedSecret).digest();
     const decipher = crypto.createDecipheriv("aes-256-gcm", aesKey, iv, {

@@ -72,6 +72,18 @@ export class AvoInspector {
 
     this.publicEncryptionKey = options.publicEncryptionKey;
 
+    if (
+      this.publicEncryptionKey &&
+      this.environment !== AvoInspectorEnv.Prod
+    ) {
+      const hexPattern = /^[0-9a-fA-F]+$/;
+      if (!hexPattern.test(this.publicEncryptionKey) || this.publicEncryptionKey.length !== 130) {
+        console.warn(
+          "[Avo Inspector] Warning: publicEncryptionKey does not look like a valid uncompressed P-256 public key (expected 130 hex characters). Encryption may fail."
+        );
+      }
+    }
+
     if (this.environment === AvoInspectorEnv.Dev) {
       AvoInspector._shouldLog = true;
     } else {
@@ -341,11 +353,9 @@ export class AvoInspector {
       });
     };
 
-    if (cache.contains(cacheKey)) {
-      const cached = cache.get(cacheKey);
-      if (cached) {
-        validateAndSend(cached);
-      }
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) {
+      validateAndSend(cached);
       return;
     }
 

@@ -15,7 +15,7 @@ export class AvoEventSpecCache {
   private globalEventCount = 0;
 
   static makeKey(apiKey: string, streamId: string, eventName: string): string {
-    return `${apiKey}:${streamId}:${eventName}`;
+    return `${apiKey}\0${streamId}\0${eventName}`;
   }
 
   /**

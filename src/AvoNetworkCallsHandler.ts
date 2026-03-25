@@ -106,6 +106,15 @@ export class AvoNetworkCallsHandler {
               " with schema " +
               JSON.stringify(schemaEvent.eventProperties)
           );
+        } else if (event.type === "validatedEvent") {
+          let validatedEvent: ValidatedEventSchemaBody = event;
+          console.log(
+            "Avo Inspector: sending validated event " +
+              validatedEvent.eventName +
+              " with " +
+              validatedEvent.propertyResults.length +
+              " property results"
+          );
         }
       });
     }

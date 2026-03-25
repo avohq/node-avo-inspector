@@ -316,6 +316,38 @@ describe("Initialization", () => {
     );
   });
 
+  test("warns when publicEncryptionKey is malformed in dev/staging", () => {
+    const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+      publicEncryptionKey: "not-valid-hex",
+    });
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("publicEncryptionKey does not look like a valid")
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  test("does not warn when publicEncryptionKey is a valid 130-char hex key in dev/staging", () => {
+    const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const validKey = "04" + "ab".repeat(64); // 2 + 128 = 130 hex chars
+
+    new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+      publicEncryptionKey: validKey,
+    });
+
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
+    consoleWarnSpy.mockRestore();
+  });
+
   test("constructor works without publicEncryptionKey (backwards compatible)", () => {
     expect(() => {
       new AvoInspector({

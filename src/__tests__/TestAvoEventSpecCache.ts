@@ -79,34 +79,41 @@ describe("AvoEventSpecCache", () => {
   });
 
   test("LRU eviction when size > 50", () => {
-    // Use a fresh cache and fill it carefully.
-    // Global rotation fires at every 50th set, so add 50 entries first
-    // (the 50th set evicts LRU entry-0).
+    // Fill cache with 50 entries. Each set() creates an entry with
+    // lastAccessed = Date.now(). We advance the fake clock by 1ms between
+    // sets so every entry has a distinct timestamp.
+    // The 50th set triggers evictLRU(), which removes the entry with the
+    // oldest lastAccessed — that is entry-0 (set at t=0).
     for (let i = 0; i < 50; i++) {
       cache.set(`entry-${i}`, makeSpec(`event-${i}`));
       jest.advanceTimersByTime(1);
     }
 
-    // entry-0 was evicted by global rotation at the 50th set
+    // entry-0 was the oldest when evictLRU() fired on the 50th set,
+    // so it should have been removed.
     expect(cache.get("entry-0")).toBeUndefined();
 
-    // Access entry-1 to make it recently used
+    // Touch entry-1 via get() — this updates its lastAccessed to "now",
+    // making it the most-recently-accessed entry and protecting it from
+    // the next eviction.
     expect(cache.get("entry-1")).toBeDefined();
     jest.advanceTimersByTime(1);
 
-    // Add entry-50 — now 50 entries again, size-cap eviction kicks in for the 51st
-    // Add entry-51 to push over 50
+    // Add two more entries to push the cache over 50 again.
+    // Each set that crosses the 50-entry threshold triggers evictLRU().
     cache.set("entry-50", makeSpec("event-50"));
     jest.advanceTimersByTime(1);
     cache.set("entry-51", makeSpec("event-51"));
 
-    // entry-2 should be evicted (oldest lastAccessed that wasn't touched)
+    // entry-2 was never touched after its initial set(), so it had the
+    // oldest lastAccessed among remaining entries — evictLRU() removes it.
     expect(cache.get("entry-2")).toBeUndefined();
 
-    // entry-1 should still be present (was recently accessed via get)
+    // entry-1 survives because get() above refreshed its lastAccessed,
+    // so it was NOT the oldest entry when eviction fired.
     expect(cache.get("entry-1")).toBeDefined();
 
-    // entry-51 should be present
+    // entry-51 was just inserted, so it is definitely still present.
     expect(cache.get("entry-51")).toBeDefined();
   });
 
@@ -124,6 +131,12 @@ describe("AvoEventSpecCache", () => {
     expect(cache.get("entry-49")).toBeDefined();
   });
 
+  test("flush on empty cache is a no-op", () => {
+    // Just verify no crash
+    cache.flush();
+    expect(cache.get("anything")).toBeUndefined();
+  });
+
   test("flush clears all entries", () => {
     cache.set("a", makeSpec("a"));
     cache.set("b", makeSpec("b"));
@@ -134,9 +147,9 @@ describe("AvoEventSpecCache", () => {
     expect(cache.get("b")).toBeUndefined();
   });
 
-  test("key format uses apiKey:streamId:eventName", () => {
+  test("key format uses null-byte delimiter", () => {
     const key = AvoEventSpecCache.makeKey("myApi", "stream1", "click");
-    expect(key).toBe("myApi:stream1:click");
+    expect(key).toBe("myApi\0stream1\0click");
   });
 
   describe("contains()", () => {
@@ -220,12 +233,10 @@ describe("AvoEventSpecCache", () => {
   });
 
   describe("makeKey delimiter collision", () => {
-    test("makeKey('a:b', 'c', 'd') collides with makeKey('a', 'b:c', 'd')", () => {
+    test("makeKey with null-byte delimiter prevents colon collisions", () => {
       const key1 = AvoEventSpecCache.makeKey("a:b", "c", "d");
       const key2 = AvoEventSpecCache.makeKey("a", "b:c", "d");
-
-      // Both produce "a:b:c:d" — documenting the known collision risk
-      expect(key1).toBe(key2);
+      expect(key1).not.toBe(key2);
     });
   });
 });

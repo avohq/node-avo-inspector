@@ -181,6 +181,13 @@ describe("AvoNetworkCallsHandler", () => {
     consoleWarnSpy.mockRestore();
   });
 
+  test("same event with different streamIds is not deduplicated", async () => {
+    await inspector.trackSchemaFromEvent(eventName, properties, "stream-a");
+    await inspector.trackSchemaFromEvent(eventName, properties, "stream-b");
+
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(2);
+  });
+
   test("trackSchemaFromEvent rejection contains the expected error string", async () => {
     const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
