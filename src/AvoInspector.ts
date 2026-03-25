@@ -170,11 +170,12 @@ export class AvoInspector {
     }
   }
 
-  private _avoFunctionTrackSchemaFromEvent(
+  _avoFunctionTrackSchemaFromEvent(
     eventName: string,
     eventProperties: { [propName: string]: any },
     eventId: string,
-    eventHash: string
+    eventHash: string,
+    streamId?: string
   ): Promise<
     Array<{
       propertyName: string;
@@ -199,16 +200,17 @@ export class AvoInspector {
           );
         }
         let eventSchema = this.extractSchema(eventProperties, false);
+        const avoStreamId = new AvoStreamId(streamId);
 
         // Fire-and-forget: validate against event spec (dev/staging only)
-        this.fetchAndValidateAsync(eventName, eventSchema, "", eventProperties);
+        this.fetchAndValidateAsync(eventName, eventSchema, avoStreamId.streamId, eventProperties);
 
         return this.trackSchemaInternal(
           eventName,
           eventSchema,
           eventId,
           eventHash,
-          "",
+          avoStreamId.streamId,
           eventProperties
         ).then(() => {
           return eventSchema;
