@@ -55,7 +55,7 @@ describe("Initialization", () => {
     }).toThrow(error.API_KEY);
   });
 
-  test("Error is thrown when empty Api Key is used", () => {
+  test("Error is thrown when whitespace Api Key is used", () => {
     // Given
     const apiKey = " ";
 
@@ -65,6 +65,16 @@ describe("Initialization", () => {
         env: AvoInspectorEnv.Prod,
         version: "0",
         apiKey,
+      });
+    }).toThrow(error.API_KEY);
+  });
+
+  test("Error is thrown when empty string Api Key is used", () => {
+    expect(() => {
+      new AvoInspector({
+        env: AvoInspectorEnv.Prod,
+        version: "0",
+        apiKey: "",
       });
     }).toThrow(error.API_KEY);
   });
@@ -263,7 +273,11 @@ describe("Initialization", () => {
     }).toThrow(error.VERSION);
   });
 
-  test("publicEncryptionKey is stored when provided", () => {
+  test("publicEncryptionKey is forwarded to AvoNetworkCallsHandler when provided", () => {
+    const inspectorVersion = process.env.npm_package_version || "";
+
+    (AvoNetworkCallsHandler as unknown as jest.Mock).mockClear();
+
     let inspector = new AvoInspector({
       apiKey: "api-key-xxx",
       env: AvoInspectorEnv.Dev,
@@ -271,17 +285,35 @@ describe("Initialization", () => {
       publicEncryptionKey: "my-public-key-123",
     });
 
-    expect(inspector.publicEncryptionKey).toBe("my-public-key-123");
+    expect(AvoNetworkCallsHandler).toHaveBeenCalledWith(
+      "api-key-xxx",
+      AvoInspectorEnv.Dev,
+      "",
+      "1",
+      inspectorVersion,
+      "my-public-key-123"
+    );
   });
 
-  test("publicEncryptionKey is undefined when not provided", () => {
+  test("publicEncryptionKey is forwarded as undefined to AvoNetworkCallsHandler when not provided", () => {
+    const inspectorVersion = process.env.npm_package_version || "";
+
+    (AvoNetworkCallsHandler as unknown as jest.Mock).mockClear();
+
     let inspector = new AvoInspector({
       apiKey: "api-key-xxx",
       env: AvoInspectorEnv.Dev,
       version: "1",
     });
 
-    expect(inspector.publicEncryptionKey).toBeUndefined();
+    expect(AvoNetworkCallsHandler).toHaveBeenCalledWith(
+      "api-key-xxx",
+      AvoInspectorEnv.Dev,
+      "",
+      "1",
+      inspectorVersion,
+      undefined
+    );
   });
 
   test("constructor works without publicEncryptionKey (backwards compatible)", () => {

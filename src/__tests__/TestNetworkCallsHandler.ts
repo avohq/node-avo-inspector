@@ -116,4 +116,64 @@ describe("NetworkCallsHandler", () => {
 
     expect(body.anonymousId).toBe("user-123");
   });
+
+  test("bodyForEventSchemaCall with rawEventProperties passes them through (no encryption in dev without key)", () => {
+    const eventName = "event name";
+    const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
+    const rawEventProperties = { prop0: "hello" };
+
+    const body = networkHandler.bodyForEventSchemaCall(
+      "",
+      eventName,
+      eventProperties,
+      null,
+      null,
+      rawEventProperties
+    );
+
+    // Without a publicEncryptionKey, encryption is not triggered,
+    // so eventProperties should be the plain schema (not encrypted)
+    expect(body.eventProperties).toEqual(eventProperties);
+    expect(body.type).toBe("event");
+    expect(body.eventName).toBe(eventName);
+  });
+
+  test("base body includes publicEncryptionKey when handler is constructed with one", () => {
+    const handlerWithKey = new AvoNetworkCallsHandler(
+      apiKey,
+      env,
+      "",
+      version,
+      inspectorVersion,
+      "test-public-key-abc"
+    );
+
+    const eventName = "event name";
+    const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
+
+    const body = handlerWithKey.bodyForEventSchemaCall(
+      "",
+      eventName,
+      eventProperties,
+      null,
+      null
+    );
+
+    expect(body.publicEncryptionKey).toBe("test-public-key-abc");
+  });
+
+  test("base body does not include publicEncryptionKey when handler is constructed without one", () => {
+    const eventName = "event name";
+    const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
+
+    const body = networkHandler.bodyForEventSchemaCall(
+      "",
+      eventName,
+      eventProperties,
+      null,
+      null
+    );
+
+    expect(body.publicEncryptionKey).toBeUndefined();
+  });
 });

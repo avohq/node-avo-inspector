@@ -138,4 +138,94 @@ describe("AvoEventSpecCache", () => {
     const key = AvoEventSpecCache.makeKey("myApi", "stream1", "click");
     expect(key).toBe("myApi:stream1:click");
   });
+
+  describe("contains()", () => {
+    test("returns true for a valid cached entry", () => {
+      cache.set("k1", makeSpec("click"));
+      expect(cache.contains("k1")).toBe(true);
+    });
+
+    test("returns false for a missing key", () => {
+      expect(cache.contains("nonexistent")).toBe(false);
+    });
+
+    test("returns false after TTL expiry", () => {
+      cache.set("ttl-key", makeSpec("click"));
+      jest.advanceTimersByTime(61_000);
+      expect(cache.contains("ttl-key")).toBe(false);
+    });
+
+    test("returns false after access count exhaustion", () => {
+      cache.set("hot-key", makeSpec("hot"));
+
+      // Access 49 times via get to increment eventCount to 49
+      for (let i = 0; i < 49; i++) {
+        cache.get("hot-key");
+      }
+
+      // eventCount is now 49; contains() checks >= 50, so still false at 49
+      // but the 50th get() returned undefined and deleted the entry
+      // Actually the 50th get increments to 50 and evicts, so after 49 gets
+      // eventCount is 49. The next get (50th) increments to 50 and evicts.
+      // contains() checks >= MAX_EVENT_COUNT without incrementing, so at 49 it's true.
+      // We need one more get to push it to 50.
+      expect(cache.get("hot-key")).toBeUndefined(); // 50th access evicts
+
+      expect(cache.contains("hot-key")).toBe(false);
+    });
+  });
+
+  describe("upsert/overwrite", () => {
+    test("setting the same key twice overwrites the previous value", () => {
+      const spec1 = makeSpec("first");
+      const spec2 = makeSpec("second");
+
+      cache.set("dup-key", spec1);
+      expect(cache.get("dup-key")).toEqual(spec1);
+
+      cache.set("dup-key", spec2);
+      expect(cache.get("dup-key")).toEqual(spec2);
+    });
+
+    test("overwrite resets timestamp", () => {
+      cache.set("ts-key", makeSpec("event"));
+
+      // Advance time close to TTL
+      jest.advanceTimersByTime(55_000);
+
+      // Overwrite — should reset the timestamp
+      cache.set("ts-key", makeSpec("event-v2"));
+
+      // Advance another 10s (total 65s since first set, but only 10s since overwrite)
+      jest.advanceTimersByTime(10_000);
+
+      expect(cache.get("ts-key")).toBeDefined();
+    });
+
+    test("overwrite resets eventCount", () => {
+      cache.set("count-key", makeSpec("event"));
+
+      // Access 48 times to bring eventCount close to limit
+      for (let i = 0; i < 48; i++) {
+        cache.get("count-key");
+      }
+
+      // Overwrite — should reset eventCount to 0
+      cache.set("count-key", makeSpec("event-v2"));
+
+      // Should be able to access again without hitting the limit
+      expect(cache.get("count-key")).toBeDefined();
+      expect(cache.get("count-key")).toBeDefined();
+    });
+  });
+
+  describe("makeKey delimiter collision", () => {
+    test("makeKey('a:b', 'c', 'd') collides with makeKey('a', 'b:c', 'd')", () => {
+      const key1 = AvoEventSpecCache.makeKey("a:b", "c", "d");
+      const key2 = AvoEventSpecCache.makeKey("a", "b:c", "d");
+
+      // Both produce "a:b:c:d" — documenting the known collision risk
+      expect(key1).toBe(key2);
+    });
+  });
 });

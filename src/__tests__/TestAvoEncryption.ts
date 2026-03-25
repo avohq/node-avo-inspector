@@ -150,7 +150,7 @@ describe("AvoEncryption", () => {
 describe("AvoNetworkCallsHandler encryption integration", () => {
   const inspectorVersion = process.env.npm_package_version || "";
 
-  beforeAll(() => {
+  beforeEach(() => {
     const now = new Date();
     // @ts-ignore
     jest.spyOn(global, "Date").mockImplementation(() => now);
@@ -343,6 +343,132 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
       expect.stringContaining("[Avo Inspector] Warning:")
     );
     warnSpy.mockRestore();
+  });
+
+  test("non-string value (number) is JSON.stringify'd before encryption", () => {
+    const ecdh = crypto.createECDH("prime256v1");
+    ecdh.generateKeys();
+    const pubKey = ecdh.getPublicKey("hex");
+
+    const handler = new AvoNetworkCallsHandler(
+      "api-key",
+      AvoInspectorEnv.Dev,
+      "app",
+      "1.0",
+      inspectorVersion,
+      pubKey
+    );
+
+    const body = handler.bodyForEventSchemaCall(
+      "anon-id",
+      "test-event",
+      [{ propertyName: "count", propertyType: "int" }],
+      null,
+      null,
+      { count: 42 }
+    );
+
+    expect(body.eventProperties.length).toBe(1);
+    const encryptedValue = (body.eventProperties[0] as any).encryptedPropertyValue;
+    expect(encryptedValue).toBeDefined();
+
+    // Decrypt and verify the value is the JSON-stringified number "42"
+    const wire = Buffer.from(encryptedValue, "base64");
+    const ephemeralPubKey = wire.subarray(1, 66);
+    const iv = wire.subarray(66, 82);
+    const authTag = wire.subarray(82, 98);
+    const ciphertext = wire.subarray(98);
+
+    const sharedSecret = ecdh.computeSecret(ephemeralPubKey);
+    const aesKey = crypto.createHash("sha256").update(sharedSecret).digest();
+    const decipher = crypto.createDecipheriv("aes-256-gcm", aesKey, iv, {
+      authTagLength: 16,
+    });
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(ciphertext);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    expect(decrypted.toString("utf8")).toBe("42");
+  });
+
+  test("missing property in rawEventProperties encrypts 'null' instead of crashing", () => {
+    const ecdh = crypto.createECDH("prime256v1");
+    ecdh.generateKeys();
+    const pubKey = ecdh.getPublicKey("hex");
+
+    const handler = new AvoNetworkCallsHandler(
+      "api-key",
+      AvoInspectorEnv.Dev,
+      "app",
+      "1.0",
+      inspectorVersion,
+      pubKey
+    );
+
+    // Schema says "missing_prop" exists, but rawEventProperties does NOT have it
+    const body = handler.bodyForEventSchemaCall(
+      "anon-id",
+      "test-event",
+      [{ propertyName: "missing_prop", propertyType: "string" }],
+      null,
+      null,
+      { other_prop: "value" }
+    );
+
+    expect(body.eventProperties.length).toBe(1);
+    const encryptedValue = (body.eventProperties[0] as any).encryptedPropertyValue;
+    expect(encryptedValue).toBeDefined();
+
+    // Decrypt and verify the value is "null"
+    const wire = Buffer.from(encryptedValue, "base64");
+    const ephemeralPubKey = wire.subarray(1, 66);
+    const iv = wire.subarray(66, 82);
+    const authTag = wire.subarray(82, 98);
+    const ciphertext = wire.subarray(98);
+
+    const sharedSecret = ecdh.computeSecret(ephemeralPubKey);
+    const aesKey = crypto.createHash("sha256").update(sharedSecret).digest();
+    const decipher = crypto.createDecipheriv("aes-256-gcm", aesKey, iv, {
+      authTagLength: 16,
+    });
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(ciphertext);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    expect(decrypted.toString("utf8")).toBe("null");
+  });
+
+  test("children are preserved in encrypted property output", () => {
+    const ecdh = crypto.createECDH("prime256v1");
+    ecdh.generateKeys();
+    const pubKey = ecdh.getPublicKey("hex");
+
+    const handler = new AvoNetworkCallsHandler(
+      "api-key",
+      AvoInspectorEnv.Dev,
+      "app",
+      "1.0",
+      inspectorVersion,
+      pubKey
+    );
+
+    const children = [
+      { propertyName: "street", propertyType: "string" },
+      { propertyName: "zip", propertyType: "int" },
+    ];
+
+    const body = handler.bodyForEventSchemaCall(
+      "anon-id",
+      "test-event",
+      [{ propertyName: "address", propertyType: "object", children }],
+      null,
+      null,
+      { address: { street: "123 Main St", zip: 12345 } }
+    );
+
+    expect(body.eventProperties.length).toBe(1);
+    const prop = body.eventProperties[0] as any;
+    expect(prop.propertyName).toBe("address");
+    expect(prop.encryptedPropertyValue).toBeDefined();
+    expect(prop.children).toEqual(children);
   });
 
   test("cross-SDK interop: encrypted wire format structure is correct", () => {

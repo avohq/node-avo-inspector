@@ -46,4 +46,27 @@ describe("AvoStreamId", () => {
     expect(consoleWarnSpy).not.toHaveBeenCalled();
     expect(id).toBe("");
   });
+
+  test("explicit undefined arg returns empty string and does not warn", () => {
+    const avoStreamId = new AvoStreamId(undefined);
+    const id = avoStreamId.streamId;
+
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
+    expect(id).toBe("");
+  });
+
+  test("warning is only logged once per instance, not on every .streamId access", () => {
+    const avoStreamId = new AvoStreamId("bad:id");
+
+    // The warning is logged in the constructor, so it's already been called once
+    expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
+
+    // Access streamId multiple times
+    avoStreamId.streamId;
+    avoStreamId.streamId;
+    avoStreamId.streamId;
+
+    // Should still be only one warning total
+    expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
+  });
 });

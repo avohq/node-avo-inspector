@@ -152,6 +152,56 @@ describe("AvoEventSpecFetcher", () => {
     fetcher.fetch("fail-event", "stream1", checkDone);
   });
 
+  test("non-200 status code resolves callback with null", (done) => {
+    setupMockRequest(500, { error: "Internal Server Error" });
+
+    fetcher.fetch("click", "stream1", (result) => {
+      expect(result).toBeNull();
+      expect(mockedHttps.request).toHaveBeenCalledTimes(1);
+      done();
+    });
+  });
+
+  test("malformed JSON body resolves callback with null", (done) => {
+    const mockReq = new MockClientRequest();
+    const mockRes = new MockIncomingMessage(200);
+
+    (mockedHttps.request as jest.Mock).mockImplementation(
+      (_options: any, callback: (res: any) => void) => {
+        callback(mockRes);
+        mockRes.emit("data", Buffer.from("not valid json {{{"));
+        mockRes.emit("end");
+        return mockReq;
+      }
+    );
+
+    fetcher.fetch("click", "stream1", (result) => {
+      expect(result).toBeNull();
+      expect(mockedHttps.request).toHaveBeenCalledTimes(1);
+      done();
+    });
+  });
+
+  test("timeout resolves callback with null", (done) => {
+    const mockReq = new MockClientRequest();
+
+    (mockedHttps.request as jest.Mock).mockImplementation(
+      (_options: any, _callback: (res: any) => void) => {
+        // Simulate timeout: never call the response callback,
+        // instead emit "timeout" on next tick
+        process.nextTick(() => mockReq.emit("timeout"));
+        return mockReq;
+      }
+    );
+
+    fetcher.fetch("click", "stream1", (result) => {
+      expect(result).toBeNull();
+      expect(mockReq.destroy).toHaveBeenCalled();
+      expect(mockedHttps.request).toHaveBeenCalledTimes(1);
+      done();
+    });
+  });
+
   test("separate keys make separate requests", (done) => {
     const spec1: EventSpecResponse = {
       eventSpec: { eventName: "click", properties: [] },

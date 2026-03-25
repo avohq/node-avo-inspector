@@ -2,6 +2,7 @@ import { AvoGuid } from "./AvoGuid";
 import { AvoInspector } from "./AvoInspector";
 import { AvoEncryption } from "./AvoEncryption";
 import { request } from "https";
+import { EventSpecMetadata, PropertyValidationResult } from "./eventSpec/AvoEventSpecFetchTypes";
 
 export interface BaseBody {
   apiKey: string;
@@ -41,6 +42,15 @@ export interface EventSchemaBody extends BaseBody {
   eventHash: string | null;
 }
 
+export interface ValidatedEventSchemaBody extends BaseBody {
+  type: "validatedEvent";
+  eventName: string;
+  eventSpecMetadata: EventSpecMetadata;
+  propertyResults: PropertyValidationResult[];
+}
+
+export type InspectorBody = EventSchemaBody | ValidatedEventSchemaBody;
+
 export class AvoNetworkCallsHandler {
   private apiKey: string;
   private envName: string;
@@ -69,7 +79,7 @@ export class AvoNetworkCallsHandler {
   }
 
   callInspectorWithBatchBody(
-    inEvents: Array<EventSchemaBody>
+    inEvents: Array<InspectorBody>
   ): Promise<void> {
     const events = inEvents.filter((x) => x != null);
 
@@ -171,6 +181,20 @@ export class AvoNetworkCallsHandler {
     return eventSchemaBody;
   }
 
+  bodyForValidatedEventSchemaCall(
+    anonymousId: string,
+    eventName: string,
+    eventSpecMetadata: EventSpecMetadata,
+    propertyResults: PropertyValidationResult[]
+  ): ValidatedEventSchemaBody {
+    let body = this.createBaseCallBody(anonymousId) as ValidatedEventSchemaBody;
+    body.type = "validatedEvent";
+    body.eventName = eventName;
+    body.eventSpecMetadata = eventSpecMetadata;
+    body.propertyResults = propertyResults;
+    return body;
+  }
+
   private encryptProperties(
     properties: Array<{
       propertyName: string;
@@ -188,7 +212,7 @@ export class AvoNetworkCallsHandler {
       }
 
       const rawValue = rawEventProperties[prop.propertyName];
-      const jsonValue = JSON.stringify(rawValue);
+      const jsonValue = JSON.stringify(rawValue) ?? "null";
 
       const encrypted = AvoEncryption.encryptValue(
         jsonValue,

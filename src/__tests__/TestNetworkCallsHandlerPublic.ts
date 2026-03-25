@@ -20,7 +20,6 @@ describe("AvoNetworkCallsHandler", () => {
   };
 
   const happyPathInspectorCall = () => {
-    inspector.avoNetworkCallsHandler["samplingRate"] = 0.1;
     return Promise.resolve();
   };
 
@@ -139,5 +138,64 @@ describe("AvoNetworkCallsHandler", () => {
 
     expect(consoleErrorSpy).toHaveBeenCalledWith('Avo Inspector: schema sending failed: Network error.');
     consoleErrorSpy.mockRestore();
+  });
+
+  test("_avoFunctionTrackSchemaFromEvent passes empty string as anonymousId", async () => {
+    const eventId = "testId";
+    const eventHash = "testHash";
+
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent(
+      eventName,
+      properties,
+      eventId,
+      eventHash
+    );
+
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
+      expect.objectContaining({
+        anonymousId: "",
+      }),
+    ]);
+  });
+
+  test("trackSchemaFromEvent with streamId containing ':' still sends the event", async () => {
+    const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    await inspector.trackSchemaFromEvent(eventName, properties, "bad:stream");
+
+    // Warning is logged
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      "[Avo Inspector] Warning: streamId contains ':' which is not supported"
+    );
+
+    // Event is still sent despite the warning
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(1);
+    expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
+      expect.objectContaining({
+        type: "event",
+        anonymousId: "bad:stream",
+      }),
+    ]);
+
+    consoleWarnSpy.mockRestore();
+  });
+
+  test("trackSchemaFromEvent rejection contains the expected error string", async () => {
+    const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    // Force the catch block in trackSchemaFromEvent by making extractSchema throw
+    jest.spyOn(inspector, "extractSchema").mockImplementation(() => {
+      throw new Error("test explosion");
+    });
+
+    await expect(
+      inspector.trackSchemaFromEvent(eventName, properties)
+    ).rejects.toBe(
+      "Avo Inspector: something went wrong. Please report to support@avo.app."
+    );
+
+    consoleErrorSpy.mockRestore();
+    (inspector.extractSchema as jest.Mock).mockRestore();
   });
 });

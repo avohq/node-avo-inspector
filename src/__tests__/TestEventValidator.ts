@@ -101,6 +101,51 @@ describe("EventValidator", () => {
       expect(urlResult?.failedEventIds).toEqual([]);
     });
 
+    test("fails when value does not match safe regex pattern", () => {
+      const spec: EventSpec = {
+        eventName: "navigate",
+        properties: [
+          {
+            propertyName: "url",
+            propertyType: "string",
+            regex: "^https://",
+          },
+        ],
+      };
+      const eventProperties = [
+        { propertyName: "url", propertyType: "string", propertyValue: "http://example.com" },
+      ];
+
+      const results = validator.validate(spec, eventProperties, "evt-regex-fail");
+      const urlResult = results.find((r: PropertyValidationResult) => r.propertyName === "url");
+      expect(urlResult?.failedEventIds).toContain("evt-regex-fail");
+      expect(urlResult?.passedEventIds).not.toContain("evt-regex-fail");
+    });
+
+    test("logs warning and passes type check when regex syntax is invalid", () => {
+      const spec: EventSpec = {
+        eventName: "filter",
+        properties: [
+          {
+            propertyName: "pattern",
+            propertyType: "string",
+            regex: "[invalid",
+          },
+        ],
+      };
+      const eventProperties = [
+        { propertyName: "pattern", propertyType: "string", propertyValue: "anything" },
+      ];
+
+      const results = validator.validate(spec, eventProperties, "evt-bad-regex");
+      const patternResult = results.find((r: PropertyValidationResult) => r.propertyName === "pattern");
+      // Invalid regex is caught, property still passes type check
+      expect(patternResult?.failedEventIds).toEqual([]);
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining("[Avo Inspector] Warning")
+      );
+    });
+
     test("skips unsafe regex patterns with warning", () => {
       const spec: EventSpec = {
         eventName: "search",
@@ -125,6 +170,29 @@ describe("EventValidator", () => {
       expect(console.warn).toHaveBeenCalledWith(
         expect.stringContaining("[Avo Inspector] Warning")
       );
+    });
+  });
+
+  describe("extra/unexpected properties", () => {
+    test("ignores properties present in event but not in the spec", () => {
+      const spec: EventSpec = {
+        eventName: "click",
+        properties: [
+          { propertyName: "target", propertyType: "string" },
+        ],
+      };
+      const eventProperties = [
+        { propertyName: "target", propertyType: "string" },
+        { propertyName: "extraProp", propertyType: "int" },
+        { propertyName: "anotherExtra", propertyType: "boolean" },
+      ];
+
+      const results = validator.validate(spec, eventProperties, "evt-extra");
+      // Only spec properties get results — extra properties are not reported
+      expect(results).toHaveLength(1);
+      expect(results[0].propertyName).toBe("target");
+      expect(results.find((r: PropertyValidationResult) => r.propertyName === "extraProp")).toBeUndefined();
+      expect(results.find((r: PropertyValidationResult) => r.propertyName === "anotherExtra")).toBeUndefined();
     });
   });
 

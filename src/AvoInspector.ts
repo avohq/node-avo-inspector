@@ -3,6 +3,10 @@ import { AvoSchemaParser } from "./AvoSchemaParser";
 import { AvoNetworkCallsHandler } from "./AvoNetworkCallsHandler";
 import { AvoDeduplicator } from "./AvoDeduplicator";
 import { AvoStreamId } from "./AvoStreamId";
+import { AvoEventSpecFetcher } from "./eventSpec/AvoEventSpecFetcher";
+import { AvoEventSpecCache } from "./eventSpec/AvoEventSpecCache";
+import { EventValidator } from "./eventSpec/EventValidator";
+import { EventSpecResponse } from "./eventSpec/AvoEventSpecFetchTypes";
 
 import { isValueEmpty } from "./utils";
 
@@ -14,7 +18,11 @@ export class AvoInspector {
   avoDeduplicator: AvoDeduplicator;
   apiKey: string;
   version: string;
-  publicEncryptionKey?: string;
+  private publicEncryptionKey?: string;
+
+  private eventSpecFetcher: AvoEventSpecFetcher | null = null;
+  private eventSpecCache: AvoEventSpecCache | null = null;
+  private eventValidator: EventValidator | null = null;
 
   private static _shouldLog = false;
   static get shouldLog() {
@@ -79,6 +87,13 @@ export class AvoInspector {
       this.publicEncryptionKey
     );
     this.avoDeduplicator = new AvoDeduplicator();
+
+    // Initialize event spec validation for dev/staging only
+    if (this.environment !== AvoInspectorEnv.Prod) {
+      this.eventSpecFetcher = new AvoEventSpecFetcher(this.apiKey);
+      this.eventSpecCache = new AvoEventSpecCache();
+      this.eventValidator = new EventValidator();
+    }
   }
 
   trackSchemaFromEvent(
@@ -112,6 +127,10 @@ export class AvoInspector {
           );
         }
         let eventSchema = this.extractSchema(eventProperties, false);
+
+        // Fire-and-forget: validate against event spec (dev/staging only)
+        this.fetchAndValidateAsync(eventName, eventSchema, anonymousId, eventProperties);
+
         return this.trackSchemaInternal(
           eventName,
           eventSchema,
@@ -168,6 +187,10 @@ export class AvoInspector {
           );
         }
         let eventSchema = this.extractSchema(eventProperties, false);
+
+        // Fire-and-forget: validate against event spec (dev/staging only)
+        this.fetchAndValidateAsync(eventName, eventSchema, "", eventProperties);
+
         return this.trackSchemaInternal(
           eventName,
           eventSchema,
@@ -265,5 +288,84 @@ export class AvoInspector {
       );
       return [];
     }
+  }
+
+  private fetchAndValidateAsync(
+    eventName: string,
+    eventSchema: Array<{
+      propertyName: string;
+      propertyType: string;
+      children?: any;
+    }>,
+    anonymousId: string,
+    rawEventProperties?: { [propName: string]: any }
+  ): void {
+    if (!this.eventSpecFetcher || !this.eventSpecCache || !this.eventValidator) {
+      return;
+    }
+
+    const cacheKey = AvoEventSpecCache.makeKey(this.apiKey, anonymousId, eventName);
+    const fetcher = this.eventSpecFetcher;
+    const cache = this.eventSpecCache;
+    const validator = this.eventValidator;
+    const networkHandler = this.avoNetworkCallsHandler;
+
+    const validateAndSend = (specResponse: EventSpecResponse) => {
+      if (specResponse.eventSpec === null) {
+        return;
+      }
+
+      const eventProperties = eventSchema.map((prop) => ({
+        propertyName: prop.propertyName,
+        propertyType: prop.propertyType,
+        ...(rawEventProperties && rawEventProperties[prop.propertyName] !== undefined
+          ? { propertyValue: String(rawEventProperties[prop.propertyName]) }
+          : {}),
+      }));
+
+      const results = validator.validate(
+        specResponse.eventSpec,
+        eventProperties,
+        eventName
+      );
+
+      networkHandler.callInspectorWithBatchBody([
+        networkHandler.bodyForValidatedEventSchemaCall(
+          anonymousId,
+          eventName,
+          specResponse.metadata,
+          results
+        ),
+      ]).catch(() => {
+        // Fire-and-forget: validation send failures are non-critical
+      });
+    };
+
+    if (cache.contains(cacheKey)) {
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        validateAndSend(cached);
+      }
+      return;
+    }
+
+    fetcher.fetch(eventName, anonymousId, (result) => {
+      if (result !== null) {
+        cache.set(cacheKey, result);
+        validateAndSend(result);
+      }
+    });
+  }
+
+  destroy(): void {
+    if (this.eventSpecFetcher) {
+      this.eventSpecFetcher.destroy();
+      this.eventSpecFetcher = null;
+    }
+    if (this.eventSpecCache) {
+      this.eventSpecCache.flush();
+      this.eventSpecCache = null;
+    }
+    this.eventValidator = null;
   }
 }
