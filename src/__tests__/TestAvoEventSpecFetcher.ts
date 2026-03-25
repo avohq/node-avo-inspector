@@ -18,6 +18,7 @@ class MockIncomingMessage extends EventEmitter {
 class MockClientRequest extends EventEmitter {
   end = jest.fn();
   destroy = jest.fn();
+  setTimeout = jest.fn();
 }
 
 function setupMockRequest(
@@ -142,6 +143,7 @@ describe("AvoEventSpecFetcher", () => {
       callCount++;
       expect(result).toBeNull();
       if (callCount === 2) {
+        expect(mockedHttps.request).toHaveBeenCalledTimes(1);
         done();
       }
     };

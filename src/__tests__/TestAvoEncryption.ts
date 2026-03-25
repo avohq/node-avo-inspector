@@ -5,7 +5,7 @@ import { AvoInspectorEnv } from "../AvoInspectorEnv";
 import { AvoGuid } from "../AvoGuid";
 import { mockedReturns } from "./constants";
 
-// A fixed test key pair for deterministic tests
+// Generate a test key pair for encryption tests
 function generateTestKeyPair() {
   const ecdh = crypto.createECDH("prime256v1");
   ecdh.generateKeys();
@@ -18,16 +18,18 @@ function generateTestKeyPair() {
 
 describe("AvoEncryption", () => {
   describe("shouldEncrypt", () => {
+    const dummyHexKey = "deadbeef";
+
     test("dev + key => true", () => {
-      expect(AvoEncryption.shouldEncrypt(AvoInspectorEnv.Dev, "some-base64-key")).toBe(true);
+      expect(AvoEncryption.shouldEncrypt(AvoInspectorEnv.Dev, dummyHexKey)).toBe(true);
     });
 
     test("staging + key => true", () => {
-      expect(AvoEncryption.shouldEncrypt(AvoInspectorEnv.Staging, "some-base64-key")).toBe(true);
+      expect(AvoEncryption.shouldEncrypt(AvoInspectorEnv.Staging, dummyHexKey)).toBe(true);
     });
 
     test("prod + key => false", () => {
-      expect(AvoEncryption.shouldEncrypt(AvoInspectorEnv.Prod, "some-base64-key")).toBe(false);
+      expect(AvoEncryption.shouldEncrypt(AvoInspectorEnv.Prod, dummyHexKey)).toBe(false);
     });
 
     test("dev + null => false", () => {
@@ -162,7 +164,7 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
   });
 
   test("publicEncryptionKey included in base body when non-null and non-empty", () => {
-    const pubKey = "test-public-key-base64";
+    const pubKey = "deadbeef";
     const handler = new AvoNetworkCallsHandler(
       "api-key",
       AvoInspectorEnv.Dev,

@@ -236,9 +236,6 @@ export class AvoInspector {
       }
     } catch (err) {
       console.error("Avo Inspector: schema sending failed: " + err + ".");
-      if (AvoInspector.shouldLog) {
-        console.log("Avo Inspector: schema sending failed: " + err + ".");
-      }
     }
   }
 
@@ -249,6 +246,20 @@ export class AvoInspector {
     );
   }
 
+  /**
+   * Opt-in async validation API — does NOT run automatically from trackSchemaFromEvent.
+   * Fetches backend event specs via eventSpecFetcher and validates locally extracted
+   * schemas against them. Only performs work when isSpecValidationEnabled() is true
+   * (Dev/Staging environments).
+   *
+   * On cache hit, validation runs synchronously. On cache miss, an async fetch is
+   * performed and the result is cached for subsequent calls.
+   *
+   * Call this after trackSchemaFromEvent when you want to validate the extracted
+   * schema against backend specs.
+   *
+   * @returns A Promise that resolves when validation/fetch completes.
+   */
   async fetchAndValidateAsync(
     eventName: string,
     eventSchema: Array<{
@@ -283,6 +294,9 @@ export class AvoInspector {
         if (result !== null) {
           cache.set(cacheKey, result);
           this.validateAndReport(result, eventName, eventSchema, streamId, validator);
+        } else {
+          // Cache null with a short TTL to avoid hammering the endpoint on persistent failures
+          cache.set(cacheKey, null);
         }
         resolve();
       });

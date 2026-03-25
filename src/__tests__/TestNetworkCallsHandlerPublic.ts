@@ -132,10 +132,12 @@ describe("AvoNetworkCallsHandler", () => {
   });
 
   test("an error is logged if event schema call fails and AvoInspector.shouldLog is true", async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     inspectorCallSpy.mockRejectedValueOnce('Network error');
 
     await inspector.trackSchemaFromEvent(eventName, properties);
 
-    expect(consoleLogSpy).toHaveBeenCalledWith('Avo Inspector: schema sending failed: Network error.');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Avo Inspector: schema sending failed: Network error.');
+    consoleErrorSpy.mockRestore();
   });
 });

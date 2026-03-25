@@ -99,7 +99,7 @@ export class AvoNetworkCallsHandler {
       });
     }
 
-    return new Promise(function (resolve, reject) {
+    return new Promise((resolve, reject) => {
       const data = JSON.stringify(events);
       var options = {
         hostname: "api.avo.app",

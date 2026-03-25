@@ -69,6 +69,7 @@ export class AvoEventSpecFetcher {
       this.resolveCallbacks(dedupeKey, null);
     });
 
+    req.setTimeout(10_000);
     req.on("timeout", () => {
       req.destroy();
       this.resolveCallbacks(dedupeKey, null);

@@ -29,11 +29,14 @@ describe("fetchAndValidateAsync integration", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (AvoEventSpecCache.makeKey as jest.Mock).mockImplementation(
+      (apiKey: string, streamId: string, eventName: string) =>
+        `${apiKey}:${streamId}:${eventName}`
+    );
     (AvoEventSpecCache as unknown as jest.Mock).mockImplementation(() => ({
       get: jest.fn().mockReturnValue(undefined),
       set: jest.fn(),
       flush: jest.fn(),
-      makeKey: jest.fn(),
     }));
     (AvoEventSpecFetcher as unknown as jest.Mock).mockImplementation(() => ({
       fetch: jest.fn(),
