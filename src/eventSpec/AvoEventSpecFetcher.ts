@@ -55,6 +55,10 @@ export class AvoEventSpecFetcher {
       res.on("data", (data: Buffer) => chunks.push(data));
       res.on("end", () => {
         let result: EventSpecResponse | null = null;
+        if (res.statusCode !== 200) {
+          this.resolveCallbacks(dedupeKey, null);
+          return;
+        }
         try {
           const body = Buffer.concat(chunks).toString();
           result = JSON.parse(body) as EventSpecResponse;

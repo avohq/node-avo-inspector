@@ -99,6 +99,14 @@ export class AvoInspector {
     }
   }
 
+  /**
+   * Releases resources held by the inspector (e.g., HTTP keep-alive connections).
+   * Call this when the inspector instance is no longer needed.
+   */
+  destroy(): void {
+    this.eventSpecFetcher?.destroy();
+  }
+
   trackSchemaFromEvent(
     eventName: string,
     eventProperties: { [propName: string]: any },

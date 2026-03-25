@@ -125,10 +125,12 @@ export class AvoNetworkCallsHandler {
         });
       });
       req.write(data);
+      req.setTimeout(10_000);
       req.on("error", () => {
         reject("Request failed");
       });
       req.on("timeout", () => {
+        req.destroy();
         reject("Request timed out");
       });
       req.end();
