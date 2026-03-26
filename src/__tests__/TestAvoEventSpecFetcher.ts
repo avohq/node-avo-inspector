@@ -21,6 +21,22 @@ class MockClientRequest extends EventEmitter {
   setTimeout = jest.fn();
 }
 
+/** Build a wire-format response body matching the /trackingPlan/eventSpec API */
+function wireResponse(
+  eventName: string,
+  properties: Record<string, { t: string }>,
+  metadata: { schemaId: string; branchId: string; latestActionId: string; sourceId: string }
+) {
+  const p: Record<string, any> = {};
+  for (const [name, constraint] of Object.entries(properties)) {
+    p[name] = { t: constraint.t, r: true };
+  }
+  return {
+    events: [{ b: metadata.branchId, id: "evt1", vids: [], p }],
+    metadata,
+  };
+}
+
 function setupMockRequest(
   responseStatusCode: number,
   responseBody: any
@@ -67,23 +83,21 @@ describe("AvoEventSpecFetcher", () => {
   });
 
   test("fetches event spec via HTTPS GET", (done) => {
-    const specResponse: EventSpecResponse = {
+    const metadata = { schemaId: "s1", branchId: "b1", latestActionId: "a1", sourceId: "src1" };
+    const wire = wireResponse("click", { target: { t: "string" } }, metadata);
+
+    const expectedParsed: EventSpecResponse = {
       eventSpec: {
         eventName: "click",
         properties: [{ propertyName: "target", propertyType: "string" }],
       },
-      metadata: {
-        schemaId: "s1",
-        branchId: "b1",
-        latestActionId: "a1",
-        sourceId: "src1",
-      },
+      metadata,
     };
 
-    setupMockRequest(200, specResponse);
+    setupMockRequest(200, wire);
 
     fetcher.fetch("click", "stream1", (result) => {
-      expect(result).toEqual(specResponse);
+      expect(result).toEqual(expectedParsed);
       expect(mockedHttps.request).toHaveBeenCalledTimes(1);
 
       const callArgs = (mockedHttps.request as jest.Mock).mock.calls[0][0];
@@ -94,17 +108,12 @@ describe("AvoEventSpecFetcher", () => {
   });
 
   test("in-flight dedup: exactly ONE https.request for concurrent same-key events", (done) => {
-    const specResponse: EventSpecResponse = {
-      eventSpec: {
-        eventName: "purchase",
-        properties: [],
-      },
-      metadata: {
-        schemaId: "s1",
-        branchId: "b1",
-        latestActionId: "a1",
-        sourceId: "src1",
-      },
+    const metadata = { schemaId: "s1", branchId: "b1", latestActionId: "a1", sourceId: "src1" };
+    const wire = wireResponse("purchase", {}, metadata);
+
+    const expectedParsed: EventSpecResponse = {
+      eventSpec: { eventName: "purchase", properties: [] },
+      metadata,
     };
 
     // Delay the response so both calls are in-flight
@@ -116,7 +125,7 @@ describe("AvoEventSpecFetcher", () => {
         // Defer the response
         setTimeout(() => {
           callback(mockRes);
-          const data = JSON.stringify(specResponse);
+          const data = JSON.stringify(wire);
           mockRes.emit("data", Buffer.from(data));
           mockRes.emit("end");
         }, 10);
@@ -127,7 +136,7 @@ describe("AvoEventSpecFetcher", () => {
     let callCount = 0;
     const checkDone = (result: EventSpecResponse | null) => {
       callCount++;
-      expect(result).toEqual(specResponse);
+      expect(result).toEqual(expectedParsed);
       if (callCount === 2) {
         // Only ONE actual https.request
         expect(mockedHttps.request).toHaveBeenCalledTimes(1);
@@ -207,17 +216,15 @@ describe("AvoEventSpecFetcher", () => {
   });
 
   test("separate keys make separate requests", (done) => {
-    const spec1: EventSpecResponse = {
+    const metadata = { schemaId: "s1", branchId: "b1", latestActionId: "a1", sourceId: "src1" };
+    const wire = wireResponse("click", {}, metadata);
+
+    const expectedParsed: EventSpecResponse = {
       eventSpec: { eventName: "click", properties: [] },
-      metadata: {
-        schemaId: "s1",
-        branchId: "b1",
-        latestActionId: "a1",
-        sourceId: "src1",
-      },
+      metadata,
     };
 
-    setupMockRequest(200, spec1);
+    setupMockRequest(200, wire);
 
     let callCount = 0;
     const checkDone = () => {
@@ -229,7 +236,7 @@ describe("AvoEventSpecFetcher", () => {
     };
 
     fetcher.fetch("click", "stream1", (result) => {
-      expect(result).toEqual(spec1);
+      expect(result).toEqual(expectedParsed);
       checkDone();
     });
 
@@ -237,5 +244,36 @@ describe("AvoEventSpecFetcher", () => {
       // Both resolve with the same mock but that's fine for this test
       checkDone();
     });
+  });
+
+  test("parseWireResponse transforms wire format correctly", () => {
+    const wire = {
+      events: [{
+        b: "main",
+        id: "evt1",
+        vids: [],
+        p: {
+          "Cli Action": { t: "string", r: true, v: { '["Status","Pull"]': ["evt1"] } },
+          "Client": { t: "string", r: true },
+        },
+      }],
+      metadata: { schemaId: "s1", branchId: "main", latestActionId: "a1", sourceId: "src1" },
+    };
+
+    const result = AvoEventSpecFetcher.parseWireResponse(wire, "Cli Invoked");
+
+    expect(result.metadata).toEqual({ schemaId: "s1", branchId: "main", latestActionId: "a1", sourceId: "src1" });
+    expect(result.eventSpec).not.toBeNull();
+    expect(result.eventSpec!.eventName).toBe("Cli Invoked");
+    expect(result.eventSpec!.properties).toEqual([
+      { propertyName: "Cli Action", propertyType: "string" },
+      { propertyName: "Client", propertyType: "string" },
+    ]);
+  });
+
+  test("parseWireResponse returns null eventSpec for empty events array", () => {
+    const wire = { events: [], metadata: { schemaId: "s1", branchId: "b1", latestActionId: "a1", sourceId: "src1" } };
+    const result = AvoEventSpecFetcher.parseWireResponse(wire, "test");
+    expect(result.eventSpec).toBeNull();
   });
 });

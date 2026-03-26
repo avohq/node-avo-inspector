@@ -332,10 +332,26 @@ describe("Initialization", () => {
     consoleWarnSpy.mockRestore();
   });
 
-  test("does not warn when publicEncryptionKey is a valid 130-char hex key in dev/staging", () => {
+  test("does not warn when publicEncryptionKey is a valid 130-char uncompressed hex key in dev/staging", () => {
     const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
     const validKey = "04" + "ab".repeat(64); // 2 + 128 = 130 hex chars
+
+    new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+      publicEncryptionKey: validKey,
+    });
+
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
+    consoleWarnSpy.mockRestore();
+  });
+
+  test("does not warn when publicEncryptionKey is a valid 66-char compressed hex key in dev/staging", () => {
+    const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const validKey = "02" + "4e".repeat(32); // 2 + 64 = 66 hex chars
 
     new AvoInspector({
       apiKey: "api-key-xxx",

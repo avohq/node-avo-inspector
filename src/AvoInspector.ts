@@ -23,6 +23,28 @@ export class AvoInspector {
   private eventSpecFetcher: AvoEventSpecFetcher | null = null;
   private eventSpecCache: AvoEventSpecCache | null = null;
   private eventValidator: EventValidator | null = null;
+  private generatedAnonymousId: string = "";
+
+  // Keep the Node process alive while there are pending inspector operations.
+  // Without this, short-lived processes (e.g. CLIs) can exit before async
+  // sends complete, since the caller typically doesn't await the inspector promise.
+  private pendingCount = 0;
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+
+  private trackPending(promise: Promise<any>): void {
+    this.pendingCount++;
+    if (this.keepAliveTimer === null) {
+      this.keepAliveTimer = setInterval(() => {}, 60_000);
+    }
+    const done = () => {
+      this.pendingCount--;
+      if (this.pendingCount === 0 && this.keepAliveTimer !== null) {
+        clearInterval(this.keepAliveTimer);
+        this.keepAliveTimer = null;
+      }
+    };
+    promise.then(done, done);
+  }
 
   private static _shouldLog = false;
   static get shouldLog() {
@@ -77,9 +99,12 @@ export class AvoInspector {
       this.environment !== AvoInspectorEnv.Prod
     ) {
       const hexPattern = /^[0-9a-fA-F]+$/;
-      if (!hexPattern.test(this.publicEncryptionKey) || this.publicEncryptionKey.length !== 130) {
+      const len = this.publicEncryptionKey.length;
+      // Accept both compressed (66 hex chars, prefix 02/03) and uncompressed (130 hex chars, prefix 04) P-256 keys
+      const isValidLength = len === 66 || len === 130;
+      if (!hexPattern.test(this.publicEncryptionKey) || !isValidLength) {
         console.warn(
-          "[Avo Inspector] Warning: publicEncryptionKey does not look like a valid uncompressed P-256 public key (expected 130 hex characters). Encryption may fail."
+          "[Avo Inspector] Warning: publicEncryptionKey does not look like a valid P-256 public key (expected 66 or 130 hex characters). Encryption may fail."
         );
       }
     }
@@ -121,7 +146,7 @@ export class AvoInspector {
   > {
     try {
       const avoStreamId = new AvoStreamId(streamId);
-      const anonymousId = avoStreamId.streamId;
+      const anonymousId = avoStreamId.streamId || this.generatedAnonymousId;
 
       if (
         this.avoDeduplicator.shouldRegisterEvent(
@@ -132,18 +157,15 @@ export class AvoInspector {
       ) {
         if (AvoInspector.shouldLog) {
           console.log(
-            "Avo Inspector: supplied event " +
+            "Avo Inspector: Supplied event " +
             eventName +
-            " with params " +
+            " with params \n" +
             JSON.stringify(eventProperties)
           );
         }
         let eventSchema = this.extractSchema(eventProperties, false);
 
-        // Fire-and-forget: validate against event spec (dev/staging only)
-        this.fetchAndValidateAsync(eventName, eventSchema, anonymousId, eventProperties);
-
-        return this.trackSchemaInternal(
+        return this.sendEventWithOptionalValidation(
           eventName,
           eventSchema,
           null,
@@ -155,7 +177,7 @@ export class AvoInspector {
         });
       } else {
         if (AvoInspector.shouldLog) {
-          console.log("Avo Inspector: Deduplicated event: " + eventName);
+          console.log("Avo Inspector: Deduplicated event " + eventName);
         }
         return Promise.resolve([]);
       }
@@ -184,6 +206,8 @@ export class AvoInspector {
     }>
   > {
     try {
+      const anonymousId = (streamId && streamId.length > 0) ? streamId : this.generatedAnonymousId;
+
       if (
         this.avoDeduplicator.shouldRegisterEvent(
           eventName,
@@ -193,31 +217,27 @@ export class AvoInspector {
       ) {
         if (AvoInspector.shouldLog) {
           console.log(
-            "Avo Inspector: supplied event " +
+            "Avo Inspector: Supplied event " +
             eventName +
-            " with params " +
+            " with params \n" +
             JSON.stringify(eventProperties)
           );
         }
         let eventSchema = this.extractSchema(eventProperties, false);
-        const avoStreamId = new AvoStreamId(streamId);
 
-        // Fire-and-forget: validate against event spec (dev/staging only)
-        this.fetchAndValidateAsync(eventName, eventSchema, avoStreamId.streamId, eventProperties);
-
-        return this.trackSchemaInternal(
+        return this.sendEventWithOptionalValidation(
           eventName,
           eventSchema,
           eventId,
           eventHash,
-          avoStreamId.streamId,
+          anonymousId,
           eventProperties
         ).then(() => {
           return eventSchema;
         });
       } else {
         if (AvoInspector.shouldLog) {
-          console.log("Avo Inspector: Deduplicated event: " + eventName);
+          console.log("Avo Inspector: Deduplicated event " + eventName);
         }
         return Promise.resolve([]);
       }
@@ -232,7 +252,16 @@ export class AvoInspector {
     }
   }
 
-  private async trackSchemaInternal(
+  /**
+   * Try to fetch event spec and validate, then send a single event call.
+   * If validation succeeds, sends a validated event (with results merged in).
+   * If unavailable, sends a plain event.
+   *
+   * Uses trackPending() to keep the Node process alive until the work completes,
+   * so short-lived processes (CLIs) don't exit before the send finishes — even
+   * when the caller doesn't await the returned promise.
+   */
+  private sendEventWithOptionalValidation(
     eventName: string,
     eventSchema: Array<{
       propertyName: string;
@@ -244,18 +273,59 @@ export class AvoInspector {
     anonymousId: string,
     rawEventProperties?: { [propName: string]: any }
   ): Promise<void> {
+    const work = this.doSendEventWithOptionalValidation(
+      eventName, eventSchema, eventId, eventHash, anonymousId, rawEventProperties
+    );
+    this.trackPending(work);
+    return work;
+  }
+
+  private async doSendEventWithOptionalValidation(
+    eventName: string,
+    eventSchema: Array<{
+      propertyName: string;
+      propertyType: string;
+      children?: any;
+    }>,
+    eventId: string | null,
+    eventHash: string | null,
+    anonymousId: string,
+    rawEventProperties?: { [propName: string]: any }
+  ): Promise<void> {
+    const validationResult = await this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties);
+
     try {
-      await this.avoNetworkCallsHandler.callInspectorWithBatchBody([
-        this.avoNetworkCallsHandler.bodyForEventSchemaCall(
+      let body;
+      if (validationResult) {
+        if (AvoInspector.shouldLog) {
+          console.log("Avo Inspector: Sending validated event " + eventName);
+        }
+        const eventProps = this.avoNetworkCallsHandler.buildEventProperties(eventSchema, rawEventProperties);
+        body = this.avoNetworkCallsHandler.bodyForValidatedEventSchemaCall(
+          anonymousId,
+          eventName,
+          eventProps,
+          eventId,
+          eventHash,
+          validationResult.metadata,
+          validationResult.propertyResults
+        );
+      } else {
+        body = this.avoNetworkCallsHandler.bodyForEventSchemaCall(
           anonymousId,
           eventName,
           eventSchema,
           eventId,
           eventHash,
           rawEventProperties
-        )]);
+        );
+      }
+
+      await this.avoNetworkCallsHandler.callInspectorWithBatchBody([body]);
+
       if (AvoInspector.shouldLog) {
-        console.log("Avo Inspector: schema sent successfully.");
+        const schemaString = eventSchema.map(p => '\t"' + p.propertyName + '": "' + p.propertyType + '"').join(";\n");
+        console.log("Avo Inspector: Saved event " + eventName + " with schema {\n" + schemaString + "\n}");
       }
     } catch (err) {
       console.error("Avo Inspector: schema sending failed: " + err + ".");
@@ -294,7 +364,14 @@ export class AvoInspector {
         );
       }
 
-      return AvoSchemaParser.extractSchema(eventProperties);
+      const schema = AvoSchemaParser.extractSchema(eventProperties);
+
+      if (AvoInspector.shouldLog) {
+        const schemaString = schema.map(p => '\t"' + p.propertyName + '": "' + p.propertyType + '"').join(";\n");
+        console.log("Avo Inspector: Parsed schema {\n" + schemaString + "\n}");
+      }
+
+      return schema;
     } catch (e) {
       console.error(
         "Avo Inspector: something went wrong. Please report to support@avo.app.",
@@ -304,7 +381,11 @@ export class AvoInspector {
     }
   }
 
-  private fetchAndValidateAsync(
+  /**
+   * Fetch event spec and validate. Returns validation results + metadata if
+   * validation succeeds, or null if unavailable (prod, no spec, fetch error).
+   */
+  private async fetchAndValidate(
     eventName: string,
     eventSchema: Array<{
       propertyName: string;
@@ -313,20 +394,27 @@ export class AvoInspector {
     }>,
     anonymousId: string,
     rawEventProperties?: { [propName: string]: any }
-  ): void {
+  ): Promise<{ metadata: import("./eventSpec/AvoEventSpecFetchTypes").EventSpecMetadata; propertyResults: import("./eventSpec/AvoEventSpecFetchTypes").PropertyValidationResult[] } | null> {
     if (!this.eventSpecFetcher || !this.eventSpecCache || !this.eventValidator) {
-      return;
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: Skipping event spec validation for event: " + eventName
+          + " (fetcher=" + (this.eventSpecFetcher != null)
+          + ", cache=" + (this.eventSpecCache != null)
+          + ", env=" + this.environment + ")");
+      }
+      return null;
     }
 
     const cacheKey = AvoEventSpecCache.makeKey(this.apiKey, anonymousId, eventName);
-    const fetcher = this.eventSpecFetcher;
     const cache = this.eventSpecCache;
     const validator = this.eventValidator;
-    const networkHandler = this.avoNetworkCallsHandler;
 
-    const validateAndSend = (specResponse: EventSpecResponse) => {
+    const doValidate = (specResponse: EventSpecResponse) => {
       if (specResponse.eventSpec === null) {
-        return;
+        if (AvoInspector.shouldLog) {
+          console.log("Avo Inspector: Event spec fetch returned null for event: " + eventName + ". Sending without validation.");
+        }
+        return null;
       }
 
       const eventProperties = eventSchema.map((prop) => ({
@@ -337,35 +425,53 @@ export class AvoInspector {
           : {}),
       }));
 
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: Validating event: " + eventName
+          + " with " + eventProperties.length + " properties"
+          + " against " + specResponse.eventSpec.properties.length + " spec properties");
+      }
+
       const results = validator.validate(
         specResponse.eventSpec,
         eventProperties,
         eventName
       );
 
-      networkHandler.callInspectorWithBatchBody([
-        networkHandler.bodyForValidatedEventSchemaCall(
-          anonymousId,
-          eventName,
-          specResponse.metadata,
-          results
-        ),
-      ]).catch(() => {
-        // Fire-and-forget: validation send failures are non-critical
-      });
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: Validation complete for event: " + eventName
+          + " with " + results.length + " property results");
+      }
+
+      return { metadata: specResponse.metadata, propertyResults: results };
     };
 
+    // Check cache first
     const cached = cache.get(cacheKey);
     if (cached !== undefined) {
-      validateAndSend(cached);
-      return;
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: Event spec cache hit for event: " + eventName);
+      }
+      return doValidate(cached);
     }
 
-    fetcher.fetch(eventName, anonymousId, (result) => {
-      if (result !== null) {
-        cache.set(cacheKey, result);
-        validateAndSend(result);
-      }
+    // Cache miss — fetch spec (process stays alive via trackPending)
+    if (AvoInspector.shouldLog) {
+      console.log("Avo Inspector: Event spec cache miss for event: " + eventName + ". Fetching before sending.");
+    }
+
+    const fetcher = this.eventSpecFetcher;
+    return new Promise((resolve) => {
+      fetcher.fetch(eventName, anonymousId, (result) => {
+        if (result !== null) {
+          cache.set(cacheKey, result);
+          resolve(doValidate(result));
+        } else {
+          if (AvoInspector.shouldLog) {
+            console.log("Avo Inspector: Event spec fetch returned null for event: " + eventName + ". Cached empty response. Sending without validation.");
+          }
+          resolve(null);
+        }
+      });
     });
   }
 

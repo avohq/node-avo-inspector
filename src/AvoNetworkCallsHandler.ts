@@ -12,6 +12,8 @@ export interface BaseBody {
   env: string;
   libPlatform: "node";
   messageId: string;
+  trackingId: string;
+  sessionId: string;
   anonymousId: string;
   createdAt: string;
   samplingRate: number;
@@ -31,7 +33,12 @@ export interface EventPropertyPlain {
   children?: any;
 }
 
-export type EventProperty = EventPropertyEncrypted | EventPropertyPlain;
+export interface EventPropertyValidation {
+  failedEventIds?: string[];
+  passedEventIds?: string[];
+}
+
+export type EventProperty = (EventPropertyEncrypted | EventPropertyPlain) & EventPropertyValidation;
 
 export interface EventSchemaBody extends BaseBody {
   type: "event";
@@ -40,16 +47,11 @@ export interface EventSchemaBody extends BaseBody {
   avoFunction: boolean;
   eventId: string | null;
   eventHash: string | null;
+  streamId?: string;
+  eventSpecMetadata?: EventSpecMetadata;
 }
 
-export interface ValidatedEventSchemaBody extends BaseBody {
-  type: "validatedEvent";
-  eventName: string;
-  eventSpecMetadata: EventSpecMetadata;
-  propertyResults: PropertyValidationResult[];
-}
-
-export type InspectorBody = EventSchemaBody | ValidatedEventSchemaBody;
+export type InspectorBody = EventSchemaBody;
 
 export class AvoNetworkCallsHandler {
   private apiKey: string;
@@ -98,24 +100,15 @@ export class AvoNetworkCallsHandler {
 
     if (AvoInspector.shouldLog) {
       events.forEach(function (event) {
-        if (event.type === "event") {
-          let schemaEvent: EventSchemaBody = event;
-          console.log(
-            "Avo Inspector: sending event " +
-              schemaEvent.eventName +
-              " with schema " +
-              JSON.stringify(schemaEvent.eventProperties)
-          );
-        } else if (event.type === "validatedEvent") {
-          let validatedEvent: ValidatedEventSchemaBody = event;
-          console.log(
-            "Avo Inspector: sending validated event " +
-              validatedEvent.eventName +
-              " with " +
-              validatedEvent.propertyResults.length +
-              " property results"
-          );
-        }
+        const eventProps = event.eventProperties
+          .map(p => '\t"' + p.propertyName + '": "' + p.propertyType + '"')
+          .join(";\n");
+        const validated = event.eventSpecMetadata ? " (validated)" : "";
+        console.log(
+          "Avo Inspector: Sending event " +
+            event.eventName + validated +
+            " with schema {\n" + eventProps + "\n}"
+        );
       });
     }
 
@@ -127,27 +120,53 @@ export class AvoNetworkCallsHandler {
         path: AvoNetworkCallsHandler.trackingEndpoint,
         method: "POST",
         headers: {
-          "Content-Type": "text/plain",
+          "Accept": "application/json",
+          "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(data),
         },
       };
+
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: [network] POST https://" + options.hostname + options.path);
+        console.log("Avo Inspector: [network] Request headers: " + JSON.stringify(options.headers));
+        console.log("Avo Inspector: [network] Request body (" + Buffer.byteLength(data) + " bytes): " + data);
+      }
+
       const req = request(options, (res: any) => {
+        if (AvoInspector.shouldLog) {
+          console.log("Avo Inspector: [network] Response status: " + res.statusCode + " " + res.statusMessage);
+          console.log("Avo Inspector: [network] Response headers: " + JSON.stringify(res.headers));
+        }
         const chunks: any = [];
         res.on("data", (data: any) => chunks.push(data));
         res.on("end", () => {
+          const responseBody = Buffer.concat(chunks).toString();
+          if (AvoInspector.shouldLog) {
+            console.log("Avo Inspector: [network] Response body: " + responseBody);
+          }
           try {
-            const data = JSON.parse(Buffer.concat(chunks).toString());
+            const data = JSON.parse(responseBody);
             this.samplingRate = data.samplingRate;
-          } catch (e) {}
+          } catch (e) {
+            if (AvoInspector.shouldLog) {
+              console.warn("Avo Inspector: [network] Failed to parse response JSON: " + e);
+            }
+          }
           resolve();
         });
       });
       req.write(data);
       req.setTimeout(10_000);
-      req.on("error", () => {
+      req.on("error", (err: any) => {
+        if (AvoInspector.shouldLog) {
+          console.error("Avo Inspector: [network] Request error: " + err);
+        }
         reject("Request failed");
       });
       req.on("timeout", () => {
+        if (AvoInspector.shouldLog) {
+          console.error("Avo Inspector: [network] Request timed out after 10s");
+        }
         req.destroy();
         reject("Request timed out");
       });
@@ -190,17 +209,68 @@ export class AvoNetworkCallsHandler {
     return eventSchemaBody;
   }
 
+  buildEventProperties(
+    eventProperties: Array<{
+      propertyName: string;
+      propertyType: string;
+      children?: any;
+    }>,
+    rawEventProperties?: { [propName: string]: any }
+  ): Array<EventProperty> {
+    if (AvoEncryption.shouldEncrypt(this.envName, this.publicEncryptionKey) && rawEventProperties) {
+      return this.encryptProperties(eventProperties, rawEventProperties);
+    }
+    return eventProperties;
+  }
+
   bodyForValidatedEventSchemaCall(
     anonymousId: string,
     eventName: string,
+    eventProperties: Array<EventProperty>,
+    eventId: string | null,
+    eventHash: string | null,
     eventSpecMetadata: EventSpecMetadata,
     propertyResults: PropertyValidationResult[]
-  ): ValidatedEventSchemaBody {
-    let body = this.createBaseCallBody(anonymousId) as ValidatedEventSchemaBody;
-    body.type = "validatedEvent";
+  ): EventSchemaBody {
+    // Build a map of validation results by property name
+    const validationMap = new Map<string, PropertyValidationResult>();
+    for (const result of propertyResults) {
+      validationMap.set(result.propertyName, result);
+    }
+
+    // Merge validation results into eventProperties (matching Android)
+    const mergedProperties: Array<EventProperty> = eventProperties.map((prop) => {
+      const validation = validationMap.get(prop.propertyName);
+      if (validation) {
+        const merged: EventProperty = { ...prop };
+        if (validation.failedEventIds.length > 0) {
+          merged.failedEventIds = validation.failedEventIds;
+        }
+        if (validation.passedEventIds.length > 0) {
+          merged.passedEventIds = validation.passedEventIds;
+        }
+        return merged;
+      }
+      return prop;
+    });
+
+    let body = this.createBaseCallBody(anonymousId) as EventSchemaBody;
+    body.type = "event";
     body.eventName = eventName;
+    body.eventProperties = mergedProperties;
+    body.streamId = anonymousId;
     body.eventSpecMetadata = eventSpecMetadata;
-    body.propertyResults = propertyResults;
+
+    if (eventId != null) {
+      body.avoFunction = true;
+      body.eventId = eventId;
+      body.eventHash = eventHash;
+    } else {
+      body.avoFunction = false;
+      body.eventId = null;
+      body.eventHash = null;
+    }
+
     return body;
   }
 
@@ -253,6 +323,8 @@ export class AvoNetworkCallsHandler {
       env: this.envName,
       libPlatform: "node",
       messageId: AvoGuid.newGuid(),
+      trackingId: "",
+      sessionId: "",
       anonymousId: anonymousId,
       createdAt: new Date().toISOString(),
       samplingRate: this.samplingRate,
