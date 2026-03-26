@@ -152,7 +152,8 @@ export class AvoInspector {
         this.avoDeduplicator.shouldRegisterEvent(
           eventName,
           eventProperties,
-          false
+          false,
+          anonymousId
         )
       ) {
         if (AvoInspector.shouldLog) {
@@ -212,7 +213,8 @@ export class AvoInspector {
         this.avoDeduplicator.shouldRegisterEvent(
           eventName,
           eventProperties,
-          true
+          true,
+          anonymousId
         )
       ) {
         if (AvoInspector.shouldLog) {
