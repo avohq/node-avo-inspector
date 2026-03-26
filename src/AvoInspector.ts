@@ -292,7 +292,7 @@ export class AvoInspector {
     anonymousId: string,
     rawEventProperties?: { [propName: string]: any }
   ): Promise<void> {
-    const validationResult = await this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties);
+    const validationResult = await this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId);
 
     try {
       let body;
@@ -393,7 +393,8 @@ export class AvoInspector {
       children?: any;
     }>,
     anonymousId: string,
-    rawEventProperties?: { [propName: string]: any }
+    rawEventProperties?: { [propName: string]: any },
+    eventId?: string | null
   ): Promise<{ metadata: import("./eventSpec/AvoEventSpecFetchTypes").EventSpecMetadata; propertyResults: import("./eventSpec/AvoEventSpecFetchTypes").PropertyValidationResult[] } | null> {
     if (!this.eventSpecFetcher || !this.eventSpecCache || !this.eventValidator) {
       if (AvoInspector.shouldLog) {
@@ -431,10 +432,11 @@ export class AvoInspector {
           + " against " + specResponse.eventSpec.properties.length + " spec properties");
       }
 
+      const validationId = eventId || eventName;
       const results = validator.validate(
         specResponse.eventSpec,
         eventProperties,
-        eventName
+        validationId
       );
 
       if (AvoInspector.shouldLog) {
@@ -485,5 +487,10 @@ export class AvoInspector {
       this.eventSpecCache = null;
     }
     this.eventValidator = null;
+    if (this.keepAliveTimer !== null) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
+    this.pendingCount = 0;
   }
 }

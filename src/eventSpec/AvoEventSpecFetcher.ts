@@ -52,7 +52,7 @@ export class AvoEventSpecFetcher {
     };
 
     if (AvoInspector.shouldLog) {
-      console.log("Avo Inspector: [network] GET https://" + options.hostname + options.path);
+      console.log("Avo Inspector: [network] GET https://" + options.hostname + AvoEventSpecFetcher.specEndpoint + "?eventName=" + encodeURIComponent(eventName));
     }
 
     const req = request(options, (res) => {

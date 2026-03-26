@@ -128,29 +128,30 @@ export class AvoNetworkCallsHandler {
 
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: [network] POST https://" + options.hostname + options.path);
-        console.log("Avo Inspector: [network] Request headers: " + JSON.stringify(options.headers));
-        console.log("Avo Inspector: [network] Request body (" + Buffer.byteLength(data) + " bytes): " + data);
+        console.log("Avo Inspector: [network] Request body (" + Buffer.byteLength(data) + " bytes)");
       }
 
       const req = request(options, (res: any) => {
         if (AvoInspector.shouldLog) {
           console.log("Avo Inspector: [network] Response status: " + res.statusCode + " " + res.statusMessage);
-          console.log("Avo Inspector: [network] Response headers: " + JSON.stringify(res.headers));
         }
         const chunks: any = [];
         res.on("data", (data: any) => chunks.push(data));
         res.on("end", () => {
-          const responseBody = Buffer.concat(chunks).toString();
-          if (AvoInspector.shouldLog) {
-            console.log("Avo Inspector: [network] Response body: " + responseBody);
-          }
-          try {
-            const data = JSON.parse(responseBody);
-            this.samplingRate = data.samplingRate;
-          } catch (e) {
-            if (AvoInspector.shouldLog) {
-              console.warn("Avo Inspector: [network] Failed to parse response JSON: " + e);
+          if (res.statusCode === 200) {
+            try {
+              const responseBody = Buffer.concat(chunks).toString();
+              const data = JSON.parse(responseBody);
+              if (typeof data.samplingRate === "number" && data.samplingRate >= 0 && data.samplingRate <= 1) {
+                this.samplingRate = data.samplingRate;
+              }
+            } catch (e) {
+              if (AvoInspector.shouldLog) {
+                console.warn("Avo Inspector: [network] Failed to parse response JSON: " + e);
+              }
             }
+          } else if (AvoInspector.shouldLog) {
+            console.warn("Avo Inspector: [network] Non-200 response: " + res.statusCode);
           }
           resolve();
         });

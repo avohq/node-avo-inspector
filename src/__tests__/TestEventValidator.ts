@@ -91,12 +91,12 @@ describe("EventValidator", () => {
         ],
       };
       const eventProperties = [
-        { propertyName: "url", propertyType: "string" },
+        { propertyName: "url", propertyType: "string", propertyValue: "https://example.com" },
       ];
 
       const results = validator.validate(spec, eventProperties, "evt-4");
       const urlResult = results.find((r: PropertyValidationResult) => r.propertyName === "url");
-      // Type matches, property passed. Bandwidth optimization: passedEventIds cleared
+      // Type matches and regex matches, property passed. Bandwidth optimization: passedEventIds cleared
       // because passed count (1) >= failed count (0)
       expect(urlResult?.failedEventIds).toEqual([]);
     });

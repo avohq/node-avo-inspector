@@ -69,6 +69,7 @@ export class AvoEventSpecCache {
 
     // Global rotation: evict LRU entry every MAX_EVENT_COUNT operations
     if (this.globalEventCount >= MAX_EVENT_COUNT) {
+      this.purgeExpired();
       this.evictLRU();
       this.globalEventCount = 0;
     }
@@ -89,6 +90,15 @@ export class AvoEventSpecCache {
   flush(): void {
     this.cache.clear();
     this.globalEventCount = 0;
+  }
+
+  private purgeExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache.entries()) {
+      if (now - entry.timestamp > TTL_MS) {
+        this.cache.delete(key);
+      }
+    }
   }
 
   private evictLRU(): void {
