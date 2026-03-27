@@ -5,33 +5,41 @@ export class AvoDeduplicator {
   manualEvents: { [time: number]: string } = {};
   private msToConsiderOld = 500;
 
+  // Keyed by streamId\0eventName to prevent cross-stream suppression on server
   avoFunctionsEventsParams: {
-    [eventName: string]: { [propName: string]: any };
+    [key: string]: { [propName: string]: any };
   } = {};
-  manualEventsParams: { [eventName: string]: { [propName: string]: any } } = {};
+  manualEventsParams: { [key: string]: { [propName: string]: any } } = {};
+
+  private static dedupKey(eventName: string, streamId: string): string {
+    return streamId + "\0" + eventName;
+  }
 
   shouldRegisterEvent(
     eventName: string,
     params: { [propName: string]: any },
-    fromAvoFunction: boolean
+    fromAvoFunction: boolean,
+    streamId: string = ""
   ): boolean {
     this.clearOldEvents();
 
+    const key = AvoDeduplicator.dedupKey(eventName, streamId);
+
     if (fromAvoFunction) {
-      this.avoFunctionsEvents[Date.now()] = eventName;
-      this.avoFunctionsEventsParams[eventName] = params;
+      this.avoFunctionsEvents[Date.now()] = key;
+      this.avoFunctionsEventsParams[key] = params;
     } else {
-      this.manualEvents[Date.now()] = eventName;
-      this.manualEventsParams[eventName] = params;
+      this.manualEvents[Date.now()] = key;
+      this.manualEventsParams[key] = params;
     }
 
     let checkInAvoFunctions = !fromAvoFunction;
 
-    return !this.hasSameEventAs(eventName, params, checkInAvoFunctions);
+    return !this.hasSameEventAs(key, params, checkInAvoFunctions);
   }
 
   private hasSameEventAs(
-    eventName: string,
+    key: string,
     params: { [propName: string]: any },
     checkInAvoFunctions: boolean
   ): boolean {
@@ -39,37 +47,33 @@ export class AvoDeduplicator {
 
     if (checkInAvoFunctions) {
       if (
-        this.lookForEventIn(eventName, params, this.avoFunctionsEventsParams)
+        this.lookForEventIn(key, params, this.avoFunctionsEventsParams)
       ) {
         result = true;
       }
     } else {
-      if (this.lookForEventIn(eventName, params, this.manualEventsParams)) {
+      if (this.lookForEventIn(key, params, this.manualEventsParams)) {
         result = true;
       }
     }
 
     if (result) {
-      delete this.avoFunctionsEventsParams[eventName];
-      delete this.manualEventsParams[eventName];
+      delete this.avoFunctionsEventsParams[key];
+      delete this.manualEventsParams[key];
     }
 
     return result;
   }
 
   private lookForEventIn(
-    eventName: string,
+    key: string,
     params: { [propName: string]: any },
-    eventsStorage: { [eventName: string]: { [propName: string]: any } }
+    eventsStorage: { [key: string]: { [propName: string]: any } }
   ): boolean {
-    for (const otherEventName in eventsStorage) {
-      if (eventsStorage.hasOwnProperty(otherEventName)) {
-        if (otherEventName === eventName) {
-          const otherParams = eventsStorage[eventName];
-          if (otherParams && deepEquals(params, otherParams)) {
-            return true;
-          }
-        }
+    if (eventsStorage.hasOwnProperty(key)) {
+      const otherParams = eventsStorage[key];
+      if (otherParams && deepEquals(params, otherParams)) {
+        return true;
       }
     }
     return false;
@@ -116,9 +120,9 @@ export class AvoDeduplicator {
       if (this.avoFunctionsEvents.hasOwnProperty(time)) {
         const timestamp = Number(time) || 0;
         if (now - timestamp > this.msToConsiderOld) {
-          const eventName = this.avoFunctionsEvents[time];
+          const key = this.avoFunctionsEvents[time];
           delete this.avoFunctionsEvents[time];
-          delete this.avoFunctionsEventsParams[eventName];
+          delete this.avoFunctionsEventsParams[key];
         }
       }
     }
@@ -127,9 +131,9 @@ export class AvoDeduplicator {
       if (this.manualEvents.hasOwnProperty(time)) {
         const timestamp = Number(time) || 0;
         if (now - timestamp > this.msToConsiderOld) {
-          const eventName = this.manualEvents[time];
+          const key = this.manualEvents[time];
           delete this.manualEvents[time];
-          delete this.manualEventsParams[eventName];
+          delete this.manualEventsParams[key];
         }
       }
     }

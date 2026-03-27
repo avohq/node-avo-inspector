@@ -15,7 +15,6 @@ describe("NetworkCallsHandler", () => {
   let networkHandler: AvoNetworkCallsHandler;
   let baseBody: BaseBody;
 
-  const customCallback = jest.fn();
   const now = new Date();
 
   beforeAll(() => {
@@ -43,8 +42,9 @@ describe("NetworkCallsHandler", () => {
       libPlatform: "node",
       messageId: mockedReturns.GUID,
       trackingId: "",
+      sessionId: "",
+      anonymousId: "",
       createdAt: new Date().toISOString(),
-      sessionId: mockedReturns.SESSION_ID,
       samplingRate: 1.0,
     };
   });
@@ -53,23 +53,12 @@ describe("NetworkCallsHandler", () => {
     jest.clearAllMocks();
   });
 
-  test("bodyForSessionStartedCall returns base body + session started body used for session started", () => {
-    const body = networkHandler.bodyForSessionStartedCall(
-      mockedReturns.SESSION_ID
-    );
-
-    expect(body).toEqual({
-      ...baseBody,
-      type: "sessionStarted",
-    });
-  });
-
   test("bodyForEventSchemaCall returns base body + event schema used for event sending from non Codegen", () => {
     const eventName = "event name";
     const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
 
     const body = networkHandler.bodyForEventSchemaCall(
-      mockedReturns.SESSION_ID,
+      "",
       eventName,
       eventProperties,
       null,
@@ -78,6 +67,7 @@ describe("NetworkCallsHandler", () => {
 
     expect(body).toEqual({
       ...baseBody,
+      anonymousId: "",
       type: "event",
       eventName,
       eventProperties,
@@ -94,7 +84,7 @@ describe("NetworkCallsHandler", () => {
     const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
 
     const body = networkHandler.bodyForEventSchemaCall(
-      mockedReturns.SESSION_ID,
+      "",
       eventName,
       eventProperties,
       eventId,
@@ -103,6 +93,7 @@ describe("NetworkCallsHandler", () => {
 
     expect(body).toEqual({
       ...baseBody,
+      anonymousId: "",
       type: "event",
       eventName,
       eventProperties,
@@ -110,5 +101,81 @@ describe("NetworkCallsHandler", () => {
       eventId,
       eventHash,
     });
+  });
+
+  test("bodyForEventSchemaCall uses streamId as anonymousId", () => {
+    const eventName = "event name";
+    const streamId = "user-123";
+    const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
+
+    const body = networkHandler.bodyForEventSchemaCall(
+      streamId,
+      eventName,
+      eventProperties,
+      null,
+      null
+    );
+
+    expect(body.anonymousId).toBe("user-123");
+  });
+
+  test("bodyForEventSchemaCall with rawEventProperties passes them through (no encryption in dev without key)", () => {
+    const eventName = "event name";
+    const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
+    const rawEventProperties = { prop0: "hello" };
+
+    const body = networkHandler.bodyForEventSchemaCall(
+      "",
+      eventName,
+      eventProperties,
+      null,
+      null,
+      rawEventProperties
+    );
+
+    // Without a publicEncryptionKey, encryption is not triggered,
+    // so eventProperties should be the plain schema (not encrypted)
+    expect(body.eventProperties).toEqual(eventProperties);
+    expect(body.type).toBe("event");
+    expect(body.eventName).toBe(eventName);
+  });
+
+  test("base body includes publicEncryptionKey when handler is constructed with one", () => {
+    const handlerWithKey = new AvoNetworkCallsHandler(
+      apiKey,
+      env,
+      "",
+      version,
+      inspectorVersion,
+      "test-public-key-abc"
+    );
+
+    const eventName = "event name";
+    const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
+
+    const body = handlerWithKey.bodyForEventSchemaCall(
+      "",
+      eventName,
+      eventProperties,
+      null,
+      null
+    );
+
+    expect(body.publicEncryptionKey).toBe("test-public-key-abc");
+  });
+
+  test("base body does not include publicEncryptionKey when handler is constructed without one", () => {
+    const eventName = "event name";
+    const eventProperties = [{ propertyName: "prop0", propertyType: "string" }];
+
+    const body = networkHandler.bodyForEventSchemaCall(
+      "",
+      eventName,
+      eventProperties,
+      null,
+      null
+    );
+
+    expect(body.publicEncryptionKey).toBeUndefined();
   });
 });

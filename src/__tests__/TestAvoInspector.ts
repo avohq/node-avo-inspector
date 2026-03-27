@@ -20,7 +20,8 @@ describe("Initialization", () => {
       env,
       "my-test-app",
       version,
-      inspectorVersion);
+      inspectorVersion,
+      undefined);
   });
 
   test("Api Key is set", () => {
@@ -54,7 +55,7 @@ describe("Initialization", () => {
     }).toThrow(error.API_KEY);
   });
 
-  test("Error is thrown when empty Api Key is used", () => {
+  test("Error is thrown when whitespace Api Key is used", () => {
     // Given
     const apiKey = " ";
 
@@ -64,6 +65,16 @@ describe("Initialization", () => {
         env: AvoInspectorEnv.Prod,
         version: "0",
         apiKey,
+      });
+    }).toThrow(error.API_KEY);
+  });
+
+  test("Error is thrown when empty string Api Key is used", () => {
+    expect(() => {
+      new AvoInspector({
+        env: AvoInspectorEnv.Prod,
+        version: "0",
+        apiKey: "",
       });
     }).toThrow(error.API_KEY);
   });
@@ -260,5 +271,106 @@ describe("Initialization", () => {
         version,
       });
     }).toThrow(error.VERSION);
+  });
+
+  test("publicEncryptionKey is forwarded to AvoNetworkCallsHandler when provided", () => {
+    const inspectorVersion = process.env.npm_package_version || "";
+
+    (AvoNetworkCallsHandler as unknown as jest.Mock).mockClear();
+
+    let inspector = new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+      publicEncryptionKey: "my-public-key-123",
+    });
+
+    expect(AvoNetworkCallsHandler).toHaveBeenCalledWith(
+      "api-key-xxx",
+      AvoInspectorEnv.Dev,
+      "",
+      "1",
+      inspectorVersion,
+      "my-public-key-123"
+    );
+  });
+
+  test("publicEncryptionKey is forwarded as undefined to AvoNetworkCallsHandler when not provided", () => {
+    const inspectorVersion = process.env.npm_package_version || "";
+
+    (AvoNetworkCallsHandler as unknown as jest.Mock).mockClear();
+
+    let inspector = new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+    });
+
+    expect(AvoNetworkCallsHandler).toHaveBeenCalledWith(
+      "api-key-xxx",
+      AvoInspectorEnv.Dev,
+      "",
+      "1",
+      inspectorVersion,
+      undefined
+    );
+  });
+
+  test("warns when publicEncryptionKey is malformed in dev/staging", () => {
+    const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+      publicEncryptionKey: "not-valid-hex",
+    });
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("publicEncryptionKey does not look like a valid")
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  test("does not warn when publicEncryptionKey is a valid 130-char uncompressed hex key in dev/staging", () => {
+    const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const validKey = "04" + "ab".repeat(64); // 2 + 128 = 130 hex chars
+
+    new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+      publicEncryptionKey: validKey,
+    });
+
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
+    consoleWarnSpy.mockRestore();
+  });
+
+  test("does not warn when publicEncryptionKey is a valid 66-char compressed hex key in dev/staging", () => {
+    const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const validKey = "02" + "4e".repeat(32); // 2 + 64 = 66 hex chars
+
+    new AvoInspector({
+      apiKey: "api-key-xxx",
+      env: AvoInspectorEnv.Dev,
+      version: "1",
+      publicEncryptionKey: validKey,
+    });
+
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
+    consoleWarnSpy.mockRestore();
+  });
+
+  test("constructor works without publicEncryptionKey (backwards compatible)", () => {
+    expect(() => {
+      new AvoInspector({
+        apiKey: "api-key-xxx",
+        env: AvoInspectorEnv.Dev,
+        version: "1",
+      });
+    }).not.toThrow();
   });
 });

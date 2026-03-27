@@ -1,6 +1,8 @@
 import { AvoGuid } from "./AvoGuid";
 import { AvoInspector } from "./AvoInspector";
+import { AvoEncryption } from "./AvoEncryption";
 import { request } from "https";
+import { EventSpecMetadata, PropertyValidationResult } from "./eventSpec/AvoEventSpecFetchTypes";
 
 export interface BaseBody {
   apiKey: string;
@@ -11,27 +13,45 @@ export interface BaseBody {
   libPlatform: "node";
   messageId: string;
   trackingId: string;
-  createdAt: string;
   sessionId: string;
+  anonymousId: string;
+  createdAt: string;
   samplingRate: number;
+  publicEncryptionKey?: string;
 }
 
-export interface SessionStartedBody extends BaseBody {
-  type: "sessionStarted";
+export interface EventPropertyEncrypted {
+  propertyName: string;
+  propertyType: string;
+  encryptedPropertyValue: string;
+  children?: any;
 }
+
+export interface EventPropertyPlain {
+  propertyName: string;
+  propertyType: string;
+  children?: any;
+}
+
+export interface EventPropertyValidation {
+  failedEventIds?: string[];
+  passedEventIds?: string[];
+}
+
+export type EventProperty = (EventPropertyEncrypted | EventPropertyPlain) & EventPropertyValidation;
 
 export interface EventSchemaBody extends BaseBody {
   type: "event";
   eventName: string;
-  eventProperties: Array<{
-    propertyName: string;
-    propertyType: string;
-    children?: any;
-  }>;
+  eventProperties: Array<EventProperty>;
   avoFunction: boolean;
   eventId: string | null;
   eventHash: string | null;
+  streamId?: string;
+  eventSpecMetadata?: EventSpecMetadata;
 }
+
+export type InspectorBody = EventSchemaBody;
 
 export class AvoNetworkCallsHandler {
   private apiKey: string;
@@ -40,6 +60,7 @@ export class AvoNetworkCallsHandler {
   private appVersion: string;
   private libVersion: string;
   private samplingRate: number = 1.0;
+  private publicEncryptionKey?: string;
 
   private static trackingEndpoint = "/inspector/v1/track";
 
@@ -48,17 +69,19 @@ export class AvoNetworkCallsHandler {
     envName: string,
     appName: string,
     appVersion: string,
-    libVersion: string
+    libVersion: string,
+    publicEncryptionKey?: string
   ) {
     this.apiKey = apiKey;
     this.envName = envName;
     this.appName = appName;
     this.appVersion = appVersion;
     this.libVersion = libVersion;
+    this.publicEncryptionKey = publicEncryptionKey;
   }
 
   callInspectorWithBatchBody(
-    inEvents: Array<SessionStartedBody | EventSchemaBody>
+    inEvents: Array<InspectorBody>
   ): Promise<void> {
     const events = inEvents.filter((x) => x != null);
 
@@ -77,64 +100,83 @@ export class AvoNetworkCallsHandler {
 
     if (AvoInspector.shouldLog) {
       events.forEach(function (event) {
-        if (event.type === "sessionStarted") {
-          console.log("Avo Inspector: sending session started event.");
-        } else if (event.type === "event") {
-          let schemaEvent: EventSchemaBody = event;
-          console.log(
-            "Avo Inspector: sending event " +
-              schemaEvent.eventName +
-              " with schema " +
-              JSON.stringify(schemaEvent.eventProperties)
-          );
-        }
+        const eventProps = event.eventProperties
+          .map(p => '\t"' + p.propertyName + '": "' + p.propertyType + '"')
+          .join(";\n");
+        const validated = event.eventSpecMetadata ? " (validated)" : "";
+        console.log(
+          "Avo Inspector: Sending event " +
+            event.eventName + validated +
+            " with schema {\n" + eventProps + "\n}"
+        );
       });
     }
 
-    return new Promise(function (resolve, reject) {
+    return new Promise((resolve, reject) => {
       const data = JSON.stringify(events);
-      var options = {
+      const options = {
         hostname: "api.avo.app",
         port: 443,
         path: AvoNetworkCallsHandler.trackingEndpoint,
         method: "POST",
         headers: {
-          "Content-Type": "text/plain",
+          "Accept": "application/json",
+          "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(data),
         },
       };
-      var req = request(options, (res: any) => {
+
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: [network] POST https://" + options.hostname + options.path);
+        console.log("Avo Inspector: [network] Request body (" + Buffer.byteLength(data) + " bytes)");
+      }
+
+      const req = request(options, (res: any) => {
+        if (AvoInspector.shouldLog) {
+          console.log("Avo Inspector: [network] Response status: " + res.statusCode + " " + res.statusMessage);
+        }
         const chunks: any = [];
         res.on("data", (data: any) => chunks.push(data));
         res.on("end", () => {
-          try {
-            // @ts-ignore
-            const data = JSON.parse(Buffer.concat(chunks).toString());
-            // @ts-ignore
-            this.samplingRate = data.samplingRate;
-          } catch (e) {}
+          if (res.statusCode === 200) {
+            try {
+              const responseBody = Buffer.concat(chunks).toString();
+              const data = JSON.parse(responseBody);
+              if (typeof data.samplingRate === "number" && data.samplingRate >= 0 && data.samplingRate <= 1) {
+                this.samplingRate = data.samplingRate;
+              }
+            } catch (e) {
+              if (AvoInspector.shouldLog) {
+                console.warn("Avo Inspector: [network] Failed to parse response JSON: " + e);
+              }
+            }
+          } else if (AvoInspector.shouldLog) {
+            console.warn("Avo Inspector: [network] Non-200 response: " + res.statusCode);
+          }
           resolve();
         });
       });
       req.write(data);
-      req.on("error", () => {
+      req.setTimeout(10_000);
+      req.on("error", (err: any) => {
+        if (AvoInspector.shouldLog) {
+          console.error("Avo Inspector: [network] Request error: " + err);
+        }
         reject("Request failed");
       });
       req.on("timeout", () => {
+        if (AvoInspector.shouldLog) {
+          console.error("Avo Inspector: [network] Request timed out after 10s");
+        }
+        req.destroy();
         reject("Request timed out");
       });
       req.end();
     });
   }
 
-  bodyForSessionStartedCall(sessionId: string): SessionStartedBody {
-    let sessionBody = this.createBaseCallBody(sessionId) as SessionStartedBody;
-    sessionBody.type = "sessionStarted";
-    return sessionBody;
-  }
-
   bodyForEventSchemaCall(
-    sessionId: string,
+    anonymousId: string,
     eventName: string,
     eventProperties: Array<{
       propertyName: string;
@@ -142,12 +184,18 @@ export class AvoNetworkCallsHandler {
       children?: any;
     }>,
     eventId: string | null,
-    eventHash: string | null
+    eventHash: string | null,
+    rawEventProperties?: { [propName: string]: any }
   ): EventSchemaBody {
-    let eventSchemaBody = this.createBaseCallBody(sessionId) as EventSchemaBody;
+    let eventSchemaBody = this.createBaseCallBody(anonymousId) as EventSchemaBody;
     eventSchemaBody.type = "event";
     eventSchemaBody.eventName = eventName;
-    eventSchemaBody.eventProperties = eventProperties;
+
+    if (AvoEncryption.shouldEncrypt(this.envName, this.publicEncryptionKey) && rawEventProperties) {
+      eventSchemaBody.eventProperties = this.encryptProperties(eventProperties, rawEventProperties);
+    } else {
+      eventSchemaBody.eventProperties = eventProperties;
+    }
 
     if (eventId != null) {
       eventSchemaBody.avoFunction = true;
@@ -162,8 +210,113 @@ export class AvoNetworkCallsHandler {
     return eventSchemaBody;
   }
 
-  private createBaseCallBody(sessionId: string): BaseBody {
-    return {
+  buildEventProperties(
+    eventProperties: Array<{
+      propertyName: string;
+      propertyType: string;
+      children?: any;
+    }>,
+    rawEventProperties?: { [propName: string]: any }
+  ): Array<EventProperty> {
+    if (AvoEncryption.shouldEncrypt(this.envName, this.publicEncryptionKey) && rawEventProperties) {
+      return this.encryptProperties(eventProperties, rawEventProperties);
+    }
+    return eventProperties;
+  }
+
+  bodyForValidatedEventSchemaCall(
+    anonymousId: string,
+    eventName: string,
+    eventProperties: Array<EventProperty>,
+    eventId: string | null,
+    eventHash: string | null,
+    eventSpecMetadata: EventSpecMetadata,
+    propertyResults: PropertyValidationResult[]
+  ): EventSchemaBody {
+    // Build a map of validation results by property name
+    const validationMap = new Map<string, PropertyValidationResult>();
+    for (const result of propertyResults) {
+      validationMap.set(result.propertyName, result);
+    }
+
+    // Merge validation results into eventProperties (matching Android)
+    const mergedProperties: Array<EventProperty> = eventProperties.map((prop) => {
+      const validation = validationMap.get(prop.propertyName);
+      if (validation) {
+        const merged: EventProperty = { ...prop };
+        if (validation.failedEventIds.length > 0) {
+          merged.failedEventIds = validation.failedEventIds;
+        }
+        if (validation.passedEventIds.length > 0) {
+          merged.passedEventIds = validation.passedEventIds;
+        }
+        return merged;
+      }
+      return prop;
+    });
+
+    let body = this.createBaseCallBody(anonymousId) as EventSchemaBody;
+    body.type = "event";
+    body.eventName = eventName;
+    body.eventProperties = mergedProperties;
+    body.streamId = anonymousId;
+    body.eventSpecMetadata = eventSpecMetadata;
+
+    if (eventId != null) {
+      body.avoFunction = true;
+      body.eventId = eventId;
+      body.eventHash = eventHash;
+    } else {
+      body.avoFunction = false;
+      body.eventId = null;
+      body.eventHash = null;
+    }
+
+    return body;
+  }
+
+  private encryptProperties(
+    properties: Array<{
+      propertyName: string;
+      propertyType: string;
+      children?: any;
+    }>,
+    rawEventProperties: { [propName: string]: any }
+  ): Array<EventProperty> {
+    const result: Array<EventProperty> = [];
+
+    for (const prop of properties) {
+      // List-type properties: omit entirely
+      if (AvoEncryption.isListType(prop.propertyType)) {
+        continue;
+      }
+
+      const rawValue = rawEventProperties[prop.propertyName];
+      const jsonValue = JSON.stringify(rawValue) ?? "null";
+
+      const encrypted = AvoEncryption.encryptValue(
+        jsonValue,
+        this.publicEncryptionKey!
+      );
+
+      if (encrypted === null) {
+        // Encryption failure: omit the property (warning already logged by encryptValue)
+        continue;
+      }
+
+      result.push({
+        propertyName: prop.propertyName,
+        propertyType: prop.propertyType,
+        encryptedPropertyValue: encrypted,
+        ...(prop.children !== undefined ? { children: prop.children } : {}),
+      });
+    }
+
+    return result;
+  }
+
+  private createBaseCallBody(anonymousId: string): BaseBody {
+    const body: BaseBody = {
       apiKey: this.apiKey,
       appName: this.appName,
       appVersion: this.appVersion,
@@ -172,9 +325,16 @@ export class AvoNetworkCallsHandler {
       libPlatform: "node",
       messageId: AvoGuid.newGuid(),
       trackingId: "",
+      sessionId: "",
+      anonymousId: anonymousId,
       createdAt: new Date().toISOString(),
-      sessionId: sessionId,
       samplingRate: this.samplingRate,
     };
+
+    if (this.publicEncryptionKey && this.publicEncryptionKey.length > 0) {
+      body.publicEncryptionKey = this.publicEncryptionKey;
+    }
+
+    return body;
   }
 }
