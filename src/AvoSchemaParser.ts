@@ -2,6 +2,14 @@ let isArray = (obj: any): boolean => {
   return Object.prototype.toString.call(obj) === "[object Array]";
 };
 
+let isComplex = (value: any): boolean => {
+  return typeof value === "object" && value != null;
+};
+
+// Deeper complex values are reported as "object" instead of being descended into, which
+// also keeps cyclic input finite.
+const MAX_DEPTH = 10;
+
 export class AvoSchemaParser {
   static extractSchema(eventProperties: {
     [propName: string]: any;
@@ -14,10 +22,10 @@ export class AvoSchemaParser {
       return [];
     }
 
-    let mapping = (object: any) => {
+    let mapping = (object: any, depth: number) => {
       if (isArray(object)) {
         let list = object.map((x: any) => {
-          return mapping(x);
+          return depth >= MAX_DEPTH && isComplex(x) ? "object" : mapping(x, depth + 1);
         });
         return this.removeDuplicates(list);
       } else if (typeof object === "object") {
@@ -35,8 +43,13 @@ export class AvoSchemaParser {
               propertyType: this.getPropValueType(val),
             };
 
-            if (typeof val === "object" && val != null) {
-              mappedEntry["children"] = mapping(val);
+            if (isComplex(val)) {
+              if (depth >= MAX_DEPTH) {
+                mappedEntry.propertyType = "object";
+                mappedEntry["children"] = [];
+              } else {
+                mappedEntry["children"] = mapping(val, depth + 1);
+              }
             }
 
             mappedResult.push(mappedEntry);
@@ -49,7 +62,7 @@ export class AvoSchemaParser {
       }
     };
 
-    var mappedEventProps = mapping(eventProperties);
+    var mappedEventProps = mapping(eventProperties, 0);
 
     return mappedEventProps;
   }

@@ -149,6 +149,64 @@ describe("Schema Parsing", () => {
     expect(res[0].propertyType).toBe(type.FLOATLIST);
   });
 
+  describe("depth cap (10 levels)", () => {
+    const nest = (levels: number, leaf: any): any =>
+      levels === 0 ? leaf : { next: nest(levels - 1, leaf) };
+
+    // Follows `next` down `levels` times from the top-level entry, which is at depth 0,
+    // so the entry returned is at depth `levels`.
+    const descend = (schema: any[], levels: number): any => {
+      let entry = schema[0];
+      for (let i = 0; i < levels; i++) entry = entry.children[0];
+      return entry;
+    };
+
+    test("an object nested deeper than the cap becomes an object leaf with empty children", () => {
+      const schema = inspector.extractSchema(nest(15, 1));
+
+      expect(descend(schema, 9)).toMatchObject({ propertyName: "next", propertyType: "object" });
+      expect(descend(schema, 9).children).toHaveLength(1);
+      expect(descend(schema, 10)).toEqual({ propertyName: "next", propertyType: "object", children: [] });
+    });
+
+    test("a scalar at the cap is still classified", () => {
+      const schema = inspector.extractSchema(nest(11, 1));
+
+      expect(descend(schema, 10)).toEqual({ propertyName: "next", propertyType: "int" });
+    });
+
+    test("a list at the cap is reported as an object with empty children", () => {
+      const schema = inspector.extractSchema(nest(11, [1, 2]));
+
+      expect(descend(schema, 10)).toEqual({ propertyName: "next", propertyType: "object", children: [] });
+    });
+
+    test("complex list elements at the cap become the type string object", () => {
+      const schema = inspector.extractSchema(nest(10, [{ a: 1 }, [2], "s"]));
+
+      expect(descend(schema, 9)).toEqual({
+        propertyName: "next",
+        propertyType: "list(object)",
+        children: ["object", "string"],
+      });
+    });
+
+    test("a cyclic object is truncated at the cap instead of yielding []", () => {
+      const cyclic: any = { name: "root" };
+      cyclic.self = cyclic;
+
+      const schema = inspector.extractSchema(cyclic);
+
+      expect(schema[0]).toEqual({ propertyName: "name", propertyType: "string" });
+      let entry = schema[1];
+      for (let i = 0; i < 10; i++) {
+        expect(entry).toMatchObject({ propertyName: "self", propertyType: "object" });
+        entry = entry.children[1];
+      }
+      expect(entry).toEqual({ propertyName: "self", propertyType: "object", children: [] });
+    });
+  });
+
   test("A list whose first element has no JSON type is list(object), never list(unknown)", () => {
     const eventProperties = {
       prop0: [() => 1, "two"],
