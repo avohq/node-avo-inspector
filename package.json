@@ -3,6 +3,12 @@
   "version": "1.3.0",
   "description": "Avo Inspector for Node.js",
   "main": "dist/index.js",
+  "files": [
+    "dist",
+    "!dist/__tests__",
+    "README.md",
+    "LICENSE"
+  ],
   "repository": "https://github.com/avohq/node-avo-inspector",
   "author": "Avo (https://www.avo.app)",
   "license": "MIT",
