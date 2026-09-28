@@ -31,7 +31,7 @@ const requestMsg = {
   TIMEOUT: "Request timed out",
 };
 
-const trackingEndpoint = "https://api.avo.app/inspector/v1/track";
+const trackingEndpoint = "https://api.avo.app/inspector/v2/track";
 
 const sessionTimeMs = 5 * 60 * 1000;
 

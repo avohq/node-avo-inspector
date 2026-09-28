@@ -41,8 +41,7 @@ describe("NetworkCallsHandler", () => {
       env,
       libPlatform: "node",
       messageId: mockedReturns.GUID,
-      trackingId: "",
-      sessionId: "",
+      streamId: "",
       anonymousId: "",
       createdAt: new Date().toISOString(),
       samplingRate: 1.0,
@@ -117,6 +116,20 @@ describe("NetworkCallsHandler", () => {
     );
 
     expect(body.anonymousId).toBe("user-123");
+    expect(body.streamId).toBe("user-123");
+  });
+
+  test("bodyForEventSchemaCall never carries trackingId or sessionId", () => {
+    const body = networkHandler.bodyForEventSchemaCall(
+      "user-123",
+      "event name",
+      [{ propertyName: "prop0", propertyType: "string" }],
+      null,
+      null
+    );
+
+    expect(body).not.toHaveProperty("trackingId");
+    expect(body).not.toHaveProperty("sessionId");
   });
 
   test("bodyForEventSchemaCall with rawEventProperties passes them through (no encryption in dev without key)", () => {

@@ -1,23 +1,33 @@
 import { AvoGuid } from "./AvoGuid";
 import { AvoInspector } from "./AvoInspector";
 import { AvoEncryption } from "./AvoEncryption";
-import { request } from "https";
+import { LIB_PLATFORM } from "./AvoInspectorVersion";
+import { hasHeaderControlChar } from "./utils";
+import { request as httpsRequest } from "https";
+import { request as httpRequest, ClientRequest } from "http";
+import { gzipSync } from "zlib";
 import { EventSpecMetadata, PropertyValidationResult } from "./eventSpec/AvoEventSpecFetchTypes";
 
 export interface BaseBody {
   apiKey: string;
   appName: string;
-  appVersion: string;
+  appVersion: string | null;
   libVersion: string;
   env: string;
   libPlatform: "node";
   messageId: string;
-  trackingId: string;
-  sessionId: string;
+  streamId: string;
   anonymousId: string;
   createdAt: string;
   samplingRate: number;
   publicEncryptionKey?: string;
+}
+
+// Per-event gateway fields, already normalized (see AvoInspector.resolveTrackOptions).
+export interface ResolvedTrackOptions {
+  appVersion: string | null;
+  outputReference?: string;
+  originHint?: string;
 }
 
 export interface EventPropertyEncrypted {
@@ -47,7 +57,8 @@ export interface EventSchemaBody extends BaseBody {
   avoFunction: boolean;
   eventId: string | null;
   eventHash: string | null;
-  streamId?: string;
+  outputReference?: string;
+  originHint?: string;
   eventSpecMetadata?: EventSpecMetadata;
 }
 
@@ -61,8 +72,12 @@ export class AvoNetworkCallsHandler {
   private libVersion: string;
   private samplingRate: number = 1.0;
   private publicEncryptionKey?: string;
+  private inFlightRequests: Set<ClientRequest> = new Set();
 
-  private static trackingEndpoint = "/inspector/v1/track";
+  private static trackingEndpoint = "https://api.avo.app/inspector/v2/track";
+  private static mockEndpointEnvVar = "AVO_INSPECTOR_MOCK_ENDPOINT";
+  private static requestTimeoutMs = 10_000;
+  private static gzipThresholdBytes = 1024;
 
   constructor(
     apiKey: string,
@@ -80,21 +95,45 @@ export class AvoNetworkCallsHandler {
     this.publicEncryptionKey = publicEncryptionKey;
   }
 
+  /**
+   * The test-only endpoint override. Fail-closed: a prod instance never honors it,
+   * whatever the surrounding process environment says.
+   */
+  static mockEndpointFor(envName: string): string | null {
+    if (envName === "prod") {
+      return null;
+    }
+    const override = process.env[AvoNetworkCallsHandler.mockEndpointEnvVar];
+    return override && override.length > 0 ? override : null;
+  }
+
+  getSamplingRate(): number {
+    return this.samplingRate;
+  }
+
+  /** @internal Test-only hook used by the conformance harness. */
+  _setSamplingRateForTesting(samplingRate: number): void {
+    this.samplingRate = samplingRate;
+  }
+
+  /** Aborts every request still in flight (used by AvoInspector.destroy). */
+  abortInFlight(): void {
+    const requests = Array.from(this.inFlightRequests);
+    this.inFlightRequests.clear();
+    requests.forEach((req) => req.destroy());
+  }
+
+  /**
+   * POSTs one batch. Resolves with the HTTP status code (the batch is never retried);
+   * rejects with "Request failed" / "Request timed out" on transport failures, or when
+   * a header value cannot be transmitted safely.
+   */
   callInspectorWithBatchBody(
     inEvents: Array<InspectorBody>
-  ): Promise<void> {
+  ): Promise<number | void> {
     const events = inEvents.filter((x) => x != null);
 
     if (events.length === 0) {
-      return Promise.resolve();
-    }
-
-    if (Math.random() > this.samplingRate) {
-      if (AvoInspector.shouldLog) {
-        console.log(
-          "Avo Inspector: last event schema dropped due to sampling rate."
-        );
-      }
       return Promise.resolve();
     }
 
@@ -113,37 +152,82 @@ export class AvoNetworkCallsHandler {
     }
 
     return new Promise((resolve, reject) => {
-      const data = JSON.stringify(events);
-      const options = {
-        hostname: "api.avo.app",
-        port: 443,
-        path: AvoNetworkCallsHandler.trackingEndpoint,
-        method: "POST",
-        headers: {
-          "Accept": "application/json",
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(data),
-        },
-      };
-
-      if (AvoInspector.shouldLog) {
-        console.log("Avo Inspector: [network] POST https://" + options.hostname + options.path);
-        console.log("Avo Inspector: [network] Request body (" + Buffer.byteLength(data) + " bytes)");
+      const json = Buffer.from(JSON.stringify(events), "utf8");
+      let data = json;
+      let compressed = false;
+      if (json.length >= AvoNetworkCallsHandler.gzipThresholdBytes) {
+        try {
+          data = gzipSync(json);
+          compressed = true;
+        } catch (e) {
+          data = json;
+        }
       }
 
-      const req = request(options, (res: any) => {
+      const headers: { [name: string]: string | number } = {
+        "api-key": this.apiKey,
+        "env": this.envName,
+        "X-Avo-Client": LIB_PLATFORM,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Content-Length": data.length,
+      };
+      if (compressed) {
+        headers["Content-Encoding"] = "gzip";
+      }
+
+      for (const name of Object.keys(headers)) {
+        const value = headers[name];
+        if (typeof value === "string" && hasHeaderControlChar(value)) {
+          if (AvoInspector.shouldLog) {
+            console.error(
+              "Avo Inspector: [network] Header " + name +
+                " contains a control character (CR, LF, or NUL). Batch dropped."
+            );
+          }
+          reject("Request failed");
+          return;
+        }
+      }
+
+      const url = new URL(
+        AvoNetworkCallsHandler.mockEndpointFor(this.envName) ||
+          AvoNetworkCallsHandler.trackingEndpoint
+      );
+      const send = url.protocol === "http:" ? httpRequest : httpsRequest;
+
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: [network] POST " + url.origin + url.pathname);
+        console.log(
+          "Avo Inspector: [network] Request body (" + data.length + " bytes" +
+            (compressed ? ", gzip" : "") + ")"
+        );
+      }
+
+      let settled = false;
+      const finish = (fn: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        this.inFlightRequests.delete(req);
+        fn();
+      };
+
+      const req = send(url, { method: "POST", headers }, (res) => {
         if (AvoInspector.shouldLog) {
           console.log("Avo Inspector: [network] Response status: " + res.statusCode + " " + res.statusMessage);
         }
-        const chunks: any = [];
-        res.on("data", (data: any) => chunks.push(data));
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
         res.on("end", () => {
           if (res.statusCode === 200) {
             try {
               const responseBody = Buffer.concat(chunks).toString();
-              const data = JSON.parse(responseBody);
-              if (typeof data.samplingRate === "number" && data.samplingRate >= 0 && data.samplingRate <= 1) {
-                this.samplingRate = data.samplingRate;
+              const body = JSON.parse(responseBody);
+              if (body && typeof body.samplingRate === "number" && body.samplingRate >= 0 && body.samplingRate <= 1) {
+                this.samplingRate = body.samplingRate;
               }
             } catch (e) {
               if (AvoInspector.shouldLog) {
@@ -153,25 +237,28 @@ export class AvoNetworkCallsHandler {
           } else if (AvoInspector.shouldLog) {
             console.warn("Avo Inspector: [network] Non-200 response: " + res.statusCode);
           }
-          resolve();
+          finish(() => resolve(res.statusCode));
         });
       });
-      req.write(data);
-      req.setTimeout(10_000);
-      req.on("error", (err: any) => {
-        if (AvoInspector.shouldLog) {
-          console.error("Avo Inspector: [network] Request error: " + err);
-        }
-        reject("Request failed");
-      });
-      req.on("timeout", () => {
+      this.inFlightRequests.add(req);
+
+      // A wall-clock budget for the whole request, not just socket idleness.
+      const timer = setTimeout(() => {
         if (AvoInspector.shouldLog) {
           console.error("Avo Inspector: [network] Request timed out after 10s");
         }
+        finish(() => reject("Request timed out"));
         req.destroy();
-        reject("Request timed out");
+      }, AvoNetworkCallsHandler.requestTimeoutMs);
+      timer.unref();
+
+      req.on("error", (err: any) => {
+        if (AvoInspector.shouldLog && !settled) {
+          console.error("Avo Inspector: [network] Request error: " + err);
+        }
+        finish(() => reject("Request failed"));
       });
-      req.end();
+      req.end(data);
     });
   }
 
@@ -185,9 +272,10 @@ export class AvoNetworkCallsHandler {
     }>,
     eventId: string | null,
     eventHash: string | null,
-    rawEventProperties?: { [propName: string]: any }
+    rawEventProperties?: { [propName: string]: any },
+    trackOptions?: ResolvedTrackOptions
   ): EventSchemaBody {
-    let eventSchemaBody = this.createBaseCallBody(anonymousId) as EventSchemaBody;
+    let eventSchemaBody = this.createBaseCallBody(anonymousId, trackOptions) as EventSchemaBody;
     eventSchemaBody.type = "event";
     eventSchemaBody.eventName = eventName;
 
@@ -231,7 +319,8 @@ export class AvoNetworkCallsHandler {
     eventId: string | null,
     eventHash: string | null,
     eventSpecMetadata: EventSpecMetadata,
-    propertyResults: PropertyValidationResult[]
+    propertyResults: PropertyValidationResult[],
+    trackOptions?: ResolvedTrackOptions
   ): EventSchemaBody {
     // Build a map of validation results by property name
     const validationMap = new Map<string, PropertyValidationResult>();
@@ -255,11 +344,10 @@ export class AvoNetworkCallsHandler {
       return prop;
     });
 
-    let body = this.createBaseCallBody(anonymousId) as EventSchemaBody;
+    let body = this.createBaseCallBody(anonymousId, trackOptions) as EventSchemaBody;
     body.type = "event";
     body.eventName = eventName;
     body.eventProperties = mergedProperties;
-    body.streamId = anonymousId;
     body.eventSpecMetadata = eventSpecMetadata;
 
     if (eventId != null) {
@@ -315,21 +403,31 @@ export class AvoNetworkCallsHandler {
     return result;
   }
 
-  private createBaseCallBody(anonymousId: string): BaseBody {
+  private createBaseCallBody(
+    anonymousId: string,
+    trackOptions?: ResolvedTrackOptions
+  ): BaseBody {
     const body: BaseBody = {
       apiKey: this.apiKey,
       appName: this.appName,
-      appVersion: this.appVersion,
+      appVersion: trackOptions ? trackOptions.appVersion : this.appVersion,
       libVersion: this.libVersion,
       env: this.envName,
-      libPlatform: "node",
+      libPlatform: LIB_PLATFORM,
       messageId: AvoGuid.newGuid(),
-      trackingId: "",
-      sessionId: "",
+      streamId: anonymousId,
       anonymousId: anonymousId,
       createdAt: new Date().toISOString(),
       samplingRate: this.samplingRate,
     };
+
+    // Gateway coordinates are sent only when present; never as null or "".
+    if (trackOptions && trackOptions.outputReference !== undefined) {
+      (body as EventSchemaBody).outputReference = trackOptions.outputReference;
+    }
+    if (trackOptions && trackOptions.originHint !== undefined) {
+      (body as EventSchemaBody).originHint = trackOptions.originHint;
+    }
 
     if (this.publicEncryptionKey && this.publicEncryptionKey.length > 0) {
       body.publicEncryptionKey = this.publicEncryptionKey;

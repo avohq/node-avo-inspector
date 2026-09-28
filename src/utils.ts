@@ -46,4 +46,16 @@ function deepEquals(x: any, y: any) {
   return true;
 }
 
-export { isValueEmpty, deepEquals };
+// Trims a gateway option value; anything that is not a non-blank string is absent.
+const normalizeOption = (value: unknown): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+// CR, LF and NUL delimit HTTP/1.1 header fields and must never reach a header value.
+const hasHeaderControlChar = (value: string): boolean => /[\r\n\0]/.test(value);
+
+export { isValueEmpty, deepEquals, normalizeOption, hasHeaderControlChar };

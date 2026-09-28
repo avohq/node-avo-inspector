@@ -1,16 +1,61 @@
 import { AvoInspectorEnv, AvoInspectorEnvValueType } from "./AvoInspectorEnv";
 import { AvoSchemaParser } from "./AvoSchemaParser";
-import { AvoNetworkCallsHandler } from "./AvoNetworkCallsHandler";
+import {
+  AvoNetworkCallsHandler,
+  EventSchemaBody,
+  InspectorBody,
+  ResolvedTrackOptions,
+} from "./AvoNetworkCallsHandler";
+import { AvoBatchQueue } from "./AvoBatchQueue";
 import { AvoDeduplicator } from "./AvoDeduplicator";
 import { AvoStreamId } from "./AvoStreamId";
 import { AvoEventSpecFetcher } from "./eventSpec/AvoEventSpecFetcher";
 import { AvoEventSpecCache } from "./eventSpec/AvoEventSpecCache";
 import { EventValidator } from "./eventSpec/EventValidator";
-import { EventSpecResponse } from "./eventSpec/AvoEventSpecFetchTypes";
+import {
+  EventSpecMetadata,
+  EventSpecResponse,
+  PropertyValidationResult,
+} from "./eventSpec/AvoEventSpecFetchTypes";
+import { VERSION } from "./AvoInspectorVersion";
 
-import { isValueEmpty } from "./utils";
+import { hasHeaderControlChar, isValueEmpty, normalizeOption } from "./utils";
 
-const libVersion = require("../package.json").version;
+const libVersion = VERSION;
+
+const DEFAULT_BATCH_SIZE = 30;
+const DEFAULT_BATCH_FLUSH_SECONDS = 30;
+const DEFAULT_MAX_QUEUE_SIZE = 1000;
+const DEFAULT_FLUSH_TIMEOUT_MS = 10_000;
+
+const INTERNAL_ERROR_MESSAGE =
+  "Avo Inspector: something went wrong. Please report to support@avo.app.";
+
+/**
+ * Gateway coordinates for a gateway-scoped Inspector API key. All optional; blank
+ * values are treated as absent.
+ */
+export interface TrackOptions {
+  /** Reference of the gateway output this observation was bound for. Absent = gateway checkpoint. */
+  outputReference?: string;
+  /** Low-cardinality label of the source the event came from (e.g. "web"). Never a user id. */
+  originHint?: string;
+  /** App version of the source that produced this event; overrides the instance version. */
+  originAppVersion?: string;
+}
+
+type SchemaEntry = {
+  propertyName: string;
+  propertyType: string;
+  children?: any;
+};
+
+type SendOutcome = "ok" | "non200" | "failed";
+
+type ValidationResult = {
+  metadata: EventSpecMetadata;
+  propertyResults: PropertyValidationResult[];
+};
 
 export class AvoInspector {
   environment: AvoInspectorEnvValueType;
@@ -25,25 +70,24 @@ export class AvoInspector {
   private eventValidator: EventValidator | null = null;
   private generatedAnonymousId: string = "";
 
-  // Keep the Node process alive while there are pending inspector operations.
-  // Without this, short-lived processes (e.g. CLIs) can exit before async
-  // sends complete, since the caller typically doesn't await the inspector promise.
-  private pendingCount = 0;
-  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private batchSize: number;
+  private batchQueue: AvoBatchQueue<SendOutcome>;
+  private destroyed = false;
 
-  private trackPending(promise: Promise<any>): void {
-    this.pendingCount++;
-    if (this.keepAliveTimer === null) {
-      this.keepAliveTimer = setInterval(() => {}, 60_000);
-    }
+  // In-flight work (spec fetches before enqueue, and batch sends) that flush() awaits.
+  // Nothing here keeps the process alive: callers flush() or await before exit.
+  private pending: Set<Promise<unknown>> = new Set();
+  private pendingCount = 0;
+
+  private trackPending<T>(promise: Promise<T>): Promise<T> {
+    this.pending.add(promise);
+    this.pendingCount = this.pending.size;
     const done = () => {
-      this.pendingCount--;
-      if (this.pendingCount === 0 && this.keepAliveTimer !== null) {
-        clearInterval(this.keepAliveTimer);
-        this.keepAliveTimer = null;
-      }
+      this.pending.delete(promise);
+      this.pendingCount = this.pending.size;
     };
     promise.then(done, done);
+    return promise;
   }
 
   private static _shouldLog = false;
@@ -60,6 +104,14 @@ export class AvoInspector {
     version: string;
     appName?: string;
     publicEncryptionKey?: string;
+    /** Flush when this many events are buffered. Default 30; always 1 in dev. */
+    batchSize?: number;
+    /** Flush once the oldest buffered event is this many seconds old. Default 30. */
+    batchFlushSeconds?: number;
+    /** Maximum buffered events; the oldest are dropped first. Default 1000. */
+    maxQueueSize?: number;
+    /** Start no background flush timer (recommended for serverless). Default false. */
+    disableBatchTimer?: boolean;
   }) {
     // the constructor does aggressive null/undefined checking because same code paths will be accessible from JS
     if (isValueEmpty(options.env)) {
@@ -79,6 +131,10 @@ export class AvoInspector {
     if (isValueEmpty(options.apiKey)) {
       throw new Error(
         "[Avo Inspector] No API key provided. Inspector can't operate without API key."
+      );
+    } else if (hasHeaderControlChar(options.apiKey)) {
+      throw new Error(
+        "[Avo Inspector] API key contains a control character. The API key is sent as a request header and cannot contain CR, LF, or NUL."
       );
     } else {
       this.apiKey = options.apiKey;
@@ -125,6 +181,15 @@ export class AvoInspector {
     );
     this.avoDeduplicator = new AvoDeduplicator();
 
+    const batchOptions = AvoInspector.resolveBatchOptions(options);
+    // dev sends every event immediately, whatever was configured.
+    this.batchSize =
+      this.environment === AvoInspectorEnv.Dev ? 1 : batchOptions.batchSize;
+    this.batchQueue = new AvoBatchQueue<SendOutcome>(
+      { ...batchOptions, batchSize: this.batchSize },
+      (batch) => this.sendBatch(batch)
+    );
+
     // Initialize event spec validation for dev/staging only
     if (this.environment !== AvoInspectorEnv.Prod) {
       this.eventSpecFetcher = new AvoEventSpecFetcher(this.apiKey);
@@ -133,18 +198,90 @@ export class AvoInspector {
     }
   }
 
+  private static resolveBatchOptions(options: {
+    batchSize?: number;
+    batchFlushSeconds?: number;
+    maxQueueSize?: number;
+    disableBatchTimer?: boolean;
+  }) {
+    const pick = (
+      name: string,
+      value: number | undefined,
+      fallback: number,
+      isValid: (v: number) => boolean
+    ): number => {
+      if (value === undefined || value === null) {
+        return fallback;
+      }
+      if (typeof value === "number" && isValid(value)) {
+        return value;
+      }
+      console.warn(
+        "[Avo Inspector] Invalid " + name + " " + value + ". Using default " + fallback + "."
+      );
+      return fallback;
+    };
+    const isPositiveInteger = (v: number) => Number.isInteger(v) && v >= 1;
+
+    return {
+      batchSize: pick("batchSize", options.batchSize, DEFAULT_BATCH_SIZE, isPositiveInteger),
+      batchFlushSeconds: pick(
+        "batchFlushSeconds",
+        options.batchFlushSeconds,
+        DEFAULT_BATCH_FLUSH_SECONDS,
+        (v) => Number.isFinite(v) && v > 0
+      ),
+      maxQueueSize: pick("maxQueueSize", options.maxQueueSize, DEFAULT_MAX_QUEUE_SIZE, isPositiveInteger),
+      disableBatchTimer: options.disableBatchTimer === true,
+    };
+  }
+
+  /**
+   * Resolves the gateway options for one event. outputReference / originHint are
+   * omitted when blank; appVersion is the per-event override, null for a
+   * source-scoped event without one, else the instance version.
+   */
+  private resolveTrackOptions(options?: TrackOptions): ResolvedTrackOptions {
+    const opts: any = options !== null && typeof options === "object" ? options : {};
+    const outputReference = normalizeOption(opts.outputReference);
+    const originHint = normalizeOption(opts.originHint);
+    const originAppVersion = normalizeOption(opts.originAppVersion);
+
+    const resolved: ResolvedTrackOptions = {
+      appVersion:
+        originAppVersion !== undefined
+          ? originAppVersion
+          : originHint !== undefined
+          ? null
+          : this.version,
+    };
+    if (outputReference !== undefined) {
+      resolved.outputReference = outputReference;
+    }
+    if (originHint !== undefined) {
+      resolved.originHint = originHint;
+    }
+    return resolved;
+  }
+
+  /**
+   * Extracts the event schema and queues it for the Inspector API.
+   *
+   * Resolves with the schema once the event is queued. In dev (batch size 1) the send
+   * happens within the call and a non-200 response resolves `[]`; with batching the
+   * batch's HTTP outcome is not observable here. Buffered events are only delivered
+   * by a later size or time trigger, or by `flush()` — call `flush()` before exit.
+   */
   trackSchemaFromEvent(
     eventName: string,
     eventProperties: { [propName: string]: any },
-    streamId?: string
-  ): Promise<
-    Array<{
-      propertyName: string;
-      propertyType: string;
-      children?: any;
-    }>
-  > {
+    streamId?: string,
+    options?: TrackOptions
+  ): Promise<Array<SchemaEntry>> {
     try {
+      if (this.destroyed) {
+        return Promise.resolve([]);
+      }
       const avoStreamId = new AvoStreamId(streamId);
       const anonymousId = avoStreamId.streamId || this.generatedAnonymousId;
 
@@ -166,16 +303,15 @@ export class AvoInspector {
         }
         let eventSchema = this.extractSchema(eventProperties, false);
 
-        return this.sendEventWithOptionalValidation(
+        return this.sampleAndEnqueue(
           eventName,
           eventSchema,
           null,
           null,
           anonymousId,
-          eventProperties
-        ).then(() => {
-          return eventSchema;
-        });
+          eventProperties,
+          this.resolveTrackOptions(options)
+        );
       } else {
         if (AvoInspector.shouldLog) {
           console.log("Avo Inspector: Deduplicated event " + eventName);
@@ -183,13 +319,8 @@ export class AvoInspector {
         return Promise.resolve([]);
       }
     } catch (e) {
-      console.error(
-        "Avo Inspector: something went wrong. Please report to support@avo.app.",
-        e
-      );
-      return Promise.reject(
-        "Avo Inspector: something went wrong. Please report to support@avo.app."
-      );
+      console.error(INTERNAL_ERROR_MESSAGE, e);
+      return Promise.reject(INTERNAL_ERROR_MESSAGE);
     }
   }
 
@@ -199,14 +330,11 @@ export class AvoInspector {
     eventId: string,
     eventHash: string,
     streamId?: string
-  ): Promise<
-    Array<{
-      propertyName: string;
-      propertyType: string;
-      children?: any;
-    }>
-  > {
+  ): Promise<Array<SchemaEntry>> {
     try {
+      if (this.destroyed) {
+        return Promise.resolve([]);
+      }
       const anonymousId = (streamId && streamId.length > 0) ? streamId : this.generatedAnonymousId;
 
       if (
@@ -227,16 +355,15 @@ export class AvoInspector {
         }
         let eventSchema = this.extractSchema(eventProperties, false);
 
-        return this.sendEventWithOptionalValidation(
+        return this.sampleAndEnqueue(
           eventName,
           eventSchema,
           eventId,
           eventHash,
           anonymousId,
-          eventProperties
-        ).then(() => {
-          return eventSchema;
-        });
+          eventProperties,
+          this.resolveTrackOptions()
+        );
       } else {
         if (AvoInspector.shouldLog) {
           console.log("Avo Inspector: Deduplicated event " + eventName);
@@ -244,60 +371,35 @@ export class AvoInspector {
         return Promise.resolve([]);
       }
     } catch (e) {
-      console.error(
-        "Avo Inspector: something went wrong. Please report to support@avo.app.",
-        e
-      );
-      return Promise.reject(
-        "Avo Inspector: something went wrong. Please report to support@avo.app."
-      );
+      console.error(INTERNAL_ERROR_MESSAGE, e);
+      return Promise.reject(INTERNAL_ERROR_MESSAGE);
     }
   }
 
   /**
-   * Try to fetch event spec and validate, then send a single event call.
-   * If validation succeeds, sends a validated event (with results merged in).
-   * If unavailable, sends a plain event.
-   *
-   * Uses trackPending() to keep the Node process alive until the work completes,
-   * so short-lived processes (CLIs) don't exit before the send finishes — even
-   * when the caller doesn't await the returned promise.
+   * Samples the event, then queues it. When event spec validation is active the spec
+   * is fetched (or read from cache) first, so the event joins the queue once its
+   * validation results are merged in; flush() awaits that fetch before draining.
    */
-  private sendEventWithOptionalValidation(
+  private sampleAndEnqueue(
     eventName: string,
-    eventSchema: Array<{
-      propertyName: string;
-      propertyType: string;
-      children?: any;
-    }>,
+    eventSchema: Array<SchemaEntry>,
     eventId: string | null,
     eventHash: string | null,
     anonymousId: string,
-    rawEventProperties?: { [propName: string]: any }
-  ): Promise<void> {
-    const work = this.doSendEventWithOptionalValidation(
-      eventName, eventSchema, eventId, eventHash, anonymousId, rawEventProperties
-    );
-    this.trackPending(work);
-    return work;
-  }
+    rawEventProperties: { [propName: string]: any } | undefined,
+    trackOptions: ResolvedTrackOptions
+  ): Promise<Array<SchemaEntry>> {
+    const samplingRate = this.avoNetworkCallsHandler.getSamplingRate();
+    if (Math.random() > samplingRate) {
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: event " + eventName + " dropped due to sampling rate.");
+      }
+      return Promise.resolve(eventSchema);
+    }
 
-  private async doSendEventWithOptionalValidation(
-    eventName: string,
-    eventSchema: Array<{
-      propertyName: string;
-      propertyType: string;
-      children?: any;
-    }>,
-    eventId: string | null,
-    eventHash: string | null,
-    anonymousId: string,
-    rawEventProperties?: { [propName: string]: any }
-  ): Promise<void> {
-    const validationResult = await this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId);
-
-    try {
-      let body;
+    const buildBody = (validationResult: ValidationResult | null): EventSchemaBody => {
+      let body: EventSchemaBody;
       if (validationResult) {
         if (AvoInspector.shouldLog) {
           console.log("Avo Inspector: Sending validated event " + eventName);
@@ -310,7 +412,8 @@ export class AvoInspector {
           eventId,
           eventHash,
           validationResult.metadata,
-          validationResult.propertyResults
+          validationResult.propertyResults,
+          trackOptions
         );
       } else {
         body = this.avoNetworkCallsHandler.bodyForEventSchemaCall(
@@ -319,19 +422,136 @@ export class AvoInspector {
           eventSchema,
           eventId,
           eventHash,
-          rawEventProperties
+          rawEventProperties,
+          trackOptions
         );
       }
+      // The rate that governed this event's sampling decision, not the one at send time.
+      body.samplingRate = samplingRate;
+      return body;
+    };
 
-      await this.avoNetworkCallsHandler.callInspectorWithBatchBody([body]);
-
-      if (AvoInspector.shouldLog) {
-        const schemaString = eventSchema.map(p => '\t"' + p.propertyName + '": "' + p.propertyType + '"').join(";\n");
-        console.log("Avo Inspector: Saved event " + eventName + " with schema {\n" + schemaString + "\n}");
-      }
-    } catch (err) {
-      console.error("Avo Inspector: schema sending failed: " + err + ".");
+    if (!this.isValidationActive()) {
+      return this.enqueue(buildBody(null), eventSchema);
     }
+
+    return this.trackPending(
+      this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId)
+        .catch((err): ValidationResult | null => {
+          if (AvoInspector.shouldLog) {
+            console.warn("Avo Inspector: Event spec validation failed for event: " + eventName + ". Sending without validation. " + err);
+          }
+          return null;
+        })
+        .then((validationResult) => {
+          if (this.destroyed) {
+            return [];
+          }
+          let body: EventSchemaBody;
+          try {
+            body = buildBody(validationResult);
+          } catch (err) {
+            console.error("Avo Inspector: schema sending failed: " + err + ".");
+            return eventSchema;
+          }
+          return this.enqueue(body, eventSchema);
+        })
+    );
+  }
+
+  private enqueue(
+    body: EventSchemaBody,
+    eventSchema: Array<SchemaEntry>
+  ): Promise<Array<SchemaEntry>> {
+    const send = this.batchQueue.enqueue(body);
+    if (this.batchSize === 1 && send !== null) {
+      // Immediate send: the HTTP outcome is observable per call.
+      return send.then((outcome) => (outcome === "non200" ? [] : eventSchema));
+    }
+    return Promise.resolve(eventSchema);
+  }
+
+  private sendBatch(batch: Array<InspectorBody>): Promise<SendOutcome> {
+    if (this.destroyed) {
+      return Promise.resolve("failed");
+    }
+    const send = this.avoNetworkCallsHandler.callInspectorWithBatchBody(batch).then(
+      (status): SendOutcome => {
+        if (typeof status === "number" && status !== 200) {
+          return "non200";
+        }
+        if (AvoInspector.shouldLog) {
+          batch.forEach((event) => {
+            const schemaString = event.eventProperties
+              .map((p) => '\t"' + p.propertyName + '": "' + p.propertyType + '"')
+              .join(";\n");
+            console.log("Avo Inspector: Saved event " + event.eventName + " with schema {\n" + schemaString + "\n}");
+          });
+        }
+        return "ok";
+      },
+      (err): SendOutcome => {
+        // At-most-once: a failed batch is dropped, never re-queued or retried.
+        if (!this.destroyed) {
+          console.error("Avo Inspector: schema sending failed: " + err + ".");
+        }
+        return "failed";
+      }
+    );
+    return this.trackPending(send);
+  }
+
+  private isValidationActive(): boolean {
+    // The conformance mock endpoint serves only the track call, so validation (which
+    // would reach the real spec endpoint) is skipped while the override is in effect.
+    return (
+      this.eventSpecFetcher !== null &&
+      AvoNetworkCallsHandler.mockEndpointFor(this.environment) === null
+    );
+  }
+
+  /**
+   * Sends every buffered event, then waits until all in-flight sends (and spec fetches
+   * that will enqueue) have completed or `timeoutMs` (default 10000) has elapsed.
+   * Always resolves. Call it before process exit or before a serverless handler returns.
+   */
+  async flush(timeoutMs: number = DEFAULT_FLUSH_TIMEOUT_MS): Promise<void> {
+    const budget =
+      typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs >= 0
+        ? timeoutMs
+        : DEFAULT_FLUSH_TIMEOUT_MS;
+    const deadline = Date.now() + budget;
+    try {
+      while (!this.destroyed) {
+        this.batchQueue.drain();
+        if (this.pending.size === 0) {
+          return;
+        }
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          return;
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timedOut = await Promise.race([
+          Promise.allSettled(Array.from(this.pending)).then(() => false),
+          new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(true), remaining);
+            timer.unref();
+          }),
+        ]);
+        clearTimeout(timer);
+        if (timedOut) {
+          return;
+        }
+      }
+    } catch (e) {
+      // flush() is a completion guarantee and never rejects.
+    }
+  }
+
+  /** @internal Test-only hook for the conformance harness; not part of the public API. */
+  _setSamplingRateForTesting(samplingRate: number): void {
+    this.avoNetworkCallsHandler._setSamplingRateForTesting(samplingRate);
   }
 
   enableLogging(enable: boolean) {
@@ -397,7 +617,7 @@ export class AvoInspector {
     anonymousId: string,
     rawEventProperties?: { [propName: string]: any },
     eventId?: string | null
-  ): Promise<{ metadata: import("./eventSpec/AvoEventSpecFetchTypes").EventSpecMetadata; propertyResults: import("./eventSpec/AvoEventSpecFetchTypes").PropertyValidationResult[] } | null> {
+  ): Promise<ValidationResult | null> {
     if (!this.eventSpecFetcher || !this.eventSpecCache || !this.eventValidator) {
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: Skipping event spec validation for event: " + eventName
@@ -458,7 +678,7 @@ export class AvoInspector {
       return doValidate(cached);
     }
 
-    // Cache miss — fetch spec (process stays alive via trackPending)
+    // Cache miss — fetch spec (flush() awaits it via trackPending)
     if (AvoInspector.shouldLog) {
       console.log("Avo Inspector: Event spec cache miss for event: " + eventName + ". Fetching before sending.");
     }
@@ -479,7 +699,17 @@ export class AvoInspector {
     });
   }
 
+  /**
+   * Cancels and cleans up: discards the pending batch unsent, abandons in-flight
+   * requests and stops the flush timer. Does not flush. After destroy() the instance
+   * is terminated and trackSchemaFromEvent resolves [] without sending.
+   */
   destroy(): void {
+    this.destroyed = true;
+    this.batchQueue.clear();
+    this.pending.clear();
+    this.pendingCount = 0;
+    this.avoNetworkCallsHandler.abortInFlight();
     if (this.eventSpecFetcher) {
       this.eventSpecFetcher.destroy();
       this.eventSpecFetcher = null;
@@ -489,10 +719,5 @@ export class AvoInspector {
       this.eventSpecCache = null;
     }
     this.eventValidator = null;
-    if (this.keepAliveTimer !== null) {
-      clearInterval(this.keepAliveTimer);
-      this.keepAliveTimer = null;
-    }
-    this.pendingCount = 0;
   }
 }

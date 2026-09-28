@@ -1,6 +1,8 @@
 import { AvoDeduplicator } from "../AvoDeduplicator";
 import { deepEquals } from "../utils";
 import { AvoInspector } from "../AvoInspector";
+import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
+import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
 import { defaultOptions } from "./constants";
 
 jest
@@ -9,6 +11,20 @@ jest
 
 describe("Deduplicator", () => {
   const deduplicator = new AvoDeduplicator();
+
+  // Keep the Inspector-level tests off the real network: a 200 send and no event spec.
+  beforeAll(() => {
+    jest
+      .spyOn(AvoNetworkCallsHandler.prototype, "callInspectorWithBatchBody")
+      .mockImplementation(() => Promise.resolve(200));
+    jest
+      .spyOn(AvoEventSpecFetcher.prototype, "fetch")
+      .mockImplementation((_eventName, _streamId, callback) => callback(null));
+  });
+
+  afterAll(() => {
+    jest.restoreAllMocks();
+  });
 
   const testObject = {
     "0": "some string",
