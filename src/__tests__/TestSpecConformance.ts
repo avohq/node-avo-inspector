@@ -229,6 +229,18 @@ describe("wire protocol", () => {
     expect(handler.getSamplingRate()).toBe(1);
   }, 15_000);
 
+  test("a 3xx is a non-200 response and is never followed", async () => {
+    responders.push((_req, res) => {
+      res.writeHead(302, { Location: process.env.AVO_INSPECTOR_MOCK_ENDPOINT + "/" });
+      res.end();
+    });
+
+    await expect(dev().trackSchemaFromEvent("E", { a: 1 })).resolves.toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(captured).toHaveLength(1);
+  });
+
   test("VERSION matches the package version", () => {
     expect(VERSION).toBe(require("../../package.json").version);
   });
