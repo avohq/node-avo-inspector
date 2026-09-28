@@ -5,7 +5,7 @@ import { LIB_PLATFORM } from "./AvoInspectorVersion";
 import { hasHeaderControlChar } from "./utils";
 import { request as httpsRequest } from "https";
 import { request as httpRequest, ClientRequest } from "http";
-import { gzipSync } from "zlib";
+import { gzip } from "zlib";
 import { EventSpecMetadata, PropertyValidationResult } from "./eventSpec/AvoEventSpecFetchTypes";
 
 export interface BaseBody {
@@ -73,6 +73,7 @@ export class AvoNetworkCallsHandler {
   private samplingRate: number = 1.0;
   private publicEncryptionKey?: string;
   private inFlightRequests: Set<ClientRequest> = new Set();
+  private aborted = false;
 
   private static trackingEndpoint = "https://api.avo.app/inspector/v2/track";
   private static mockEndpointEnvVar = "AVO_INSPECTOR_MOCK_ENDPOINT";
@@ -118,6 +119,8 @@ export class AvoNetworkCallsHandler {
 
   /** Aborts every request still in flight (used by AvoInspector.destroy). */
   abortInFlight(): void {
+    // Also stops sends still being compressed from starting a request afterwards.
+    this.aborted = true;
     const requests = Array.from(this.inFlightRequests);
     this.inFlightRequests.clear();
     requests.forEach((req) => req.destroy());
@@ -151,17 +154,30 @@ export class AvoNetworkCallsHandler {
       });
     }
 
+    const json = Buffer.from(JSON.stringify(events), "utf8");
+    // Compressed off the event loop; on a compression error the body is sent as-is.
+    const body: Promise<{ data: Buffer; compressed: boolean }> =
+      json.length >= AvoNetworkCallsHandler.gzipThresholdBytes
+        ? AvoNetworkCallsHandler.gzipAsync(json).then(
+            (data) => ({ data, compressed: true }),
+            () => ({ data: json, compressed: false })
+          )
+        : Promise.resolve({ data: json, compressed: false });
+
+    return body.then(({ data, compressed }) => this.post(data, compressed));
+  }
+
+  private static gzipAsync(input: Buffer): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const json = Buffer.from(JSON.stringify(events), "utf8");
-      let data = json;
-      let compressed = false;
-      if (json.length >= AvoNetworkCallsHandler.gzipThresholdBytes) {
-        try {
-          data = gzipSync(json);
-          compressed = true;
-        } catch (e) {
-          data = json;
-        }
+      gzip(input, (err, output) => (err ? reject(err) : resolve(output)));
+    });
+  }
+
+  private post(data: Buffer, compressed: boolean): Promise<number | undefined> {
+    return new Promise((resolve, reject) => {
+      if (this.aborted) {
+        reject("Request failed");
+        return;
       }
 
       const headers: { [name: string]: string | number } = {

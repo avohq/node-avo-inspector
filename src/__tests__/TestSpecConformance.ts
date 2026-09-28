@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
+import * as zlib from "zlib";
 import { gunzipSync } from "zlib";
 
 import { AvoInspector } from "../AvoInspector";
@@ -102,6 +103,44 @@ describe("wire protocol", () => {
     expect(Number(headers["content-length"])).toBeLessThan(
       Buffer.byteLength(JSON.stringify(body))
     );
+  });
+
+  test("compression is asynchronous and never uses gzipSync", async () => {
+    const gzipSync = jest.spyOn(zlib, "gzipSync");
+    const inspector = dev();
+    const props: { [key: string]: string } = {};
+    for (let i = 0; i < 40; i++) props["attribute_" + i] = "value";
+    await inspector.trackSchemaFromEvent("Large", props);
+
+    expect(gzipSync).not.toHaveBeenCalled();
+    expect(captured[0].headers["content-encoding"]).toBe("gzip");
+  });
+
+  test("a compression error falls back to the uncompressed body without Content-Encoding", async () => {
+    jest.spyOn(zlib, "gzip").mockImplementation(((_buf: any, callback: any) =>
+      callback(new Error("zlib unavailable"))) as any);
+    const inspector = dev();
+    const props: { [key: string]: string } = {};
+    for (let i = 0; i < 40; i++) props["attribute_" + i] = "value";
+    await inspector.trackSchemaFromEvent("Large", props);
+
+    const { headers, body } = captured[0];
+    expect(headers["content-encoding"]).toBeUndefined();
+    expect(Number(headers["content-length"])).toBe(Buffer.byteLength(JSON.stringify(body)));
+    expect(body[0].eventName).toBe("Large");
+  });
+
+  test("destroy() while a batch is being compressed sends nothing", async () => {
+    const inspector = staging({ batchSize: 1 });
+    const props: { [key: string]: string } = {};
+    for (let i = 0; i < 40; i++) props["attribute_" + i] = "value";
+
+    const tracked = inspector.trackSchemaFromEvent("Large", props);
+    inspector.destroy();
+    await tracked;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(captured).toHaveLength(0);
   });
 
   test("non-string gateway option values are treated as absent", async () => {
