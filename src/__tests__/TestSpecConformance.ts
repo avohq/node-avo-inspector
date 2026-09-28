@@ -586,6 +586,28 @@ describe("batching", () => {
     expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("is larger than maxQueueSize"));
   });
 
+  test("createdAt is stamped when track is called, not when validation lets the event join the queue", async () => {
+    jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
+    jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((eventName, _streamId, callback) => {
+      setTimeout(() => callback(null), eventName === "Slow" ? 60 : 0);
+    });
+    const inspector = staging({ batchSize: 30 });
+    const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockResolvedValue(200);
+
+    const calledAt = Date.now();
+    const slow = inspector.trackSchemaFromEvent("Slow", {});
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await inspector.trackSchemaFromEvent("Fast", {});
+    await slow;
+    await inspector.flush();
+
+    const events = send.mock.calls[0][0];
+    const createdAt = (name: string) => Date.parse(events.find((e) => e.eventName === name)!.createdAt);
+    expect(createdAt("Slow")).toBeLessThan(createdAt("Fast"));
+    expect(createdAt("Slow") - calledAt).toBeLessThan(15);
+  });
+
   test("invalid batch options fall back to the defaults with a warning", () => {
     const inspector = staging({ batchSize: 0, batchFlushSeconds: -1, maxQueueSize: 1.5 });
     expect((inspector as any).batchSize).toBe(30);

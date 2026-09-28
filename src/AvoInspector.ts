@@ -471,6 +471,8 @@ export class AvoInspector {
     trackOptions: ResolvedTrackOptions
   ): Promise<Array<SchemaEntry>> {
     const samplingRate = this.avoNetworkCallsHandler.getSamplingRate();
+    // Stamped at the call: with validation active the event may join the queue later.
+    const createdAt = new Date().toISOString();
     if (Math.random() > samplingRate) {
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: event " + eventName + " dropped due to sampling rate.");
@@ -508,6 +510,7 @@ export class AvoInspector {
       }
       // The rate that governed this event's sampling decision, not the one at send time.
       body.samplingRate = samplingRate;
+      body.createdAt = createdAt;
       return body;
     };
 

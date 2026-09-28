@@ -115,6 +115,10 @@ inspector.trackSchemaFromEvent("Event name", {
 
 `trackSchemaFromEvent` returns a promise that resolves with the extracted schema once the event is queued. In `dev` the event is sent within the call, and the promise resolves `[]` if the Inspector API answers with a non-200 status. You can pass an optional stream id as the third argument to correlate events.
 
+## Event order
+
+Each event carries its own `createdAt`, stamped when `trackSchemaFromEvent` is called. Events in a batch are not guaranteed to be in call order: in `dev` and `staging`, an event whose spec must first be fetched for validation joins the queue when the fetch completes, so it can be sent after events tracked later. Use `createdAt` if you need the call order.
+
 ## Gateway options
 
 When you use a gateway-scoped Inspector API key, pass the gateway coordinates in an optional options object as the fourth argument (JavaScript has no named arguments, so the three are grouped in one object):
