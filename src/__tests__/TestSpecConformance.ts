@@ -426,6 +426,28 @@ describe("batching", () => {
     await expect(tracked).resolves.toEqual([{ propertyName: "plan", propertyType: "string" }]);
   });
 
+  test("batchSize above maxQueueSize warns even with logging off, and keeps FIFO overflow", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 2 });
+    expect(AvoInspector.shouldLog).toBe(false);
+    expect(console.warn).toHaveBeenCalledWith(
+      "[Avo Inspector] batchSize 30 is larger than maxQueueSize 2, so a batch never fills: " +
+        "events are sent only by the scheduled flush or flush(), and the oldest are dropped " +
+        "once 2 are buffered. Set batchSize to at most maxQueueSize."
+    );
+
+    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent("E2", {});
+    await inspector.trackSchemaFromEvent("E3", {});
+    await inspector.flush();
+    expect(captured.map((c) => c.body.map((e: any) => e.eventName))).toEqual([["E2", "E3"]]);
+  });
+
+  test("no batch-size warning when batchSize fits in maxQueueSize, or in dev", () => {
+    staging({ batchSize: 2, maxQueueSize: 2 });
+    dev({ batchSize: 30, maxQueueSize: 2 });
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("is larger than maxQueueSize"));
+  });
+
   test("invalid batch options fall back to the defaults with a warning", () => {
     const inspector = staging({ batchSize: 0, batchFlushSeconds: -1, maxQueueSize: 1.5 });
     expect((inspector as any).batchSize).toBe(30);

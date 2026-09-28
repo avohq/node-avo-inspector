@@ -237,6 +237,15 @@ export class AvoInspector {
     // dev sends every event immediately, whatever was configured.
     this.batchSize =
       this.environment === AvoInspectorEnv.Dev ? 1 : batchOptions.batchSize;
+    // Not clamped: the conformance suite (batch-4) requires FIFO overflow in this case.
+    if (this.batchSize > batchOptions.maxQueueSize) {
+      console.warn(
+        "[Avo Inspector] batchSize " + this.batchSize + " is larger than maxQueueSize " +
+          batchOptions.maxQueueSize + ", so a batch never fills: events are sent only by the " +
+          "scheduled flush or flush(), and the oldest are dropped once " +
+          batchOptions.maxQueueSize + " are buffered. Set batchSize to at most maxQueueSize."
+      );
+    }
     this.batchQueue = new AvoBatchQueue<SendOutcome>(
       { ...batchOptions, batchSize: this.batchSize },
       (batch) => this.sendBatch(batch)
