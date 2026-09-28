@@ -131,6 +131,23 @@ Logs are enabled by default in the dev mode and disabled in prod mode. You can e
 inspector.enableLogging(true | false);
 ```
 
+# Upgrading from 1.2.0
+
+1.3.0 implements spec 3.0.1. These are the changes you may notice:
+
+- **The promise resolves when the event is queued, not when it is delivered.** Outside `dev`, events are batched (see [Batching options](#batching-options)), so `await inspector.trackSchemaFromEvent(...)` no longer means the event reached Avo. In `dev` each event is still sent within the call.
+- **The SDK no longer keeps your process alive.** 1.2.0 ran a keep-alive timer while sends were pending; it is gone. Call `await inspector.flush()` before the process exits or a serverless handler returns, or buffered events are lost (see [Flushing before exit](#flushing-before-exit-required)).
+- **A non-200 response in `dev` resolves `[]`.** 1.2.0 resolved the extracted schema whatever the status. Outside `dev` the promise resolves the schema, because the send happens later.
+- **`destroy()` terminates the instance.** It discards buffered events unsent and aborts in-flight requests. Afterwards `trackSchemaFromEvent` resolves `[]` and sends nothing; 1.2.0 kept sending.
+- **`callInspectorWithBatchBody` changed**, if you call it directly:
+  - it no longer applies sampling (sampling now happens per event when it is queued);
+  - it resolves with the HTTP status code instead of `undefined`;
+  - besides network errors and timeouts, it rejects with `"Request failed"` without sending when a header value contains CR, LF or NUL.
+- **An API key containing CR, LF or NUL now throws in the constructor**, because the key is sent as a request header.
+- **Wire changes:** requests go to `https://api.avo.app/inspector/v2/track` and carry the API key and env as `api-key` and `env` headers. Bodies of 1024 bytes or more are gzipped. Events no longer carry `sessionId` or `trackingId`, and every event now carries `streamId`.
+
+Unchanged from 1.2.0, but easy to trip over: the logging flag is shared by every instance in the process, and each constructor resets it (on for `dev`, off otherwise). Creating a `prod` instance after a `dev` one turns logging off for both. Call `enableLogging` after constructing your instances if you need a specific setting.
+
 # Development
 
 ## Releasing
