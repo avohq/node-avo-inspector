@@ -149,5 +149,17 @@ describe("Schema Parsing", () => {
     expect(res[0].propertyType).toBe(type.FLOATLIST);
   });
 
+  test("A list whose first element has no JSON type is list(object), never list(unknown)", () => {
+    const eventProperties = {
+      prop0: [() => 1, "two"],
+      prop1: [Symbol("s")],
+    };
+
+    const res = inspector.extractSchema(eventProperties);
+
+    expect(res[0].propertyType).toBe(type.OBJECTLIST);
+    expect(res[1].propertyType).toBe(type.OBJECTLIST);
+  });
+
 
 });

@@ -105,6 +105,10 @@ export class AvoSchemaParser {
       }
       else {
       let propElementType = this.getBasicPropType(propElement);
+      // "list(unknown)" is not a wire type; elements with no JSON type count as objects.
+      if (propElementType === "unknown") {
+        propElementType = "object";
+      }
       return `list(${propElementType})`
       }
     }
