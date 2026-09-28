@@ -10,6 +10,10 @@ let isComplex = (value: any): boolean => {
 const MAX_DEPTH = 10;
 
 export class AvoSchemaParser {
+  /**
+   * Maps each property to its name, type and (for objects and lists) child schema.
+   * Values nested deeper than MAX_DEPTH, and cyclic references, are reported as "object".
+   */
   static extractSchema(eventProperties: {
     [propName: string]: any;
   }): Array<{

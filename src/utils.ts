@@ -1,10 +1,13 @@
+/** True for null, undefined, or a string that is empty after trimming. */
 const isValueEmpty = (value: string | null | undefined): boolean => {
   return value === null || value === undefined || value.trim().length == 0;
 };
 
-// `comparing` holds the object pairs already being compared further up the recursion, so
-// cyclic structures terminate: a pair met again is assumed equal (its other properties
-// are still compared where it was first met).
+/**
+ * Structural equality. `comparing` holds the object pairs already being compared further
+ * up the recursion, so cyclic structures terminate: a pair met again is assumed equal
+ * (its other properties are still compared where it was first met).
+ */
 function deepEquals(x: any, y: any, comparing: Map<object, Set<object>> = new Map()) {
 
   if (x === y) {
@@ -59,7 +62,7 @@ function deepEquals(x: any, y: any, comparing: Map<object, Set<object>> = new Ma
   return true;
 }
 
-// Trims a gateway option value; anything that is not a non-blank string is absent.
+/** Trims a gateway option value; anything that is not a non-blank string is absent. */
 const normalizeOption = (value: unknown): string | undefined => {
   if (typeof value !== "string") {
     return undefined;
@@ -68,13 +71,20 @@ const normalizeOption = (value: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-// No control character (Unicode Cc: C0, DEL, C1) may reach a header value; CR, LF and NUL
-// would split or end the header field. Tab is the one exception: it is valid in a value.
+/**
+ * No control character (Unicode Cc: C0, DEL, C1) may reach a header value; CR, LF and NUL
+ * would split or end the header field. Tab is the one exception: it is valid in a value.
+ */
 const hasHeaderControlChar = (value: string): boolean =>
   /[\u0000-\u0008\u000A-\u001F\u007F-\u009F]/.test(value);
 
-// JSON for log lines only: a repeated object reference is written as "[Circular]" instead
-// of throwing on cyclic input.
+/** Node sends header values as Latin-1 and throws synchronously on anything above U+00FF. */
+const hasNonLatin1Char = (value: string): boolean => /[^\u0000-\u00FF]/.test(value);
+
+/**
+ * JSON for log lines only: a repeated object reference is written as "[Circular]" instead
+ * of throwing on cyclic input.
+ */
 const safeStringify = (value: unknown): string => {
   const seen = new WeakSet<object>();
   try {
@@ -94,4 +104,4 @@ const safeStringify = (value: unknown): string => {
   }
 };
 
-export { isValueEmpty, deepEquals, safeStringify, normalizeOption, hasHeaderControlChar };
+export { isValueEmpty, deepEquals, safeStringify, normalizeOption, hasHeaderControlChar, hasNonLatin1Char };

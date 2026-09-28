@@ -2,7 +2,7 @@ import { AvoGuid } from "./AvoGuid";
 import { AvoInspector } from "./AvoInspector";
 import { AvoEncryption } from "./AvoEncryption";
 import { LIB_PLATFORM } from "./AvoInspectorVersion";
-import { hasHeaderControlChar } from "./utils";
+import { hasHeaderControlChar, hasNonLatin1Char } from "./utils";
 import { request as httpsRequest } from "https";
 import { request as httpRequest, ClientRequest } from "http";
 import { gzip } from "zlib";
@@ -110,6 +110,7 @@ export class AvoNetworkCallsHandler {
     return override && override.length > 0 ? override : null;
   }
 
+  /** The sampling rate last returned by the Inspector API (1 until a response sets it). */
   getSamplingRate(): number {
     return this.samplingRate;
   }
@@ -196,11 +197,11 @@ export class AvoNetworkCallsHandler {
 
       for (const name of Object.keys(headers)) {
         const value = headers[name];
-        if (typeof value === "string" && hasHeaderControlChar(value)) {
+        if (typeof value === "string" && (hasHeaderControlChar(value) || hasNonLatin1Char(value))) {
           if (AvoInspector.shouldLog) {
             console.error(
               "Avo Inspector: [network] Header " + name +
-                " contains a control character. Batch dropped."
+                " contains a character that cannot be sent in a header. Batch dropped."
             );
           }
           reject("Request failed");
@@ -292,6 +293,7 @@ export class AvoNetworkCallsHandler {
     });
   }
 
+  /** Builds the wire body for one event, encrypting property values when configured. */
   bodyForEventSchemaCall(
     anonymousId: string,
     eventName: string,
@@ -328,6 +330,7 @@ export class AvoNetworkCallsHandler {
     return eventSchemaBody;
   }
 
+  /** Returns the event properties, with values encrypted when encryption applies. */
   buildEventProperties(
     eventProperties: Array<{
       propertyName: string;
@@ -342,6 +345,7 @@ export class AvoNetworkCallsHandler {
     return eventProperties;
   }
 
+  /** Builds the wire body for one event, including its event-spec validation results. */
   bodyForValidatedEventSchemaCall(
     anonymousId: string,
     eventName: string,

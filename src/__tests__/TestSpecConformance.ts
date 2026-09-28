@@ -189,6 +189,20 @@ describe("wire protocol", () => {
     expect(captured).toHaveLength(0);
   });
 
+  test("the send guard refuses a character Node cannot put in a header, without contacting the server", async () => {
+    const handler = new AvoNetworkCallsHandler("test\u2014key", "dev", "", "1.0.0", VERSION);
+    const body = handler.bodyForEventSchemaCall("", "E", [], null, null);
+
+    await expect(handler.callInspectorWithBatchBody([body])).rejects.toBe("Request failed");
+    expect(captured).toHaveLength(0);
+  });
+
+  test.each(["\u2014", "\u{1F600}"])("constructor rejects an API key containing %j, which a header cannot carry", (ch) => {
+    expect(() => dev({ apiKey: "test" + ch + "key" })).toThrow(
+      new Error("Avo Inspector: apiKey must only contain characters that can be sent in an HTTP header")
+    );
+  });
+
   test("a tab in the API key is allowed and sent verbatim", async () => {
     const inspector = dev({ apiKey: "test\tkey" });
     await inspector.trackSchemaFromEvent("E", {});

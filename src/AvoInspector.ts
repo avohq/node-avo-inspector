@@ -19,7 +19,7 @@ import {
 } from "./eventSpec/AvoEventSpecFetchTypes";
 import { VERSION } from "./AvoInspectorVersion";
 
-import { hasHeaderControlChar, isValueEmpty, normalizeOption, safeStringify } from "./utils";
+import { hasHeaderControlChar, hasNonLatin1Char, isValueEmpty, normalizeOption, safeStringify } from "./utils";
 
 const libVersion = VERSION;
 
@@ -153,6 +153,7 @@ export class AvoInspector {
   }
 
   private static _shouldLog = false;
+  /** Whether the SDK writes its diagnostic log lines (shared by every instance). */
   static get shouldLog() {
     return this._shouldLog;
   }
@@ -160,6 +161,12 @@ export class AvoInspector {
     this._shouldLog = enable;
   }
 
+  /**
+   * Creates an Inspector instance. A missing or unsupported `env` falls back to dev.
+   *
+   * @throws if `apiKey` or `version` is blank, or `apiKey` contains a character that
+   * cannot be sent in an HTTP header.
+   */
   constructor(options: {
     apiKey: string;
     env: AvoInspectorEnvValueType;
@@ -201,6 +208,10 @@ export class AvoInspector {
       );
     } else if (hasHeaderControlChar(options.apiKey)) {
       throw new Error("Avo Inspector: apiKey must not contain control characters");
+    } else if (hasNonLatin1Char(options.apiKey)) {
+      throw new Error(
+        "Avo Inspector: apiKey must only contain characters that can be sent in an HTTP header"
+      );
     } else {
       this.apiKey = options.apiKey;
     }
@@ -359,6 +370,10 @@ export class AvoInspector {
     return this.track(eventName, eventProperties, false, null, null, streamId, options);
   }
 
+  /**
+   * Codegen entry point: like `trackSchemaFromEvent`, and additionally records the
+   * Avo function's `eventId` / `eventHash` so the event is sent with `avoFunction: true`.
+   */
   _avoFunctionTrackSchemaFromEvent(
     eventName: string,
     eventProperties: { [propName: string]: any },
@@ -647,10 +662,12 @@ export class AvoInspector {
     this.avoNetworkCallsHandler._setSamplingRateForTesting(samplingRate);
   }
 
+  /** Turns the SDK's diagnostic logging on or off for every instance. */
   enableLogging(enable: boolean) {
     AvoInspector._shouldLog = enable;
   }
 
+  /** Returns the schema of `eventProperties` without tracking or sending anything. */
   extractSchema(
     eventProperties: {
       [propName: string]: any;
