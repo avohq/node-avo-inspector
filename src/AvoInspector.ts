@@ -194,10 +194,13 @@ export class AvoInspector {
       throw new Error(
         "[Avo Inspector] No API key provided. Inspector can't operate without API key."
       );
-    } else if (hasHeaderControlChar(options.apiKey)) {
+    } else if (/[\r\n\0]/.test(options.apiKey)) {
+      // The spec's exact message covers CR, LF and NUL.
       throw new Error(
         "[Avo Inspector] API key contains a control character. The API key is sent as a request header and cannot contain CR, LF, or NUL."
       );
+    } else if (hasHeaderControlChar(options.apiKey)) {
+      throw new Error("Avo Inspector: apiKey must not contain control characters");
     } else {
       this.apiKey = options.apiKey;
     }

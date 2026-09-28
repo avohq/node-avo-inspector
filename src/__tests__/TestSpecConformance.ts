@@ -165,17 +165,17 @@ describe("wire protocol", () => {
     expect(captured).toHaveLength(0);
   });
 
-  test.each(["\r", "\n", "\0"])("constructor rejects an API key containing %j", (ch) => {
+  test.each(["\r", "\n", "\0"])("constructor rejects an API key containing %j with the spec's message", (ch) => {
     expect(() => dev({ apiKey: "test" + ch + "key" })).toThrow(
       "[Avo Inspector] API key contains a control character. The API key is sent as a request header and cannot contain CR, LF, or NUL."
     );
   });
 
   test.each(["\u0001", "\u001b", "\u007f", "\u0085"])(
-    "constructor rejects an API key containing any control character such as %j",
+    "constructor rejects an API key containing another control character such as %j",
     (ch) => {
       expect(() => dev({ apiKey: "test" + ch + "key" })).toThrow(
-        "[Avo Inspector] API key contains a control character. The API key is sent as a request header and cannot contain CR, LF, or NUL."
+        new Error("Avo Inspector: apiKey must not contain control characters")
       );
     }
   );
