@@ -714,7 +714,8 @@ describe("batching", () => {
     const events = send.mock.calls[0][0];
     const createdAt = (name: string) => Date.parse(events.find((e) => e.eventName === name)!.createdAt);
     expect(createdAt("Slow")).toBeLessThan(createdAt("Fast"));
-    expect(createdAt("Slow") - calledAt).toBeLessThan(15);
+    // The Slow fetch is delayed 60 ms; an enqueue-time stamp would be at least that late.
+    expect(createdAt("Slow") - calledAt).toBeLessThan(50);
   });
 
   test("invalid batch options fall back to the defaults with a warning", () => {

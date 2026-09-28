@@ -25,15 +25,15 @@ function readStdin() {
   });
 }
 
-function writeEnvelope(envelope) {
-  process.stdout.write(JSON.stringify(envelope) + "\n");
-}
+// Thrown by exitWith so that nothing after it runs while the envelope is being written.
+const EXITING = Symbol("exiting");
 
 // Always leave through process.exit(): it skips the SDK's "beforeExit" drain, which would
 // otherwise send events a fixture expects to stay buffered (wire-8 expects 0 requests).
+// Writes to a pipe can complete asynchronously, so exit only once the envelope is flushed.
 function exitWith(code, envelope) {
-  writeEnvelope(envelope);
-  process.exit(code);
+  process.stdout.write(JSON.stringify(envelope) + "\n", () => process.exit(code));
+  throw EXITING;
 }
 
 function configError(fixtureId, message) {
@@ -111,6 +111,9 @@ async function main() {
   } catch (err) {
     configError(null, `input JSON parse failed: ${err.message}`);
   }
+  if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)) {
+    configError(null, "input envelope must be a JSON object");
+  }
 
   const fixtureId = envelope.fixture_id;
   if (typeof fixtureId !== "string") configError(fixtureId, "missing fixture_id");
@@ -152,10 +155,13 @@ async function main() {
     }
     configError(fixtureId, `unsupported operation: ${operation}`);
   } catch (err) {
+    if (err === EXITING) throw err;
     exitWith(1, { fixture_id: fixtureId, passed: false, actual: null, outcome: "resolve", error: `harness runtime error: ${err && err.message}` });
   }
 }
 
-main();
+main().catch((err) => {
+  if (err !== EXITING) throw err;
+});
 
 module.exports = { HARNESS_CONTRACT_VERSION };

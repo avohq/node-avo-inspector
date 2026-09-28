@@ -13,8 +13,10 @@ process.env.AVO_INSPECTOR_MOCK_ENDPOINT =
 type Guarded = typeof net & { __blockedHosts?: string[] };
 const guarded = net as Guarded;
 
+// A hostname such as "127.example.com" can resolve anywhere, so only a literal IPv4
+// address counts as 127.0.0.0/8.
 const isLoopback = (host: string) =>
-  host === "localhost" || host === "::1" || host.startsWith("127.");
+  host === "localhost" || host === "::1" || (net.isIPv4(host) && host.startsWith("127."));
 
 // net is shared by every test file in a worker, so patch it once.
 if (!guarded.__blockedHosts) {

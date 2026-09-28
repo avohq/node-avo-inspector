@@ -11,12 +11,17 @@ beforeAll(() => {
   ]);
 }, 60_000);
 
-function runHarness(envelope: object) {
+function runHarnessRaw(input: string) {
   const result = spawnSync(process.execPath, [harness], {
-    input: JSON.stringify(envelope) + "\n",
+    input,
     encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
   });
   return { status: result.status, output: JSON.parse(result.stdout.trim()) };
+}
+
+function runHarness(envelope: object) {
+  return runHarnessRaw(JSON.stringify(envelope) + "\n");
 }
 
 describe("conformance harness", () => {
@@ -53,6 +58,29 @@ describe("conformance harness", () => {
 
     expect(status).toBe(0);
     expect(output.actual).toEqual([{ propertyName: "a", propertyType: "int" }]);
+  });
+
+  test.each(["null", "42", "[]"])("a JSON input that is not an object (%s) is a configuration error (exit 2)", (input) => {
+    const { status, output } = runHarnessRaw(input + "\n");
+
+    expect(status).toBe(2);
+    expect(output).toMatchObject({ fixture_id: null, passed: false });
+  });
+
+  test("a large output envelope reaches the pipe in full before the harness exits", () => {
+    const input: { [key: string]: string } = {};
+    for (let i = 0; i < 20000; i += 1) {
+      input["property_with_a_long_name_" + i] = "value";
+    }
+    const { status, output } = runHarness({
+      suite: "schema-extraction",
+      fixture_id: "large",
+      constructor: { apiKey: "test-key", env: "dev", version: "1.0.0" },
+      input,
+    });
+
+    expect(status).toBe(0);
+    expect(output.actual).toHaveLength(20000);
   });
 
   test("a constructor that throws is a harness failure (exit 1)", () => {
