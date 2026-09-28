@@ -214,6 +214,21 @@ describe("wire protocol", () => {
     }
   });
 
+  test("a 200 response cut off after its headers fails the send promptly", async () => {
+    responders.push((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "100" });
+      res.write('{"samplingRate":');
+      setTimeout(() => res.socket!.destroy(), 20);
+    });
+    const handler = new AvoNetworkCallsHandler("test-key", "dev", "", "1.0.0", VERSION);
+    const body = handler.bodyForEventSchemaCall("", "E", [], null, null);
+
+    const started = Date.now();
+    await expect(handler.callInspectorWithBatchBody([body])).rejects.toBe("Request failed");
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(handler.getSamplingRate()).toBe(1);
+  }, 15_000);
+
   test("VERSION matches the package version", () => {
     expect(VERSION).toBe(require("../../package.json").version);
   });

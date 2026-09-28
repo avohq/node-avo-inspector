@@ -255,6 +255,18 @@ export class AvoNetworkCallsHandler {
           }
           finish(() => resolve(res.statusCode));
         });
+        // A response cut off mid-body emits neither "end" nor a request "error".
+        const truncated = () => {
+          if (!res.complete) {
+            if (AvoInspector.shouldLog && !settled) {
+              console.error("Avo Inspector: [network] Response ended before its body was complete");
+            }
+            finish(() => reject("Request failed"));
+          }
+        };
+        res.on("aborted", truncated);
+        res.on("error", truncated);
+        res.on("close", truncated);
       });
       this.inFlightRequests.add(req);
 
