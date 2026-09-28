@@ -6,7 +6,7 @@ import {
   InspectorBody,
   ResolvedTrackOptions,
 } from "./AvoNetworkCallsHandler";
-import { AvoBatchQueue } from "./AvoBatchQueue";
+import { AvoBatchQueue, MAX_TIMER_MS } from "./AvoBatchQueue";
 import { AvoDeduplicator } from "./AvoDeduplicator";
 import { AvoStreamId } from "./AvoStreamId";
 import { AvoEventSpecFetcher } from "./eventSpec/AvoEventSpecFetcher";
@@ -599,7 +599,7 @@ export class AvoInspector {
   async flush(timeoutMs: number = DEFAULT_FLUSH_TIMEOUT_MS): Promise<void> {
     const budget =
       typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs >= 0
-        ? timeoutMs
+        ? Math.min(timeoutMs, MAX_TIMER_MS)
         : DEFAULT_FLUSH_TIMEOUT_MS;
     const deadline = Date.now() + budget;
     try {

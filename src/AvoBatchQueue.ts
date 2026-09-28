@@ -1,6 +1,9 @@
 import { AvoInspector } from "./AvoInspector";
 import { InspectorBody } from "./AvoNetworkCallsHandler";
 
+// setTimeout fires almost at once for delays above this (2^31 - 1 ms, about 24.8 days).
+export const MAX_TIMER_MS = 2_147_483_647;
+
 export interface AvoBatchOptions {
   batchSize: number;
   batchFlushSeconds: number;
@@ -77,7 +80,7 @@ export class AvoBatchQueue<T> {
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
       this.drain();
-    }, Math.min(this.options.batchFlushSeconds * 1000, 2_147_483_647));
+    }, Math.min(this.options.batchFlushSeconds * 1000, MAX_TIMER_MS));
     this.flushTimer.unref();
   }
 

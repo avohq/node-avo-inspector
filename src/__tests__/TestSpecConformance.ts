@@ -491,6 +491,23 @@ describe("batching", () => {
     expect(eventNames).toEqual([["E1", "E2"], ["E3"]]);
   });
 
+  test("a flush timeout beyond the timer limit still waits for in-flight sends", async () => {
+    const inspector = staging({ batchSize: 30 });
+    let release: (status: number) => void = () => {};
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    await inspector.trackSchemaFromEvent("E1", {});
+
+    let flushed = false;
+    const flushing = inspector.flush(3e9).then(() => { flushed = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(flushed).toBe(false);
+
+    release(200);
+    await flushing;
+    expect(flushed).toBe(true);
+  });
+
   test("flush resolves after its timeout even when a send never completes", async () => {
     responders.push(() => {}); // never answers
     const inspector = staging({ batchSize: 30 });
