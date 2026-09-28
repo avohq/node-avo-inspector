@@ -57,9 +57,17 @@ let inspector = new Inspector.AvoInspector({
 
 # Flushing before exit (required)
 
-Buffered events live in memory only and are lost if the process exits first. Delivery is at-most-once: a batch that fails to send is dropped, never retried. The SDK does not keep your process alive, so:
+Buffered events live in memory only and are lost if the process exits first. Delivery is at-most-once: a batch that fails to send is dropped, never retried.
 
-- Call `await inspector.flush()` before the process exits, or before a serverless handler (AWS Lambda, Google Cloud Functions, Vercel, ...) returns. It sends everything buffered, waits for in-flight requests (up to `timeoutMs`, default 10000) and never rejects.
+When a process ends because it has nothing left to do, the SDK sends what is still buffered on its own: it listens for Node's `beforeExit` event and flushes (bounded by the 10-second flush timeout). This is a best-effort safety net, not a guarantee. The SDK never keeps an idle process alive, and `beforeExit` does **not** fire when:
+
+- the process calls `process.exit()`;
+- the process is stopped by a signal such as `SIGTERM` or `SIGINT` (container shutdown, Ctrl-C);
+- a serverless platform freezes or reclaims the function after the handler returns.
+
+So call `flush()` yourself in those cases:
+
+- Call `await inspector.flush()` before `process.exit()`, in your `SIGTERM`/`SIGINT` handlers, and before a serverless handler (AWS Lambda, Google Cloud Functions, Vercel, ...) returns. It sends everything buffered, waits for in-flight requests (up to `timeoutMs`, default 10000) and never rejects.
 - In serverless functions, also pass `disableBatchTimer: true`.
 
 ```javascript
@@ -67,6 +75,11 @@ export const handler = async (event) => {
   inspector.trackSchemaFromEvent("Order Placed", { amount: 42 });
   await inspector.flush();
 };
+
+process.on("SIGTERM", async () => {
+  await inspector.flush();
+  process.exit(0);
+});
 ```
 
 `destroy()` is different: it discards buffered events without sending them, abandons in-flight requests and stops the timer. After `destroy()`, `trackSchemaFromEvent` resolves `[]` and sends nothing.
@@ -136,7 +149,7 @@ inspector.enableLogging(true | false);
 2.0 implements spec 3.0.1. These are the changes you may notice:
 
 - **The promise resolves when the event is queued, not when it is delivered.** Outside `dev`, events are batched (see [Batching options](#batching-options)), so `await inspector.trackSchemaFromEvent(...)` no longer means the event reached Avo. In `dev` each event is still sent within the call.
-- **The SDK no longer keeps your process alive.** 1.x ran a keep-alive timer while sends were pending; it is gone. Call `await inspector.flush()` before the process exits or a serverless handler returns, or buffered events are lost (see [Flushing before exit](#flushing-before-exit-required)).
+- **The SDK no longer keeps your process alive.** 1.x ran a keep-alive timer while sends were pending; it is gone. Buffered events are still sent when the process ends naturally (on `beforeExit`), but not on `process.exit()`, on signals, or when a serverless function is frozen. Call `await inspector.flush()` in those cases (see [Flushing before exit](#flushing-before-exit-required)).
 - **A non-200 response in `dev` resolves `[]`.** 1.x resolved the extracted schema whatever the status. Outside `dev` the promise resolves the schema, because the send happens later.
 - **`destroy()` terminates the instance.** It discards buffered events unsent and aborts in-flight requests. Afterwards `trackSchemaFromEvent` resolves `[]` and sends nothing; 1.x kept sending.
 - **`callInspectorWithBatchBody` changed**, if you call it directly:

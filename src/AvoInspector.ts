@@ -82,12 +82,64 @@ export class AvoInspector {
   private trackPending<T>(promise: Promise<T>): Promise<T> {
     this.pending.add(promise);
     this.pendingCount = this.pending.size;
+    this.updateExitDrain();
     const done = () => {
       this.pending.delete(promise);
       this.pendingCount = this.pending.size;
+      this.updateExitDrain();
     };
     promise.then(done, done);
     return promise;
+  }
+
+  // Best-effort delivery at exit: when the event loop empties ("beforeExit"), every
+  // instance with buffered or in-flight events is flushed. One listener serves all
+  // instances, and only instances with work are registered, so idle instances are not
+  // retained. The listener schedules nothing when there is nothing to send, so it never
+  // keeps the process alive on its own. "beforeExit" does not fire on process.exit() or
+  // on signals; callers flush() there.
+  private static instancesWithWork: Set<AvoInspector> = new Set();
+  private static exitDrainArmed = false;
+
+  private static drainOnExit = (): void => {
+    AvoInspector.exitDrainArmed = false;
+    const instances = Array.from(AvoInspector.instancesWithWork);
+    instances.forEach((inspector) => {
+      inspector.flush();
+    });
+    // The sends just started keep the loop alive; re-arm so anything they leave behind
+    // is drained at the next "beforeExit".
+    if (AvoInspector.instancesWithWork.size > 0) {
+      AvoInspector.armExitDrain();
+    }
+  };
+
+  private static armExitDrain(): void {
+    if (!AvoInspector.exitDrainArmed) {
+      process.once("beforeExit", AvoInspector.drainOnExit);
+      AvoInspector.exitDrainArmed = true;
+    }
+  }
+
+  private static disarmExitDrain(): void {
+    if (AvoInspector.exitDrainArmed) {
+      process.removeListener("beforeExit", AvoInspector.drainOnExit);
+      AvoInspector.exitDrainArmed = false;
+    }
+  }
+
+  private updateExitDrain(): void {
+    const hasWork =
+      !this.destroyed && (this.batchQueue.length > 0 || this.pending.size > 0);
+    if (hasWork) {
+      AvoInspector.instancesWithWork.add(this);
+      AvoInspector.armExitDrain();
+    } else {
+      AvoInspector.instancesWithWork.delete(this);
+      if (AvoInspector.instancesWithWork.size === 0) {
+        AvoInspector.disarmExitDrain();
+      }
+    }
   }
 
   private static _shouldLog = false;
@@ -483,6 +535,7 @@ export class AvoInspector {
     eventSchema: Array<SchemaEntry>
   ): Promise<Array<SchemaEntry>> {
     const send = this.batchQueue.enqueue(body);
+    this.updateExitDrain();
     if (this.batchSize === 1 && send !== null) {
       // Immediate send: the HTTP outcome is observable per call.
       return send.then((outcome) => (outcome === "non200" ? [] : eventSchema));
@@ -728,6 +781,7 @@ export class AvoInspector {
     this.batchQueue.clear();
     this.pending.clear();
     this.pendingCount = 0;
+    this.updateExitDrain();
     this.avoNetworkCallsHandler.abortInFlight();
     if (this.eventSpecFetcher) {
       this.eventSpecFetcher.destroy();
