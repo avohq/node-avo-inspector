@@ -5,6 +5,8 @@ import { gunzipSync } from "zlib";
 import { AvoInspector } from "../AvoInspector";
 import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
 import { VERSION } from "../AvoInspectorVersion";
+import { deepEquals } from "../utils";
+import * as crypto from "crypto";
 import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
 
 type Captured = { headers: IncomingMessage["headers"]; body: any[] };
@@ -151,6 +153,67 @@ describe("wire protocol", () => {
 
   test("VERSION matches the package version", () => {
     expect(VERSION).toBe(require("../../package.json").version);
+  });
+});
+
+describe("cyclic event properties with logging on", () => {
+  const cyclicProps = () => {
+    const props: any = { plan: "pro" };
+    props.self = props;
+    return props;
+  };
+
+  test("extractSchema returns the truncated schema instead of []", () => {
+    const inspector = dev();
+    inspector.enableLogging(true);
+
+    const schema = inspector.extractSchema(cyclicProps());
+
+    expect(schema[0]).toEqual({ propertyName: "plan", propertyType: "string" });
+    expect(schema[1]).toMatchObject({ propertyName: "self", propertyType: "object" });
+  });
+
+  test("trackSchemaFromEvent resolves the schema and sends the event", async () => {
+    const inspector = dev();
+    inspector.enableLogging(true);
+
+    const schema = await inspector.trackSchemaFromEvent("Cyclic", cyclicProps());
+
+    expect(schema[0]).toEqual({ propertyName: "plan", propertyType: "string" });
+    expect(captured).toHaveLength(1);
+  });
+
+  test("a codegen call and a manual call with distinct cyclic properties dedup without overflowing", async () => {
+    const inspector = dev();
+    inspector.enableLogging(true);
+
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent("Cyclic", cyclicProps(), "id", "hash");
+    await expect(inspector.trackSchemaFromEvent("Cyclic", cyclicProps())).resolves.toEqual([]);
+    expect(captured).toHaveLength(1);
+  });
+
+  test("deepEquals terminates on distinct cyclic objects", () => {
+    const a: any = { x: 1 };
+    a.self = a;
+    const b: any = { x: 1 };
+    b.self = b;
+    const c: any = { x: 2 };
+    c.self = c;
+
+    expect(deepEquals(a, b)).toBe(true);
+    expect(deepEquals(a, c)).toBe(false);
+  });
+
+  test("with encryption on, a cyclic property value is omitted instead of failing the event", async () => {
+    const ecdh = crypto.createECDH("prime256v1");
+    ecdh.generateKeys();
+    const inspector = dev({ publicEncryptionKey: ecdh.getPublicKey("hex") });
+
+    const schema = await inspector.trackSchemaFromEvent("Cyclic", cyclicProps());
+
+    expect(schema).toHaveLength(2);
+    expect(captured[0].body[0].eventProperties.map((p: any) => p.propertyName)).toEqual(["plan"]);
   });
 });
 

@@ -19,7 +19,7 @@ import {
 } from "./eventSpec/AvoEventSpecFetchTypes";
 import { VERSION } from "./AvoInspectorVersion";
 
-import { hasHeaderControlChar, isValueEmpty, normalizeOption } from "./utils";
+import { hasHeaderControlChar, isValueEmpty, normalizeOption, safeStringify } from "./utils";
 
 const libVersion = VERSION;
 
@@ -346,7 +346,7 @@ export class AvoInspector {
             "Avo Inspector: Supplied event " +
             eventName +
             " with params \n" +
-            JSON.stringify(eventProperties)
+            safeStringify(eventProperties)
           );
         }
         let eventSchema = this.extractSchema(eventProperties, false);
@@ -395,7 +395,7 @@ export class AvoInspector {
             "Avo Inspector: Supplied event " +
             eventName +
             " with params \n" +
-            JSON.stringify(eventProperties)
+            safeStringify(eventProperties)
           );
         }
         let eventSchema = this.extractSchema(eventProperties, false);
@@ -654,7 +654,7 @@ export class AvoInspector {
       if (AvoInspector.shouldLog) {
         console.log(
           "Avo Inspector: extracting schema from " +
-          JSON.stringify(eventProperties)
+          safeStringify(eventProperties)
         );
       }
 

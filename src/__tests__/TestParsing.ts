@@ -191,11 +191,20 @@ describe("Schema Parsing", () => {
       });
     });
 
-    test("a cyclic object is truncated at the cap instead of yielding []", () => {
+    test("a cyclic object is truncated at the cap instead of yielding [], with logging on", () => {
       const cyclic: any = { name: "root" };
       cyclic.self = cyclic;
+      // Logging stringifies the input, which must not throw on a cycle.
+      const log = jest.spyOn(console, "log").mockImplementation(() => {});
+      inspector.enableLogging(true);
 
-      const schema = inspector.extractSchema(cyclic);
+      let schema: any[];
+      try {
+        schema = inspector.extractSchema(cyclic);
+      } finally {
+        inspector.enableLogging(false);
+        log.mockRestore();
+      }
 
       expect(schema[0]).toEqual({ propertyName: "name", propertyType: "string" });
       let entry = schema[1];

@@ -380,7 +380,16 @@ export class AvoNetworkCallsHandler {
       }
 
       const rawValue = rawEventProperties[prop.propertyName];
-      const jsonValue = JSON.stringify(rawValue) ?? "null";
+      let jsonValue: string;
+      try {
+        jsonValue = JSON.stringify(rawValue) ?? "null";
+      } catch (e) {
+        // A value that cannot be serialized (e.g. cyclic) is omitted, like an encryption failure.
+        console.warn(
+          `[Avo Inspector] Warning: could not serialize property "${prop.propertyName}" for encryption, omitting it. ${e}`
+        );
+        continue;
+      }
 
       const encrypted = AvoEncryption.encryptValue(
         jsonValue,
