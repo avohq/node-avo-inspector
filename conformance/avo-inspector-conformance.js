@@ -115,9 +115,17 @@ async function main() {
   const operation =
     envelope.operation ?? (envelope.suite === "schema-extraction" ? "extractSchema" : undefined);
 
+  // `envelope.constructor` would otherwise resolve to the inherited Object function.
+  const options = Object.prototype.hasOwnProperty.call(envelope, "constructor")
+    ? envelope.constructor
+    : undefined;
+  if (options === null || typeof options !== "object" || Array.isArray(options)) {
+    configError(fixtureId, "missing or invalid constructor object");
+  }
+
   let inspector;
   try {
-    inspector = new AvoInspector(envelope.constructor);
+    inspector = new AvoInspector(options);
   } catch (err) {
     exitWith(1, { fixture_id: fixtureId, passed: false, actual: null, outcome: "resolve", error: `Constructor threw: ${err.message}` });
   }
