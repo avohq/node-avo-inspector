@@ -171,6 +171,30 @@ describe("wire protocol", () => {
     );
   });
 
+  test.each(["\u0001", "\u001b", "\u007f", "\u0085"])(
+    "constructor rejects an API key containing any control character such as %j",
+    (ch) => {
+      expect(() => dev({ apiKey: "test" + ch + "key" })).toThrow(
+        "[Avo Inspector] API key contains a control character. The API key is sent as a request header and cannot contain CR, LF, or NUL."
+      );
+    }
+  );
+
+  test("the send guard refuses any control character, without contacting the server", async () => {
+    const handler = new AvoNetworkCallsHandler("test\u0001key", "dev", "", "1.0.0", VERSION);
+    const body = handler.bodyForEventSchemaCall("", "E", [], null, null);
+
+    await expect(handler.callInspectorWithBatchBody([body])).rejects.toBe("Request failed");
+    expect(captured).toHaveLength(0);
+  });
+
+  test("a tab in the API key is allowed and sent verbatim", async () => {
+    const inspector = dev({ apiKey: "test\tkey" });
+    await inspector.trackSchemaFromEvent("E", {});
+
+    expect(captured[0].headers["api-key"]).toBe("test\tkey");
+  });
+
   test("the mock endpoint override is never honored by a prod instance", () => {
     expect(AvoNetworkCallsHandler.mockEndpointFor("prod")).toBeNull();
     expect(AvoNetworkCallsHandler.mockEndpointFor("staging")).toBe(

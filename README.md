@@ -155,8 +155,8 @@ inspector.enableLogging(true | false);
 - **`callInspectorWithBatchBody` changed**, if you call it directly:
   - it no longer applies sampling (sampling now happens per event when it is queued);
   - it resolves with the HTTP status code instead of `undefined`;
-  - besides network errors and timeouts, it rejects with `"Request failed"` without sending when a header value contains CR, LF or NUL.
-- **An API key containing CR, LF or NUL now throws in the constructor**, because the key is sent as a request header.
+  - besides network errors and timeouts, it rejects with `"Request failed"` without sending when a header value contains a control character (anything but tab).
+- **An API key containing a control character (anything but tab) now throws in the constructor**, because the key is sent as a request header.
 - **Wire changes:** requests go to `https://api.avo.app/inspector/v2/track` and carry the API key and env as `api-key` and `env` headers. Bodies of 1024 bytes or more are gzipped. Events no longer carry `sessionId` or `trackingId`, and every event now carries `streamId`.
 
 Unchanged from 1.x, but easy to trip over: the logging flag is shared by every instance in the process, and each constructor resets it (on for `dev`, off otherwise). Creating a `prod` instance after a `dev` one turns logging off for both. Call `enableLogging` after constructing your instances if you need a specific setting.

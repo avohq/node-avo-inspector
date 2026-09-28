@@ -198,7 +198,7 @@ export class AvoNetworkCallsHandler {
           if (AvoInspector.shouldLog) {
             console.error(
               "Avo Inspector: [network] Header " + name +
-                " contains a control character (CR, LF, or NUL). Batch dropped."
+                " contains a control character. Batch dropped."
             );
           }
           reject("Request failed");

@@ -68,8 +68,10 @@ const normalizeOption = (value: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-// CR, LF and NUL delimit HTTP/1.1 header fields and must never reach a header value.
-const hasHeaderControlChar = (value: string): boolean => /[\r\n\0]/.test(value);
+// No control character (Unicode Cc: C0, DEL, C1) may reach a header value; CR, LF and NUL
+// would split or end the header field. Tab is the one exception: it is valid in a value.
+const hasHeaderControlChar = (value: string): boolean =>
+  /[\u0000-\u0008\u000A-\u001F\u007F-\u009F]/.test(value);
 
 // JSON for log lines only: a repeated object reference is written as "[Circular]" instead
 // of throwing on cyclic input.
