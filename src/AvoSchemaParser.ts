@@ -6,8 +6,7 @@ let isComplex = (value: any): boolean => {
   return typeof value === "object" && value != null;
 };
 
-// Deeper complex values are reported as "object" instead of being descended into, which
-// also keeps cyclic input finite.
+// Deeper complex values are reported as "object" instead of being descended into.
 const MAX_DEPTH = 10;
 
 export class AvoSchemaParser {
@@ -22,10 +21,28 @@ export class AvoSchemaParser {
       return [];
     }
 
+    // Objects and arrays on the path from the root to the value being mapped. A value that
+    // is its own ancestor (a cycle) is reported like one past the depth cap, so an object
+    // holding itself under several keys cannot expand exponentially.
+    const ancestors = new Set<any>();
+    const isLeaf = (value: any, depth: number): boolean =>
+      isComplex(value) && (depth >= MAX_DEPTH || ancestors.has(value));
+
     let mapping = (object: any, depth: number) => {
+      if (isComplex(object)) {
+        ancestors.add(object);
+      }
+      try {
+        return mapValue(object, depth);
+      } finally {
+        ancestors.delete(object);
+      }
+    };
+
+    let mapValue = (object: any, depth: number): any => {
       if (isArray(object)) {
         let list = object.map((x: any) => {
-          return depth >= MAX_DEPTH && isComplex(x) ? "object" : mapping(x, depth + 1);
+          return isLeaf(x, depth) ? "object" : mapping(x, depth + 1);
         });
         return this.removeDuplicates(list);
       } else if (typeof object === "object") {
@@ -44,7 +61,7 @@ export class AvoSchemaParser {
             };
 
             if (isComplex(val)) {
-              if (depth >= MAX_DEPTH) {
+              if (isLeaf(val, depth)) {
                 mappedEntry.propertyType = "object";
                 mappedEntry["children"] = [];
               } else {

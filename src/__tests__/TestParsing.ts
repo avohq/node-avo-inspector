@@ -191,7 +191,7 @@ describe("Schema Parsing", () => {
       });
     });
 
-    test("a cyclic object is truncated at the cap instead of yielding [], with logging on", () => {
+    test("a cyclic object is cut at the repeat instead of yielding [], with logging on", () => {
       const cyclic: any = { name: "root" };
       cyclic.self = cyclic;
       // Logging stringifies the input, which must not throw on a cycle.
@@ -206,13 +206,54 @@ describe("Schema Parsing", () => {
         log.mockRestore();
       }
 
-      expect(schema[0]).toEqual({ propertyName: "name", propertyType: "string" });
-      let entry = schema[1];
-      for (let i = 0; i < 10; i++) {
-        expect(entry).toMatchObject({ propertyName: "self", propertyType: "object" });
-        entry = entry.children[1];
-      }
-      expect(entry).toEqual({ propertyName: "self", propertyType: "object", children: [] });
+      expect(schema).toEqual([
+        { propertyName: "name", propertyType: "string" },
+        { propertyName: "self", propertyType: "object", children: [] },
+      ]);
+    });
+  });
+
+  describe("cycles are cut by ancestor identity", () => {
+    test("an object holding itself under several keys is not expanded", () => {
+      const o: any = { n: 1 };
+      o.a = o;
+      o.b = o;
+      o.c = o;
+
+      expect(inspector.extractSchema(o)).toEqual([
+        { propertyName: "n", propertyType: "int" },
+        { propertyName: "a", propertyType: "object", children: [] },
+        { propertyName: "b", propertyType: "object", children: [] },
+        { propertyName: "c", propertyType: "object", children: [] },
+      ]);
+    });
+
+    test("an array containing itself maps that element to the type string object", () => {
+      const list: any[] = [1];
+      list.push(list);
+
+      expect(inspector.extractSchema({ list })).toEqual([
+        { propertyName: "list", propertyType: "list(int)", children: ["int", "object"] },
+      ]);
+    });
+
+    test("a list element that is an ancestor object maps to object", () => {
+      const o: any = { n: 1 };
+      o.items = [o];
+
+      expect(inspector.extractSchema(o)).toEqual([
+        { propertyName: "n", propertyType: "int" },
+        { propertyName: "items", propertyType: "list(object)", children: ["object"] },
+      ]);
+    });
+
+    test("a shared reference that is not an ancestor is expanded each time", () => {
+      const shared = { v: 1 };
+
+      expect(inspector.extractSchema({ a: shared, b: shared })).toEqual([
+        { propertyName: "a", propertyType: "object", children: [{ propertyName: "v", propertyType: "int" }] },
+        { propertyName: "b", propertyType: "object", children: [{ propertyName: "v", propertyType: "int" }] },
+      ]);
     });
   });
 
