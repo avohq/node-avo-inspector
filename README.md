@@ -55,6 +55,8 @@ let inspector = new Inspector.AvoInspector({
 });
 ```
 
+While an instance has events that are buffered or still being sent, the SDK keeps a reference to it so they can be sent when the process ends. Such an instance is not garbage-collected until its events are sent or it is destroyed, even if your code has dropped it. With `disableBatchTimer: true` and no `flush()`, buffered events leave only on a size trigger or at exit, so the instance and its buffer stay in memory until then. Call `flush()` or `destroy()` when you are done with an instance.
+
 # Flushing before exit (required)
 
 Buffered events live in memory only and are lost if the process exits first. Delivery is at-most-once: a batch that fails to send is dropped, never retried.
