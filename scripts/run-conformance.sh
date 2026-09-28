@@ -36,5 +36,18 @@ else
   echo "    spec @ $(git -C "$SPEC_DIR" rev-parse --short HEAD)"
 fi
 
+HARNESS="$ROOT/conformance/avo-inspector-conformance.js"
+# The suite runner splits --harness on whitespace and does not honor quotes, so a checkout
+# path containing spaces is reached through a symlink in a space-free temp directory.
+# Node resolves the link to the real file, so the harness still finds ../dist.
+case "$HARNESS" in
+  *[[:space:]]*)
+    LINK_DIR="$(mktemp -d /tmp/avo-harness.XXXXXX)"
+    trap 'rm -rf "$LINK_DIR"' EXIT
+    ln -s "$HARNESS" "$LINK_DIR/avo-inspector-conformance.js"
+    HARNESS="$LINK_DIR/avo-inspector-conformance.js"
+    ;;
+esac
+
 echo "==> Running conformance suite"
-node "$SPEC_DIR/conformance/runner/suite-runner.mjs" --harness "node $ROOT/conformance/avo-inspector-conformance.js"
+node "$SPEC_DIR/conformance/runner/suite-runner.mjs" --harness "node $HARNESS"
