@@ -228,6 +228,20 @@ describe("Schema Parsing", () => {
       ]);
     });
 
+    test("an object holding itself under 5 keys finishes fast with a small schema", () => {
+      // Without the ancestor check this expands to about 5^10 (~10M) nodes.
+      const o: any = {};
+      for (const key of ["a", "b", "c", "d", "e"]) o[key] = o;
+
+      const started = Date.now();
+      const schema = inspector.extractSchema(o);
+
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(schema).toEqual(
+        ["a", "b", "c", "d", "e"].map((key) => ({ propertyName: key, propertyType: "object", children: [] }))
+      );
+    }, 5000);
+
     test("an array containing itself maps that element to the type string object", () => {
       const list: any[] = [1];
       list.push(list);
