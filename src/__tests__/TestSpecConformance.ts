@@ -295,6 +295,32 @@ describe("cyclic event properties with logging on", () => {
   });
 });
 
+describe("an internal error while building the body", () => {
+  const internalError = "Avo Inspector: something went wrong. Please report to support@avo.app.";
+
+  test("rejects with the internal-error string without validation", async () => {
+    const inspector = staging({ batchSize: 30 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "bodyForEventSchemaCall").mockImplementation(() => {
+      throw new Error("boom");
+    });
+
+    await expect(inspector.trackSchemaFromEvent("E", { a: 1 })).rejects.toBe(internalError);
+  });
+
+  test("rejects with the same string when validation is active", async () => {
+    jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
+    jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((_e, _s, callback) => callback(null));
+    const inspector = staging({ batchSize: 30 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "bodyForEventSchemaCall").mockImplementation(() => {
+      throw new Error("boom");
+    });
+
+    await expect(inspector.trackSchemaFromEvent("E", { a: 1 })).rejects.toBe(internalError);
+    expect(console.error).toHaveBeenCalledWith(internalError, expect.any(Error));
+    expect((inspector as any).batchQueue.length).toBe(0);
+  });
+});
+
 describe("deduplication", () => {
   test("a manual call carrying gateway options is not deduplicated against a codegen call", async () => {
     const inspector = dev();

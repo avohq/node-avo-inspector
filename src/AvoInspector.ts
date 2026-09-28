@@ -52,9 +52,10 @@ type SchemaEntry = {
 
 type SendOutcome = "ok" | "non200" | "failed";
 
-// The promise a track call resolves with, and the send its enqueue triggered, if any.
+// The promise a track call resolves with (null: reject with the internal error), and the
+// send its enqueue triggered, if any.
 type Enqueued = {
-  result: Promise<Array<SchemaEntry>>;
+  result: Promise<Array<SchemaEntry>> | null;
   send: Promise<SendOutcome> | null;
 };
 
@@ -523,7 +524,7 @@ export class AvoInspector {
     };
 
     if (!this.isValidationActive()) {
-      return this.enqueue(buildBody(null), eventSchema).result;
+      return this.enqueue(buildBody(null), eventSchema).result!;
     }
 
     // A flush() that starts while this validation is in progress sets flushRequested:
@@ -544,8 +545,9 @@ export class AvoInspector {
         try {
           body = buildBody(validationResult);
         } catch (err) {
-          console.error("Avo Inspector: schema sending failed: " + err + ".");
-          return { result: Promise.resolve(eventSchema), send: null };
+          // Same outcome as a synchronous internal error before enqueue (SPEC §4.2 step 5).
+          console.error(INTERNAL_ERROR_MESSAGE, err);
+          return { result: null, send: null };
         }
         const enqueued = this.enqueue(body, eventSchema);
         return {
@@ -563,7 +565,7 @@ export class AvoInspector {
     inFlight.then(forget, forget);
     this.trackPending(inFlight);
 
-    return outcome.then(({ result }) => result);
+    return outcome.then(({ result }) => result || Promise.reject(INTERNAL_ERROR_MESSAGE));
   }
 
   private enqueue(body: EventSchemaBody, eventSchema: Array<SchemaEntry>): Enqueued {
