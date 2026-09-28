@@ -29,6 +29,8 @@ function writeEnvelope(envelope) {
   process.stdout.write(JSON.stringify(envelope) + "\n");
 }
 
+// Always leave through process.exit(): it skips the SDK's "beforeExit" drain, which would
+// otherwise send events a fixture expects to stay buffered (wire-8 expects 0 requests).
 function exitWith(code, envelope) {
   writeEnvelope(envelope);
   process.exit(code);
