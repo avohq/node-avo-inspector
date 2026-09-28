@@ -77,6 +77,12 @@ The setup is lightweight and is covered [in this guide](https://www.avo.app/docs
 
 Every event sent with your Codegen after this integration will automatically be sent to Inspector.
 
+## Deduplication with Codegen
+
+If you also call `trackSchemaFromEvent` for events that Codegen already reports, the SDK drops the second report of the same observation. A Codegen call and a manual call are treated as duplicates when they have the same event name, the same stream id and deeply equal properties, and arrive within 500 ms of each other in either order. The duplicate call sends nothing and resolves `[]`. Two manual calls, or two Codegen calls, are never deduplicated against each other.
+
+Calls that carry [gateway options](#gateway-options) are never deduplicated: each gateway output is a distinct observation and is always sent.
+
 # Sending event schemas for events reported outside of Codegen
 
 Whenever you send tracking event call the following methods:
