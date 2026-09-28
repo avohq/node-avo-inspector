@@ -4,6 +4,8 @@
 
 This is a quick start guide. For more information about the Inspector project please read the [Inspector SDK Reference](https://www.avo.app/docs/implementation/avo-inspector-sdk-reference) and the [Inspector Setup Guide](https://www.avo.app/docs/implementation/setup-inspector-sdk).
 
+Implements [avohq/spec-first-inspector-server-sdk](https://github.com/avohq/spec-first-inspector-server-sdk) v3.0.1 (exported as `SPEC_VERSION`).
+
 # Installation
 
 The library is distributed with npm, install with npm:
@@ -31,6 +33,44 @@ let inspector = new Inspector.AvoInspector({
 });
 ```
 
+## Batching options
+
+Events are buffered in memory and sent in batches. All options are optional:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `batchSize` | `30` | Send when this many events are buffered. Always `1` in `dev`, so every event is sent immediately. |
+| `batchFlushSeconds` | `30` | Send once the oldest buffered event is this many seconds old. |
+| `maxQueueSize` | `1000` | Maximum buffered events; the oldest are dropped first when it is exceeded. |
+| `disableBatchTimer` | `false` | Start no background flush timer. Set it to `true` in serverless functions. |
+
+```javascript
+let inspector = new Inspector.AvoInspector({
+  apiKey: "your api key",
+  env: Inspector.AvoInspectorEnv.Prod,
+  version: "1.0.0",
+  appName: "My app",
+  batchSize: 50,
+  batchFlushSeconds: 10,
+});
+```
+
+# Flushing before exit (required)
+
+Buffered events live in memory only and are lost if the process exits first. Delivery is at-most-once: a batch that fails to send is dropped, never retried. The SDK does not keep your process alive, so:
+
+- Call `await inspector.flush()` before the process exits, or before a serverless handler (AWS Lambda, Google Cloud Functions, Vercel, ...) returns. It sends everything buffered, waits for in-flight requests (up to `timeoutMs`, default 10000) and never rejects.
+- In serverless functions, also pass `disableBatchTimer: true`.
+
+```javascript
+export const handler = async (event) => {
+  inspector.trackSchemaFromEvent("Order Placed", { amount: 42 });
+  await inspector.flush();
+};
+```
+
+`destroy()` is different: it discards buffered events without sending them, abandons in-flight requests and stops the timer. After `destroy()`, `trackSchemaFromEvent` resolves `[]` and sends nothing.
+
 # Integrating with Avo Codegen
 
 The setup is lightweight and is covered [in this guide](https://www.avo.app/docs/implementation/start-using-inspector-with-avo-functions).
@@ -54,12 +94,49 @@ inspector.trackSchemaFromEvent("Event name", {
 });
 ```
 
+`trackSchemaFromEvent` returns a promise that resolves with the extracted schema once the event is queued. In `dev` the event is sent within the call, and the promise resolves `[]` if the Inspector API answers with a non-200 status. You can pass an optional stream id as the third argument to correlate events.
+
+## Gateway options
+
+When you use a gateway-scoped Inspector API key, pass the gateway coordinates in an optional options object as the fourth argument (JavaScript has no named arguments, so the three are grouped in one object):
+
+```javascript
+inspector.trackSchemaFromEvent(
+  "Purchase",
+  { amount: 42 },
+  undefined, // streamId
+  {
+    outputReference: "meta-x7k2q", // the gateway output this event was bound for; omit for the gateway checkpoint
+    originHint: "android",         // which source the event came from
+    originAppVersion: "4.2.0",     // that source's app version
+  }
+);
+```
+
+- `originHint` must be a low-cardinality label such as `"web"`, `"ios"` or `"android"`, never a user id or any other high-cardinality value.
+- Values are trimmed; blank or non-string values are ignored.
+- `originAppVersion` replaces the constructor `version` for that event. If you pass `originHint` without `originAppVersion`, the event is sent without an app version (`null`), because the constructor version belongs to a different source.
+
 # Enabling logs
 
 Logs are enabled by default in the dev mode and disabled in prod mode. You can enable and disable logs by calling the `enableLogging` method:
 
 ```javascript
 inspector.enableLogging(true | false);
+```
+
+# Development
+
+## Releasing
+
+Update the `VERSION` constant in `src/AvoInspectorVersion.ts` and the `version` in `package.json` on every release. `VERSION` is sent to Avo as `libVersion`, and a unit test fails if the two differ.
+
+## Conformance suite
+
+`scripts/run-conformance.sh` builds the SDK and runs the spec's conformance suite (36 fixtures) against the harness in `conformance/avo-inspector-conformance.js` (runner contract 1.1.0). It fetches the spec at the pinned commit into `.spec-repo/`; set `SPEC_DIR` to use a local checkout instead.
+
+```
+./scripts/run-conformance.sh
 ```
 
 ## Author
