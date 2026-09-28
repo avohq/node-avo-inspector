@@ -393,6 +393,49 @@ describe("batching", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  // Node needs no fix for the Go/Java flush race: drain() swaps the buffer and registers the
+  // send in flight in one synchronous step (drain -> dispatch -> sendBatch -> trackPending),
+  // so flush() cannot run in between. These tests pin that invariant.
+  describe("a swapped-out batch is in flight before any other code runs", () => {
+    const deferredSend = (inspector: AvoInspector) => {
+      let release: (status: number) => void = () => {};
+      const send = jest
+        .spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+        .mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+      return { send, release: (status: number) => release(status) };
+    };
+
+    test("size trigger: registered synchronously, and flush() waits for it", async () => {
+      const inspector = staging({ batchSize: 2 });
+      const { release } = deferredSend(inspector);
+
+      inspector.trackSchemaFromEvent("E1", {});
+      inspector.trackSchemaFromEvent("E2", {});
+      expect((inspector as any).pending.size).toBe(1);
+
+      let flushed = false;
+      const flushing = inspector.flush().then(() => { flushed = true; });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(flushed).toBe(false);
+
+      release(200);
+      await flushing;
+      expect(flushed).toBe(true);
+    });
+
+    test("scheduled flush: registered synchronously when the timer fires", () => {
+      jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
+      const inspector = staging({ batchSize: 30, batchFlushSeconds: 1 });
+      deferredSend(inspector);
+
+      inspector.trackSchemaFromEvent("E1", {});
+      jest.advanceTimersByTime(1000);
+
+      expect((inspector as any).batchQueue.length).toBe(0);
+      expect((inspector as any).pending.size).toBe(1);
+    });
+  });
+
   test("a transient network failure drops the batch; it is never re-queued", async () => {
     responders.push((req) => req.socket.destroy()); // connection dropped mid-request
     const inspector = staging({ batchSize: 2 });
