@@ -86,15 +86,16 @@ export class AvoInspector {
   private pending: Set<Promise<unknown>> = new Set();
   // Pending entries that are event spec validations, keyed by their pending promise.
   private validations: Map<Promise<unknown>, { flushRequested: boolean }> = new Map();
-  private pendingCount = 0;
+
+  private get pendingCount(): number {
+    return this.pending.size;
+  }
 
   private trackPending<T>(promise: Promise<T>): Promise<T> {
     this.pending.add(promise);
-    this.pendingCount = this.pending.size;
     this.updateExitDrain();
     const done = () => {
       this.pending.delete(promise);
-      this.pendingCount = this.pending.size;
       this.updateExitDrain();
     };
     promise.then(done, done);
@@ -823,7 +824,6 @@ export class AvoInspector {
     this.batchQueue.clear();
     this.pending.clear();
     this.validations.clear();
-    this.pendingCount = 0;
     this.updateExitDrain();
     this.avoNetworkCallsHandler.abortInFlight();
     if (this.eventSpecFetcher) {
