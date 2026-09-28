@@ -309,6 +309,10 @@ export class AvoInspector {
     const originAppVersion = normalizeOption(opts.originAppVersion);
 
     const resolved: ResolvedTrackOptions = {
+      gatewayScoped:
+        outputReference !== undefined ||
+        originHint !== undefined ||
+        originAppVersion !== undefined,
       appVersion:
         originAppVersion !== undefined
           ? originAppVersion
@@ -441,11 +445,7 @@ export class AvoInspector {
     anonymousId: string,
     trackOptions: ResolvedTrackOptions
   ): boolean {
-    const gatewayScoped =
-      trackOptions.outputReference !== undefined ||
-      trackOptions.originHint !== undefined ||
-      trackOptions.appVersion !== this.version;
-    if (gatewayScoped) {
+    if (trackOptions.gatewayScoped) {
       return true;
     }
     return this.avoDeduplicator.shouldRegisterEvent(

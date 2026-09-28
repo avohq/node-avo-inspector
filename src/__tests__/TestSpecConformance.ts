@@ -309,6 +309,28 @@ describe("deduplication", () => {
     expect(captured[1].body[0].outputReference).toBe("meta-x7k2q");
   });
 
+  test("a manual call whose only option is originAppVersion equal to the instance version is not deduplicated", async () => {
+    const inspector = dev();
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "s1");
+    const schema = await inspector.trackSchemaFromEvent("Purchase", { a: 1 }, "s1", {
+      originAppVersion: " 1.0.0 ",
+    });
+
+    expect(schema).toEqual([{ propertyName: "a", propertyType: "int" }]);
+    expect(captured).toHaveLength(2);
+  });
+
+  test("blank gateway options do not exempt a call from deduplication", async () => {
+    const inspector = dev();
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "s1");
+    await expect(
+      inspector.trackSchemaFromEvent("Purchase", { a: 1 }, "s1", { outputReference: "  ", originHint: "" })
+    ).resolves.toEqual([]);
+    expect(captured).toHaveLength(1);
+  });
+
   test("a manual call without options is still deduplicated against a codegen call", async () => {
     const inspector = dev();
     // @ts-ignore

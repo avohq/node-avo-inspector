@@ -28,6 +28,8 @@ export interface ResolvedTrackOptions {
   appVersion: string | null;
   outputReference?: string;
   originHint?: string;
+  /** True when the caller supplied at least one non-blank gateway option. */
+  gatewayScoped: boolean;
 }
 
 export interface EventPropertyEncrypted {
