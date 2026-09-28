@@ -154,6 +154,40 @@ describe("wire protocol", () => {
   });
 });
 
+describe("deduplication", () => {
+  test("a manual call carrying gateway options is not deduplicated against a codegen call", async () => {
+    const inspector = dev();
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "s1");
+    const schema = await inspector.trackSchemaFromEvent("Purchase", { a: 1 }, "s1", {
+      outputReference: "meta-x7k2q",
+    });
+
+    expect(schema).toEqual([{ propertyName: "a", propertyType: "int" }]);
+    expect(captured).toHaveLength(2);
+    expect(captured[1].body[0].outputReference).toBe("meta-x7k2q");
+  });
+
+  test("a manual call without options is still deduplicated against a codegen call", async () => {
+    const inspector = dev();
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "s1");
+    await expect(inspector.trackSchemaFromEvent("Purchase", { a: 1 }, "s1")).resolves.toEqual([]);
+    expect(captured).toHaveLength(1);
+  });
+
+  test("the codegen entry accepts gateway options", async () => {
+    const inspector = dev();
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "s1", {
+      originHint: " web ",
+    });
+
+    const event = captured[0].body[0];
+    expect(event).toMatchObject({ avoFunction: true, eventId: "eventId", originHint: "web", appVersion: null });
+  });
+});
+
 describe("sampling", () => {
   const respondWith = (status: number, body: object): Responder => (_req, res) => {
     res.writeHead(status, { "Content-Type": "application/json" });

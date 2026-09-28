@@ -284,14 +284,10 @@ export class AvoInspector {
       }
       const avoStreamId = new AvoStreamId(streamId);
       const anonymousId = avoStreamId.streamId || this.generatedAnonymousId;
+      const trackOptions = this.resolveTrackOptions(options);
 
       if (
-        this.avoDeduplicator.shouldRegisterEvent(
-          eventName,
-          eventProperties,
-          false,
-          anonymousId
-        )
+        this.shouldRegisterEvent(eventName, eventProperties, false, anonymousId, trackOptions)
       ) {
         if (AvoInspector.shouldLog) {
           console.log(
@@ -310,7 +306,7 @@ export class AvoInspector {
           null,
           anonymousId,
           eventProperties,
-          this.resolveTrackOptions(options)
+          trackOptions
         );
       } else {
         if (AvoInspector.shouldLog) {
@@ -329,21 +325,18 @@ export class AvoInspector {
     eventProperties: { [propName: string]: any },
     eventId: string,
     eventHash: string,
-    streamId?: string
+    streamId?: string,
+    options?: TrackOptions
   ): Promise<Array<SchemaEntry>> {
     try {
       if (this.destroyed) {
         return Promise.resolve([]);
       }
       const anonymousId = (streamId && streamId.length > 0) ? streamId : this.generatedAnonymousId;
+      const trackOptions = this.resolveTrackOptions(options);
 
       if (
-        this.avoDeduplicator.shouldRegisterEvent(
-          eventName,
-          eventProperties,
-          true,
-          anonymousId
-        )
+        this.shouldRegisterEvent(eventName, eventProperties, true, anonymousId, trackOptions)
       ) {
         if (AvoInspector.shouldLog) {
           console.log(
@@ -362,7 +355,7 @@ export class AvoInspector {
           eventHash,
           anonymousId,
           eventProperties,
-          this.resolveTrackOptions()
+          trackOptions
         );
       } else {
         if (AvoInspector.shouldLog) {
@@ -374,6 +367,32 @@ export class AvoInspector {
       console.error(INTERNAL_ERROR_MESSAGE, e);
       return Promise.reject(INTERNAL_ERROR_MESSAGE);
     }
+  }
+
+  /**
+   * Codegen/manual deduplication applies only to plain calls. A call carrying gateway
+   * options is a distinct observation per gateway output and is always sent.
+   */
+  private shouldRegisterEvent(
+    eventName: string,
+    eventProperties: { [propName: string]: any },
+    fromAvoFunction: boolean,
+    anonymousId: string,
+    trackOptions: ResolvedTrackOptions
+  ): boolean {
+    const gatewayScoped =
+      trackOptions.outputReference !== undefined ||
+      trackOptions.originHint !== undefined ||
+      trackOptions.appVersion !== this.version;
+    if (gatewayScoped) {
+      return true;
+    }
+    return this.avoDeduplicator.shouldRegisterEvent(
+      eventName,
+      eventProperties,
+      fromAvoFunction,
+      anonymousId
+    );
   }
 
   /**
