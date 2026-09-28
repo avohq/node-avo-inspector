@@ -52,6 +52,12 @@ type SchemaEntry = {
 
 type SendOutcome = "ok" | "non200" | "failed";
 
+// The promise a track call resolves with, and the send its enqueue triggered, if any.
+type Enqueued = {
+  result: Promise<Array<SchemaEntry>>;
+  send: Promise<SendOutcome> | null;
+};
+
 type ValidationResult = {
   metadata: EventSpecMetadata;
   propertyResults: PropertyValidationResult[];
@@ -77,6 +83,8 @@ export class AvoInspector {
   // In-flight work (spec fetches before enqueue, and batch sends) that flush() awaits.
   // Nothing here keeps the process alive: callers flush() or await before exit.
   private pending: Set<Promise<unknown>> = new Set();
+  // Pending entries that are event spec validations, keyed by their pending promise.
+  private validations: Map<Promise<unknown>, { flushRequested: boolean }> = new Map();
   private pendingCount = 0;
 
   private trackPending<T>(promise: Promise<T>): Promise<T> {
@@ -515,44 +523,60 @@ export class AvoInspector {
     };
 
     if (!this.isValidationActive()) {
-      return this.enqueue(buildBody(null), eventSchema);
+      return this.enqueue(buildBody(null), eventSchema).result;
     }
 
-    return this.trackPending(
-      this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId)
-        .catch((err): ValidationResult | null => {
-          if (AvoInspector.shouldLog) {
-            console.warn("Avo Inspector: Event spec validation failed for event: " + eventName + ". Sending without validation. " + err);
-          }
-          return null;
-        })
-        .then((validationResult) => {
-          if (this.destroyed) {
-            return [];
-          }
-          let body: EventSchemaBody;
-          try {
-            body = buildBody(validationResult);
-          } catch (err) {
-            console.error("Avo Inspector: schema sending failed: " + err + ".");
-            return eventSchema;
-          }
-          return this.enqueue(body, eventSchema);
-        })
-    );
+    // A flush() that starts while this validation is in progress sets flushRequested:
+    // the event then goes out as soon as it is queued, and flush() waits for that send.
+    const validation = { flushRequested: false };
+    const outcome = this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId)
+      .catch((err): ValidationResult | null => {
+        if (AvoInspector.shouldLog) {
+          console.warn("Avo Inspector: Event spec validation failed for event: " + eventName + ". Sending without validation. " + err);
+        }
+        return null;
+      })
+      .then((validationResult): Enqueued => {
+        if (this.destroyed) {
+          return { result: Promise.resolve([]), send: null };
+        }
+        let body: EventSchemaBody;
+        try {
+          body = buildBody(validationResult);
+        } catch (err) {
+          console.error("Avo Inspector: schema sending failed: " + err + ".");
+          return { result: Promise.resolve(eventSchema), send: null };
+        }
+        const enqueued = this.enqueue(body, eventSchema);
+        return {
+          result: enqueued.result,
+          send: enqueued.send || (validation.flushRequested ? this.batchQueue.drain() : null),
+        };
+      });
+
+    // In flight until the event is queued and, if that triggered a send, until it settles.
+    const inFlight = outcome.then(({ send }) => (send ? send.then(() => undefined) : undefined));
+    this.validations.set(inFlight, validation);
+    const forget = () => {
+      this.validations.delete(inFlight);
+    };
+    inFlight.then(forget, forget);
+    this.trackPending(inFlight);
+
+    return outcome.then(({ result }) => result);
   }
 
-  private enqueue(
-    body: EventSchemaBody,
-    eventSchema: Array<SchemaEntry>
-  ): Promise<Array<SchemaEntry>> {
+  private enqueue(body: EventSchemaBody, eventSchema: Array<SchemaEntry>): Enqueued {
     const send = this.batchQueue.enqueue(body);
     this.updateExitDrain();
     if (this.batchSize === 1 && send !== null) {
       // Immediate send: the HTTP outcome is observable per call.
-      return send.then((outcome) => (outcome === "non200" ? [] : eventSchema));
+      return {
+        result: send.then((outcome) => (outcome === "non200" ? [] : eventSchema)),
+        send,
+      };
     }
-    return Promise.resolve(eventSchema);
+    return { result: Promise.resolve(eventSchema), send };
   }
 
   private sendBatch(batch: Array<InspectorBody>): Promise<SendOutcome> {
@@ -604,30 +628,34 @@ export class AvoInspector {
       typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs >= 0
         ? Math.min(timeoutMs, MAX_TIMER_MS)
         : DEFAULT_FLUSH_TIMEOUT_MS;
-    const deadline = Date.now() + budget;
     try {
-      while (!this.destroyed) {
-        this.batchQueue.drain();
-        if (this.pending.size === 0) {
-          return;
-        }
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) {
-          return;
-        }
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const timedOut = await Promise.race([
-          Promise.allSettled(Array.from(this.pending)).then(() => false),
-          new Promise<boolean>((resolve) => {
-            timer = setTimeout(() => resolve(true), remaining);
-            timer.unref();
-          }),
-        ]);
-        clearTimeout(timer);
-        if (timedOut) {
-          return;
-        }
+      if (this.destroyed) {
+        return;
       }
+      // Only work started before this call, plus the batch it drains, is awaited.
+      const waitFor: Array<Promise<unknown>> = Array.from(this.pending);
+      waitFor.forEach((promise) => {
+        const validation = this.validations.get(promise);
+        if (validation) {
+          validation.flushRequested = true;
+        }
+      });
+      const drained = this.batchQueue.drain();
+      if (drained !== null) {
+        waitFor.push(drained);
+      }
+      if (waitFor.length === 0) {
+        return;
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.allSettled(waitFor),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, budget);
+          timer.unref();
+        }),
+      ]);
+      clearTimeout(timer);
     } catch (e) {
       // flush() is a completion guarantee and never rejects.
     }
@@ -792,6 +820,7 @@ export class AvoInspector {
     this.destroyed = true;
     this.batchQueue.clear();
     this.pending.clear();
+    this.validations.clear();
     this.pendingCount = 0;
     this.updateExitDrain();
     this.avoNetworkCallsHandler.abortInFlight();

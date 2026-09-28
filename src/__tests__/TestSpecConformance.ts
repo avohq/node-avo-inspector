@@ -530,6 +530,29 @@ describe("batching", () => {
     expect(flushed).toBe(true);
   });
 
+  test("flush waits only for sends started before or by it", async () => {
+    const inspector = staging({ batchSize: 2 });
+    const releases: Array<(status: number) => void> = [];
+    const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockImplementation(() => new Promise((resolve) => { releases.push(resolve); }));
+
+    await inspector.trackSchemaFromEvent("E1", {});
+    let flushed = false;
+    const flushing = inspector.flush().then(() => { flushed = true; });
+    expect(send).toHaveBeenCalledTimes(1);
+
+    // A size-triggered send that starts after flush() was called, and never completes.
+    await inspector.trackSchemaFromEvent("E2", {});
+    await inspector.trackSchemaFromEvent("E3", {});
+    expect(send).toHaveBeenCalledTimes(2);
+
+    releases[0](200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(flushed).toBe(true);
+    await flushing;
+    inspector.destroy();
+  });
+
   test("flush resolves after its timeout even when a send never completes", async () => {
     responders.push(() => {}); // never answers
     const inspector = staging({ batchSize: 30 });
