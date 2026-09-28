@@ -22,6 +22,7 @@ const ok: Responder = (_req, res) => {
 let server: Server;
 let captured: Captured[] = [];
 let responders: Responder[] = [];
+const defaultEndpoint = process.env.AVO_INSPECTOR_MOCK_ENDPOINT;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -40,7 +41,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  delete process.env.AVO_INSPECTOR_MOCK_ENDPOINT;
+  process.env.AVO_INSPECTOR_MOCK_ENDPOINT = defaultEndpoint;
   await new Promise((resolve) => server.close(resolve));
 });
 

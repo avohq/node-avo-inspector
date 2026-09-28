@@ -35,6 +35,9 @@
       "dist-native"
     ],
     "testRegex": "(/__tests__/.*|\\.(test|spec))\\.(ts|tsx|js)$",
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup.ts"
+    ],
     "moduleFileExtensions": [
       "ts",
       "tsx",

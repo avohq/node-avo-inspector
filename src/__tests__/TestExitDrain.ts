@@ -13,6 +13,7 @@ let distDir: string;
 let server: Server;
 let endpoint: string;
 let received: any[] = [];
+const defaultEndpoint = process.env.AVO_INSPECTOR_MOCK_ENDPOINT;
 
 beforeAll(async () => {
   distDir = mkdtempSync(join(tmpdir(), "avo-inspector-exit-"));
@@ -114,7 +115,7 @@ describe("exit hook registration", () => {
   });
 
   afterEach(() => {
-    delete process.env.AVO_INSPECTOR_MOCK_ENDPOINT;
+    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = defaultEndpoint;
     jest.restoreAllMocks();
   });
 
