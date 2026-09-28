@@ -365,6 +365,17 @@ describe("deduplication", () => {
     expect(captured).toHaveLength(1);
   });
 
+  test("the codegen entry warns about a streamId containing ':' and still sends it verbatim", async () => {
+    const inspector = dev();
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "user:42");
+
+    expect(console.warn).toHaveBeenCalledWith(
+      "[Avo Inspector] Warning: streamId contains ':' which is not supported"
+    );
+    expect(captured[0].body[0].streamId).toBe("user:42");
+  });
+
   test("the codegen entry accepts gateway options", async () => {
     const inspector = dev();
     // @ts-ignore

@@ -353,46 +353,7 @@ export class AvoInspector {
     streamId?: string,
     options?: TrackOptions
   ): Promise<Array<SchemaEntry>> {
-    try {
-      if (this.destroyed) {
-        return Promise.resolve([]);
-      }
-      const avoStreamId = new AvoStreamId(streamId);
-      const anonymousId = avoStreamId.streamId || this.generatedAnonymousId;
-      const trackOptions = this.resolveTrackOptions(options);
-
-      if (
-        this.shouldRegisterEvent(eventName, eventProperties, false, anonymousId, trackOptions)
-      ) {
-        if (AvoInspector.shouldLog) {
-          console.log(
-            "Avo Inspector: Supplied event " +
-            eventName +
-            " with params \n" +
-            safeStringify(eventProperties)
-          );
-        }
-        let eventSchema = this.extractSchema(eventProperties, false);
-
-        return this.sampleAndEnqueue(
-          eventName,
-          eventSchema,
-          null,
-          null,
-          anonymousId,
-          eventProperties,
-          trackOptions
-        );
-      } else {
-        if (AvoInspector.shouldLog) {
-          console.log("Avo Inspector: Deduplicated event " + eventName);
-        }
-        return Promise.resolve([]);
-      }
-    } catch (e) {
-      console.error(INTERNAL_ERROR_MESSAGE, e);
-      return Promise.reject(INTERNAL_ERROR_MESSAGE);
-    }
+    return this.track(eventName, eventProperties, false, null, null, streamId, options);
   }
 
   _avoFunctionTrackSchemaFromEvent(
@@ -403,15 +364,29 @@ export class AvoInspector {
     streamId?: string,
     options?: TrackOptions
   ): Promise<Array<SchemaEntry>> {
+    return this.track(eventName, eventProperties, true, eventId, eventHash, streamId, options);
+  }
+
+  // Shared by the manual and Codegen entry points.
+  private track(
+    eventName: string,
+    eventProperties: { [propName: string]: any },
+    fromAvoFunction: boolean,
+    eventId: string | null,
+    eventHash: string | null,
+    streamId: string | undefined,
+    options: TrackOptions | undefined
+  ): Promise<Array<SchemaEntry>> {
     try {
       if (this.destroyed) {
         return Promise.resolve([]);
       }
-      const anonymousId = (streamId && streamId.length > 0) ? streamId : this.generatedAnonymousId;
+      const avoStreamId = new AvoStreamId(streamId);
+      const anonymousId = avoStreamId.streamId || this.generatedAnonymousId;
       const trackOptions = this.resolveTrackOptions(options);
 
       if (
-        this.shouldRegisterEvent(eventName, eventProperties, true, anonymousId, trackOptions)
+        this.shouldRegisterEvent(eventName, eventProperties, fromAvoFunction, anonymousId, trackOptions)
       ) {
         if (AvoInspector.shouldLog) {
           console.log(
