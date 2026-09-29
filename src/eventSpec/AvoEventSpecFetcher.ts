@@ -1,19 +1,25 @@
 import { request, Agent } from "https";
+import { ClientRequest } from "http";
 import { EventSpecResponse, EventSpec, EventSpecMetadata, PropertyConstraint } from "./AvoEventSpecFetchTypes";
 import { AvoInspector } from "../AvoInspector";
 
 type FetchCallback = (result: EventSpecResponse | null) => void;
 
+// One keep-alive agent for every instance, so creating many instances (for example one per
+// request) cannot pile up idle TLS sockets. Idle sockets are capped and do not hold the
+// process open.
+const sharedAgent = new Agent({ keepAlive: true, maxSockets: 8, maxFreeSockets: 2 });
+
 export class AvoEventSpecFetcher {
   private apiKey: string;
   private inFlight: Map<string, FetchCallback[]> = new Map();
-  private agent: Agent;
+  private agent: Agent = sharedAgent;
+  private requests: Set<ClientRequest> = new Set();
 
   private static specEndpoint = "/trackingPlan/eventSpec";
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
-    this.agent = new Agent({ keepAlive: true });
   }
 
   fetch(
@@ -106,6 +112,10 @@ export class AvoEventSpecFetcher {
       this.resolveCallbacks(dedupeKey, null);
     });
 
+    this.requests.add(req);
+    req.on("close", () => {
+      this.requests.delete(req);
+    });
     req.end();
   }
 
@@ -180,7 +190,10 @@ export class AvoEventSpecFetcher {
     return { eventSpec, metadata };
   }
 
+  /** Aborts this instance's in-flight requests; the shared agent stays usable. */
   destroy(): void {
-    this.agent.destroy();
+    const requests = Array.from(this.requests);
+    this.requests.clear();
+    requests.forEach((req) => req.destroy());
   }
 }

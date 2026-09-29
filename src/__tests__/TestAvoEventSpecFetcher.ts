@@ -277,3 +277,41 @@ describe("AvoEventSpecFetcher", () => {
     expect(result.eventSpec).toBeNull();
   });
 });
+
+describe("AvoEventSpecFetcher connection reuse", () => {
+  const metadata = { schemaId: "s1", branchId: "b1", latestActionId: "a1", sourceId: "src1" };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test("every fetcher uses one shared agent, and destroy() leaves it usable for the others", async () => {
+    setupMockRequest(200, wireResponse("a", { x: { t: "string" } }, metadata));
+    const first = new AvoEventSpecFetcher("key-1");
+    const second = new AvoEventSpecFetcher("key-2");
+
+    // The fetcher swallows callback exceptions, so assert outside the callbacks.
+    await new Promise((resolve) => first.fetch("a", "s", resolve));
+    first.destroy();
+    const result = await new Promise((resolve) => second.fetch("a", "s", resolve));
+    second.destroy();
+
+    const agents = (mockedHttps.request as jest.Mock).mock.calls.map((call) => call[0].agent);
+    expect(result).not.toBeNull();
+    expect(agents).toHaveLength(2);
+    expect(agents[0]).toBeDefined();
+    expect(agents[1]).toBe(agents[0]);
+    expect(agents[0].destroy).not.toHaveBeenCalled();
+  });
+
+  test("destroy() aborts the fetcher's own in-flight request", () => {
+    const mockReq = new MockClientRequest();
+    (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq);
+    const fetcher = new AvoEventSpecFetcher("key-1");
+
+    fetcher.fetch("a", "s", () => {});
+    fetcher.destroy();
+
+    expect(mockReq.destroy).toHaveBeenCalled();
+  });
+});
