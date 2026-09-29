@@ -202,16 +202,21 @@ describe("flush() during event spec validation", () => {
 
   test("events whose validations settle together go out in one batch", async () => {
     jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
-    // Every spec response arrives in the same timers phase.
+    // Hold every spec response, then deliver them all in one synchronous loop: they settle
+    // in the same event-loop turn. (One timer per fetch did not guarantee that: on a slow
+    // run the timers straddled a millisecond and fired in different turns.)
+    const specCallbacks: Array<(result: null) => void> = [];
     jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((...args: any[]) => {
-      setTimeout(() => args[2](null), 20);
+      specCallbacks.push(args[2]);
     });
     const inspector = staging({ batchSize: 30 });
     const { send, batches, releaseAll } = holdSends(inspector);
 
     const tracks = Array.from({ length: 20 }, (_, i) => inspector.trackSchemaFromEvent("E" + i, {}));
     const flushing = inspector.flush();
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(specCallbacks).toHaveLength(20);
+    specCallbacks.forEach((callback) => callback(null));
+    await new Promise((resolve) => setTimeout(resolve, 20));
     await releaseAll();
     await flushing;
     await Promise.all(tracks);

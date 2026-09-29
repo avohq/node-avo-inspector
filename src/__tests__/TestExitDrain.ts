@@ -103,7 +103,10 @@ describe("exit against an endpoint that never answers", () => {
     `, hungEndpoint);
 
     expect(hungRequests.sort((a, b) => a - b)).toEqual([15, 30]);
-    expect(elapsedMs).toBeLessThan(12_000);
+    // About 10 s: one shared deadline, not two in a row (20 s). Wide upper margin for slow
+    // machines; the lower bound shows the exit really waited for the drain.
+    expect(elapsedMs).toBeGreaterThan(9_000);
+    expect(elapsedMs).toBeLessThan(15_000);
   }, 40_000);
 });
 
