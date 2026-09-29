@@ -38,6 +38,9 @@ const valueToString = (value: unknown): string => {
   }
 };
 
+const NO_API_KEY_MESSAGE =
+  "[Avo Inspector] No API key provided. Inspector can't operate without API key.";
+
 const INTERNAL_ERROR_MESSAGE =
   "Avo Inspector: something went wrong. Please report to support@avo.app.";
 
@@ -214,6 +217,10 @@ export class AvoInspector {
     disableBatchTimer?: boolean;
   }) {
     // the constructor does aggressive null/undefined checking because same code paths will be accessible from JS
+    if (options === null || typeof options !== "object") {
+      throw new Error(NO_API_KEY_MESSAGE);
+    }
+
     // A non-string env is not "empty": it falls through to the unsupported-value check.
     const env: unknown = options.env;
     if (env === undefined || env === null || (typeof env === "string" && isValueEmpty(env))) {
@@ -230,10 +237,8 @@ export class AvoInspector {
       this.environment = options.env;
     }
 
-    if (isValueEmpty(options.apiKey)) {
-      throw new Error(
-        "[Avo Inspector] No API key provided. Inspector can't operate without API key."
-      );
+    if (typeof options.apiKey !== "string" || isValueEmpty(options.apiKey)) {
+      throw new Error(NO_API_KEY_MESSAGE);
     } else if (/[\r\n\0]/.test(options.apiKey)) {
       // The spec's exact message covers CR, LF and NUL.
       throw new Error(
@@ -249,7 +254,7 @@ export class AvoInspector {
       this.apiKey = options.apiKey;
     }
 
-    if (isValueEmpty(options.version)) {
+    if (typeof options.version !== "string" || isValueEmpty(options.version)) {
       throw new Error(
         "[Avo Inspector] No version provided. Many features of Inspector rely on versioning. Please provide comparable string version, i.e. integer or semantic."
       );

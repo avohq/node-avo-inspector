@@ -237,3 +237,43 @@ describe("number classification", () => {
     ]);
   });
 });
+
+describe("non-string or missing constructor arguments", () => {
+  const NO_API_KEY = "[Avo Inspector] No API key provided. Inspector can't operate without API key.";
+  const NO_VERSION =
+    "[Avo Inspector] No version provided. Many features of Inspector rely on versioning. Please provide comparable string version, i.e. integer or semantic.";
+
+  const thrown = (make: () => unknown): Error => {
+    try {
+      make();
+    } catch (e) {
+      return e as Error;
+    }
+    throw new Error("constructor did not throw");
+  };
+
+  test.each([[12345], [true], [{}], [["key"]]])("apiKey %p throws the No API key message", (apiKey) => {
+    const error = thrown(() => new AvoInspector({ apiKey: apiKey as any, env: "dev", version: "1.0.0" }));
+
+    expect(error).not.toBeInstanceOf(TypeError);
+    expect(error.message).toBe(NO_API_KEY);
+  });
+
+  test.each([[2], [false], [{}]])("version %p throws the No version message", (version) => {
+    const error = thrown(() => new AvoInspector({ apiKey: "test-key", env: "dev", version: version as any }));
+
+    expect(error).not.toBeInstanceOf(TypeError);
+    expect(error.message).toBe(NO_VERSION);
+  });
+
+  test.each([
+    ["no options", () => new (AvoInspector as any)()],
+    ["null options", () => new AvoInspector(null as any)],
+    ["a string as options", () => new AvoInspector("test-key" as any)],
+  ])("%s throws the No API key message", (_label, make) => {
+    const error = thrown(make);
+
+    expect(error).not.toBeInstanceOf(TypeError);
+    expect(error.message).toBe(NO_API_KEY);
+  });
+});
