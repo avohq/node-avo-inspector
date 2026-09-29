@@ -181,6 +181,47 @@ describe("Deduplicator", () => {
     expect(avoTrackedSchemaAgain.length).toBe(4);
   });
 
+  describe("expiry keeps the params of a newer registration of the same key", () => {
+    const start = new Date("2020-01-01").getTime();
+    afterEach(() => jest.setSystemTime(new Date("2020-01-01")));
+
+    test.each([
+      ["Codegen", true],
+      ["manual", false],
+    ])("%s at 0 ms and 400 ms, then the other kind at 600 ms, is a duplicate", (_kind, first) => {
+      const dedup = new AvoDeduplicator();
+      jest.setSystemTime(start);
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, first, "s")).toBe(true);
+      jest.setSystemTime(start + 400);
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, first, "s")).toBe(true);
+
+      // The 0 ms registration expires here; the 400 ms one is still inside the window.
+      jest.setSystemTime(start + 600);
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, !first, "s")).toBe(false);
+    });
+
+    test("a lone registration older than 500 ms still expires", () => {
+      const dedup = new AvoDeduplicator();
+      jest.setSystemTime(start);
+      dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
+
+      jest.setSystemTime(start + 600);
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, false, "s")).toBe(true);
+    });
+
+    test("a newer registration with different params replaces the older one's", () => {
+      const dedup = new AvoDeduplicator();
+      jest.setSystemTime(start);
+      dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
+      jest.setSystemTime(start + 400);
+      dedup.shouldRegisterEvent("A", { a: 2 }, true, "s");
+
+      jest.setSystemTime(start + 600);
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, false, "s")).toBe(true);
+      expect(dedup.shouldRegisterEvent("A", { a: 2 }, false, "s")).toBe(false);
+    });
+  });
+
   test(`Does not deduplicate if more than 500ms pass`, () => {
     const shouldRegisterFromAvo = deduplicator.shouldRegisterEvent(
       "Test",

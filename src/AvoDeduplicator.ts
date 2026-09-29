@@ -1,9 +1,11 @@
 import { deepEquals } from "./utils";
 
-// A registration, in time order, so expired ones are popped from the front.
+// A registration, in time order, so expired ones are popped from the front. `generation`
+// identifies it among registrations of the same key.
 interface Registration {
   time: number;
   key: string;
+  generation: number;
 }
 
 export class AvoDeduplicator {
@@ -14,6 +16,11 @@ export class AvoDeduplicator {
   private avoFunctionsHead = 0;
   private manualHead = 0;
   private msToConsiderOld = 500;
+  // The generation of each key's latest registration. A key's params always belong to its
+  // latest registration, so only that registration's expiry may delete them.
+  private avoFunctionsLatest: { [key: string]: number } = {};
+  private manualLatest: { [key: string]: number } = {};
+  private nextGeneration = 0;
 
   // Keyed by streamId\0eventName to prevent cross-stream suppression on server
   avoFunctionsEventsParams: {
@@ -35,11 +42,14 @@ export class AvoDeduplicator {
 
     const key = AvoDeduplicator.dedupKey(eventName, streamId);
 
+    const registration = { time: Date.now(), key, generation: this.nextGeneration++ };
     if (fromAvoFunction) {
-      this.avoFunctionsEvents.push({ time: Date.now(), key });
+      this.avoFunctionsEvents.push(registration);
+      this.avoFunctionsLatest[key] = registration.generation;
       this.avoFunctionsEventsParams[key] = params;
     } else {
-      this.manualEvents.push({ time: Date.now(), key });
+      this.manualEvents.push(registration);
+      this.manualLatest[key] = registration.generation;
       this.manualEventsParams[key] = params;
     }
 
@@ -126,9 +136,11 @@ export class AvoDeduplicator {
   private clearOldEvents() {
     const now = Date.now();
     this.avoFunctionsHead = this.expire(
-      this.avoFunctionsEvents, this.avoFunctionsHead, this.avoFunctionsEventsParams, now
+      this.avoFunctionsEvents, this.avoFunctionsHead, this.avoFunctionsEventsParams, this.avoFunctionsLatest, now
     );
-    this.manualHead = this.expire(this.manualEvents, this.manualHead, this.manualEventsParams, now);
+    this.manualHead = this.expire(
+      this.manualEvents, this.manualHead, this.manualEventsParams, this.manualLatest, now
+    );
     if (this.avoFunctionsHead > 1024 && this.avoFunctionsHead * 2 > this.avoFunctionsEvents.length) {
       this.avoFunctionsEvents = this.avoFunctionsEvents.slice(this.avoFunctionsHead);
       this.avoFunctionsHead = 0;
@@ -139,15 +151,21 @@ export class AvoDeduplicator {
     }
   }
 
-  // Deletes the params of every registration older than msToConsiderOld; returns the new head.
+  // Pops every registration older than msToConsiderOld and deletes a key's params only when
+  // the popped registration is still that key's latest; returns the new head.
   private expire(
     registrations: Array<Registration>,
     head: number,
     paramsByKey: { [key: string]: { [propName: string]: any } },
+    latestByKey: { [key: string]: number },
     now: number
   ): number {
     while (head < registrations.length && now - registrations[head].time > this.msToConsiderOld) {
-      delete paramsByKey[registrations[head].key];
+      const { key, generation } = registrations[head];
+      if (latestByKey[key] === generation) {
+        delete paramsByKey[key];
+        delete latestByKey[key];
+      }
       head++;
     }
     return head;
@@ -162,5 +180,7 @@ export class AvoDeduplicator {
 
     this.avoFunctionsEventsParams = {};
     this.manualEventsParams = {};
+    this.avoFunctionsLatest = {};
+    this.manualLatest = {};
   }
 }
