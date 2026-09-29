@@ -214,7 +214,9 @@ export class AvoInspector {
     disableBatchTimer?: boolean;
   }) {
     // the constructor does aggressive null/undefined checking because same code paths will be accessible from JS
-    if (isValueEmpty(options.env)) {
+    // A non-string env is not "empty": it falls through to the unsupported-value check.
+    const env: unknown = options.env;
+    if (env === undefined || env === null || (typeof env === "string" && isValueEmpty(env))) {
       this.environment = AvoInspectorEnv.Dev;
       console.warn(
         "[Avo Inspector] No environment provided. Defaulting to dev."

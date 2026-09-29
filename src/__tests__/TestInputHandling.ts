@@ -191,3 +191,23 @@ describe("non-string streamId", () => {
     expect(captured.map((batch) => batch[0].streamId)).toEqual(["42", ""]);
   });
 });
+
+describe("non-string env", () => {
+  test.each([[5], [true], [{}], [["dev"]]])("%p falls back to dev with a warning and never throws", (env) => {
+    const inspector = new AvoInspector({ apiKey: "test-key", env: env as any, version: "1.0.0" });
+
+    expect(inspector.environment).toBe("dev");
+    expect(console.warn).toHaveBeenCalledWith(
+      "[Avo Inspector] Unsupported environment provided. Defaulting to dev. Supported environments - Dev, Staging, Prod."
+    );
+    inspector.destroy();
+  });
+
+  test("null still counts as no environment", () => {
+    const inspector = new AvoInspector({ apiKey: "test-key", env: null as any, version: "1.0.0" });
+
+    expect(inspector.environment).toBe("dev");
+    expect(console.warn).toHaveBeenCalledWith("[Avo Inspector] No environment provided. Defaulting to dev.");
+    inspector.destroy();
+  });
+});
