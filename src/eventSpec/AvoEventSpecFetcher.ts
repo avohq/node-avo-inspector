@@ -17,6 +17,10 @@ export class AvoEventSpecFetcher {
   private requests: Set<ClientRequest> = new Set();
 
   private static specEndpoint = "/trackingPlan/eventSpec";
+  // Wall-clock budget per fetch, from the moment it is requested. The socket timeout alone
+  // starts only once the shared agent assigns a socket, so a fetch queued behind 8 hung
+  // ones would otherwise wait for theirs first.
+  private static fetchTimeoutMs = 10_000;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -103,6 +107,15 @@ export class AvoEventSpecFetcher {
       this.resolveCallbacks(dedupeKey, null);
     });
 
+    const deadline = setTimeout(() => {
+      if (AvoInspector.shouldLog) {
+        console.error("Avo Inspector: [network] Spec fetch timed out after 10s");
+      }
+      req.destroy();
+      this.resolveCallbacks(dedupeKey, null);
+    }, AvoEventSpecFetcher.fetchTimeoutMs);
+    deadline.unref();
+
     req.setTimeout(10_000);
     req.on("timeout", () => {
       if (AvoInspector.shouldLog) {
@@ -114,6 +127,7 @@ export class AvoEventSpecFetcher {
 
     this.requests.add(req);
     req.on("close", () => {
+      clearTimeout(deadline);
       this.requests.delete(req);
     });
     req.end();
