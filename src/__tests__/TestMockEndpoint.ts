@@ -5,7 +5,7 @@ import { EventEmitter } from "events";
 
 import { AvoInspector } from "../AvoInspector";
 import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
-import { trackingEndpoint } from "./constants";
+import { restoreEnv, trackingEndpoint } from "./constants";
 
 // AVO_INSPECTOR_MOCK_ENDPOINT: the test-only override of the track URL (SPEC §7.1).
 
@@ -28,7 +28,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  process.env.AVO_INSPECTOR_MOCK_ENDPOINT = defaultEndpoint;
+  restoreEnv("AVO_INSPECTOR_MOCK_ENDPOINT", defaultEndpoint);
   await new Promise((resolve) => server.close(resolve));
 });
 
@@ -41,7 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env.AVO_INSPECTOR_MOCK_ENDPOINT = defaultEndpoint;
+  restoreEnv("AVO_INSPECTOR_MOCK_ENDPOINT", defaultEndpoint);
   jest.restoreAllMocks();
 });
 

@@ -52,14 +52,16 @@ export class AvoEventSpecFetcher {
     this.inFlight.set(dedupeKey, { callbacks: [callback], owner });
     // A request settles its key once. A late event (for example the error from a request
     // destroyed on timeout) must not settle a newer fetch that has taken the key since.
+    // `deferCallbacks` is for settling inside fetch() itself: the key is freed and the
+    // deadline cleared at once, but callbacks still run asynchronously.
     let settled = false;
-    const settle = (result: EventSpecResponse | null) => {
+    const settle = (result: EventSpecResponse | null, deferCallbacks = false) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(deadline);
-      this.resolveCallbacks(dedupeKey, owner, result);
+      this.resolveCallbacks(dedupeKey, owner, result, deferCallbacks);
     };
 
     const queryParams = new URLSearchParams({
@@ -103,7 +105,7 @@ export class AvoEventSpecFetcher {
       if (AvoInspector.shouldLog) {
         console.error("Avo Inspector: [network] Spec fetch error: " + e);
       }
-      settle(null);
+      settle(null, true);
       return;
     }
     const sent = req;
@@ -181,7 +183,8 @@ export class AvoEventSpecFetcher {
   private resolveCallbacks(
     key: string,
     owner: object,
-    result: EventSpecResponse | null
+    result: EventSpecResponse | null,
+    deferCallbacks = false
   ): void {
     const pending = this.inFlight.get(key);
     if (!pending || pending.owner !== owner) {
@@ -189,7 +192,7 @@ export class AvoEventSpecFetcher {
     }
     this.inFlight.delete(key);
 
-    if (pending) {
+    const invoke = () => {
       for (const cb of pending.callbacks) {
         try {
           cb(result);
@@ -197,6 +200,11 @@ export class AvoEventSpecFetcher {
           // Don't let one callback failure affect others
         }
       }
+    };
+    if (deferCallbacks) {
+      process.nextTick(invoke);
+    } else {
+      invoke();
     }
   }
 

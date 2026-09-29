@@ -7,6 +7,7 @@ import { AvoInspector } from "../AvoInspector";
 import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
 import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
 import { deepEquals } from "../utils";
+import { restoreEnv } from "./constants";
 
 // Inputs that real callers pass and that the SDK must handle without throwing internally.
 
@@ -30,7 +31,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  process.env.AVO_INSPECTOR_MOCK_ENDPOINT = defaultEndpoint;
+  restoreEnv("AVO_INSPECTOR_MOCK_ENDPOINT", defaultEndpoint);
   await new Promise((resolve) => server.close(resolve));
 });
 

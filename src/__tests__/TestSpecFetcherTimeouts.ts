@@ -4,22 +4,25 @@ import { AddressInfo } from "net";
 import { EventEmitter } from "events";
 
 import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
+import { trackConnections } from "./constants";
 
 // Event spec fetch deadlines, against endpoints that never answer.
 
 let hung: http.Server;
 let port: number;
+let closeHungConnections: () => void;
 
 beforeAll(async () => {
   hung = http.createServer(() => {
     // Never answers.
   });
+  closeHungConnections = trackConnections(hung);
   await new Promise<void>((resolve) => hung.listen(0, "127.0.0.1", resolve));
   port = (hung.address() as AddressInfo).port;
 });
 
 afterAll(async () => {
-  hung.closeAllConnections();
+  closeHungConnections();
   await new Promise((resolve) => hung.close(resolve));
 });
 
@@ -100,6 +103,7 @@ describe("settling a fetch", () => {
 describe("a spec response cut off mid-body", () => {
   let cutting: http.Server;
   let cuttingPort: number;
+  let closeCuttingConnections: () => void;
 
   beforeAll(async () => {
     // Sends the headers and part of the promised body, then drops the connection.
@@ -108,12 +112,13 @@ describe("a spec response cut off mid-body", () => {
       res.write('{"events":[');
       setTimeout(() => res.socket!.destroy(), 20);
     });
+    closeCuttingConnections = trackConnections(cutting);
     await new Promise<void>((resolve) => cutting.listen(0, "127.0.0.1", resolve));
     cuttingPort = (cutting.address() as AddressInfo).port;
   });
 
   afterAll(async () => {
-    cutting.closeAllConnections();
+    closeCuttingConnections();
     await new Promise((resolve) => cutting.close(resolve));
   });
 

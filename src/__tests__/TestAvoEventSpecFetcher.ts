@@ -230,13 +230,15 @@ describe("AvoEventSpecFetcher", () => {
       const results: Array<EventSpecResponse | null> = [];
 
       expect(() => fetcher.fetch("click", "stream1", (r) => results.push(r))).not.toThrow();
-      expect(results).toEqual([null]);
-
-      // Past the (zero) deadline nothing fires, and the key is free for a new request.
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Callbacks are always asynchronous, even on this path...
+      expect(results).toEqual([]);
+      // ...but the key is freed at once: a same-key fetch starts its own request.
       setupMockRequest(200, { events: [], metadata: {} });
       fetcher.fetch("click", "stream1", () => {});
       expect(mockedHttps.request).toHaveBeenCalledTimes(2);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(results).toEqual([null]);
     });
   });
 

@@ -7,6 +7,7 @@ import { join } from "path";
 import { gunzipSync } from "zlib";
 
 import { AvoInspector } from "../AvoInspector";
+import { restoreEnv, trackConnections } from "./constants";
 
 // These tests run a real Node process that exits on its own, so they need the compiled SDK.
 const repoRoot = join(__dirname, "..", "..");
@@ -73,6 +74,7 @@ const trackWithoutFlush = `
 describe("exit against an endpoint that never answers", () => {
   let hung: Server;
   let hungEndpoint: string;
+  let closeHungConnections: () => void;
   let hungRequests: number[] = [];
 
   beforeAll(async () => {
@@ -85,12 +87,13 @@ describe("exit against an endpoint that never answers", () => {
         hungRequests.push(JSON.parse(body.toString("utf8")).length);
       });
     });
+    closeHungConnections = trackConnections(hung);
     await new Promise<void>((resolve) => hung.listen(0, "127.0.0.1", resolve));
     hungEndpoint = "http://127.0.0.1:" + (hung.address() as AddressInfo).port;
   });
 
   afterAll(async () => {
-    hung.closeAllConnections();
+    closeHungConnections();
     await new Promise((resolve) => hung.close(resolve));
   });
 
@@ -156,7 +159,7 @@ describe("exit hook registration", () => {
   });
 
   afterEach(() => {
-    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = defaultEndpoint;
+    restoreEnv("AVO_INSPECTOR_MOCK_ENDPOINT", defaultEndpoint);
     jest.restoreAllMocks();
   });
 

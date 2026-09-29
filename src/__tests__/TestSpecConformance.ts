@@ -9,6 +9,7 @@ import { VERSION } from "../AvoInspectorVersion";
 import { deepEquals } from "../utils";
 import * as crypto from "crypto";
 import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
+import { restoreEnv } from "./constants";
 
 type Captured = { headers: IncomingMessage["headers"]; body: any[] };
 type Responder = (req: IncomingMessage, res: ServerResponse) => void;
@@ -41,7 +42,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  process.env.AVO_INSPECTOR_MOCK_ENDPOINT = defaultEndpoint;
+  restoreEnv("AVO_INSPECTOR_MOCK_ENDPOINT", defaultEndpoint);
   await new Promise((resolve) => server.close(resolve));
 });
 

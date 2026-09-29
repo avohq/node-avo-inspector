@@ -48,7 +48,7 @@ internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, r
    - status 200 -> `JSON.parse` the body and `parseWireResponse`; a parse/convert exception settles with `null`.
 4. Request `error` -> settle with `null`. A response that ends before its body is complete (`aborted`, `error` or `close` on the response while `res.complete` is false, with no `end`) -> settle with `null` at once, freeing the key, instead of waiting for the deadline.
 5. **Deadline:** `fetchTimeoutMs` (10 s) after the fetch was requested, queue time for a socket included -> destroy the request (if one was created) and settle with `null`. This wall-clock deadline is the only timeout; no socket-idle timeout is set.
-6. If `request()` throws synchronously, the fetch settles with `null` at once (the key is freed and the deadline cleared); nothing is thrown to the caller.
+6. If `request()` throws synchronously, the fetch settles with `null`: the key is freed and the deadline cleared before `fetch` returns, and the callbacks receive `null` on the next tick (never before `fetch` returns); nothing is thrown to the caller.
 7. **IMPORTANT:** a request settles at most once, and only while it still owns its key. Settling clears the deadline. If the key's in-flight entry has a different owner (a newer fetch registered after this request settled), the settlement is ignored.
 8. Settling removes the key from the in-flight map first, then invokes every queued callback in registration order; an exception thrown by one callback is swallowed and does not stop the others.
 
