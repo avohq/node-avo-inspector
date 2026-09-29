@@ -207,6 +207,16 @@ inspector.enableLogging(true | false);
 
 Unchanged from 1.x, but easy to trip over: the logging flag is shared by every instance in the process, and each constructor resets it (on for `dev`, off otherwise). Creating a `prod` instance after a `dev` one turns logging off for both. Call `enableLogging` after constructing your instances if you need a specific setting.
 
+# Testing
+
+To test against a local mock server, set the `AVO_INSPECTOR_MOCK_ENDPOINT` environment variable to its URL, for example `http://127.0.0.1:9876`. It exists for the spec's conformance suite and for local mock servers (spec §7.1).
+
+- Track requests go to that URL exactly as they would go to Avo, including the `api-key` header, so point it only at a server you control.
+- It is ignored when `env` is `prod`, whatever its value.
+- While it is set, event spec validation is turned off, because a mock server does not serve event specs.
+- The first redirected send prints a one-time warning naming the scheme, host and port (never the path, the query or the API key).
+- A value that is not an `http` or `https` URL is ignored with a one-time warning, and requests go to Avo as usual.
+
 # Development
 
 ## Releasing

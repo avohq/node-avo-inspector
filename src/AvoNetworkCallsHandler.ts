@@ -100,14 +100,59 @@ export class AvoNetworkCallsHandler {
 
   /**
    * The test-only endpoint override. Fail-closed: a prod instance never honors it,
-   * whatever the surrounding process environment says.
+   * whatever the surrounding process environment says. A value that is not an http(s)
+   * URL is ignored (with a one-time warning), so callers only ever see a valid URL.
+   * `redirecting` marks a real send, which prints the one-time redirect warning.
    */
-  static mockEndpointFor(envName: string): string | null {
+  static mockEndpointFor(envName: string, redirecting: boolean = false): string | null {
     if (envName === "prod") {
       return null;
     }
     const override = process.env[AvoNetworkCallsHandler.mockEndpointEnvVar];
-    return override && override.length > 0 ? override : null;
+    if (!override) {
+      return null;
+    }
+    let url: URL;
+    try {
+      url = new URL(override);
+    } catch (e) {
+      AvoNetworkCallsHandler.warnOnce(
+        "invalid:" + override,
+        '[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT "' + override + '": not a valid URL'
+      );
+      return null;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      AvoNetworkCallsHandler.warnOnce(
+        "invalid:" + override,
+        '[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT "' + override +
+          '": unsupported protocol ' + url.protocol
+      );
+      return null;
+    }
+    if (redirecting) {
+      // Scheme, host and port only: the path or query may carry sensitive values.
+      AvoNetworkCallsHandler.warnOnce(
+        "redirect",
+        "[Avo Inspector] AVO_INSPECTOR_MOCK_ENDPOINT is set: sending to " + url.protocol + "//" +
+          url.host + " instead of api.avo.app (ignored in prod)."
+      );
+    }
+    return override;
+  }
+
+  // Warnings about the override print once per process, whatever the logging flag, on
+  // stderr (console.warn).
+  private static warnedMockEndpoint: Set<string> | null = null;
+
+  private static warnOnce(key: string, message: string): void {
+    if (AvoNetworkCallsHandler.warnedMockEndpoint === null) {
+      AvoNetworkCallsHandler.warnedMockEndpoint = new Set();
+    }
+    if (!AvoNetworkCallsHandler.warnedMockEndpoint.has(key)) {
+      AvoNetworkCallsHandler.warnedMockEndpoint.add(key);
+      console.warn(message);
+    }
   }
 
   /** The sampling rate last returned by the Inspector API (1 until a response sets it). */
@@ -210,7 +255,7 @@ export class AvoNetworkCallsHandler {
       }
 
       const url = new URL(
-        AvoNetworkCallsHandler.mockEndpointFor(this.envName) ||
+        AvoNetworkCallsHandler.mockEndpointFor(this.envName, true) ||
           AvoNetworkCallsHandler.trackingEndpoint
       );
       const send = url.protocol === "http:" ? httpRequest : httpsRequest;
