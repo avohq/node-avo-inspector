@@ -4,6 +4,10 @@ import { InspectorBody } from "./AvoNetworkCallsHandler";
 // setTimeout fires almost at once for delays above this (2^31 - 1 ms, about 24.8 days).
 export const MAX_TIMER_MS = 2_147_483_647;
 
+// Batch sends in flight at once. Batches swapped out beyond this wait for a free slot, so
+// a fast producer or a slow endpoint cannot open an unbounded number of requests.
+export const MAX_IN_FLIGHT_SENDS = 4;
+
 export interface AvoBatchOptions {
   batchSize: number;
   batchFlushSeconds: number;
@@ -11,22 +15,40 @@ export interface AvoBatchOptions {
   disableBatchTimer: boolean;
 }
 
+// A swapped-out batch waiting for a send slot, and the settle function of its promise.
+interface WaitingBatch<T> {
+  events: Array<InspectorBody>;
+  settle: (outcome: T) => void;
+}
+
 /**
  * In-memory pending batch buffer. Node runs this on a single thread, so appending and
  * the swap-and-clear in drain() are atomic without a lock; the send itself happens in
- * the dispatch callback, after the buffer has been swapped out.
+ * the dispatch callback, after the buffer has been swapped out. At most
+ * MAX_IN_FLIGHT_SENDS dispatches run at once; later batches wait in order.
  */
 export class AvoBatchQueue<T> {
   private buffer: Array<InspectorBody> = [];
+  private waiting: Array<WaitingBatch<T>> = [];
+  private waitingEvents = 0;
+  private inFlight = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * @param dispatch sends one batch; must not reject.
+   * @param dropped the outcome for a batch discarded before it was sent.
+   * @param track called with each batch's outcome promise as soon as it is swapped out.
+   */
   constructor(
     private options: AvoBatchOptions,
-    private dispatch: (batch: Array<InspectorBody>) => Promise<T>
+    private dispatch: (batch: Array<InspectorBody>) => Promise<T>,
+    private dropped: T,
+    private track: (outcome: Promise<T>) => Promise<T> = (outcome) => outcome
   ) {}
 
+  /** Events not yet handed to dispatch: the buffer plus batches waiting for a slot. */
   get length(): number {
-    return this.buffer.length;
+    return this.buffer.length + this.waitingEvents;
   }
 
   /**
@@ -36,9 +58,9 @@ export class AvoBatchQueue<T> {
   enqueue(event: InspectorBody): Promise<T> | null {
     this.buffer.push(event);
 
-    const overflow = this.buffer.length - this.options.maxQueueSize;
+    const overflow = this.length - this.options.maxQueueSize;
     if (overflow > 0) {
-      this.buffer.splice(0, overflow);
+      this.dropOldest(overflow);
       if (AvoInspector.shouldLog) {
         console.warn(
           "Avo Inspector: pending batch is full (maxQueueSize " +
@@ -62,13 +84,53 @@ export class AvoBatchQueue<T> {
     }
     const batch = this.buffer;
     this.buffer = [];
-    return this.dispatch(batch);
+    const outcome = new Promise<T>((settle) => {
+      this.waiting.push({ events: batch, settle });
+    });
+    this.waitingEvents += batch.length;
+    this.startSends();
+    return this.track(outcome);
   }
 
-  /** Discards every buffered event unsent and cancels the scheduled flush. */
+  /** Discards every buffered or waiting event unsent and cancels the scheduled flush. */
   clear(): void {
     this.clearTimer();
     this.buffer = [];
+    const discarded = this.waiting;
+    this.waiting = [];
+    this.waitingEvents = 0;
+    discarded.forEach((batch) => batch.settle(this.dropped));
+  }
+
+  private startSends(): void {
+    while (this.inFlight < MAX_IN_FLIGHT_SENDS && this.waiting.length > 0) {
+      const batch = this.waiting.shift()!;
+      this.waitingEvents -= batch.events.length;
+      this.inFlight++;
+      const done = (outcome: T) => {
+        this.inFlight--;
+        batch.settle(outcome);
+        this.startSends();
+      };
+      this.dispatch(batch.events).then(done, () => done(this.dropped));
+    }
+  }
+
+  // Oldest first: waiting batches were swapped out before anything still in the buffer.
+  private dropOldest(count: number): void {
+    while (count > 0 && this.waiting.length > 0) {
+      const batch = this.waiting[0];
+      const removed = batch.events.splice(0, Math.min(count, batch.events.length)).length;
+      this.waitingEvents -= removed;
+      count -= removed;
+      if (batch.events.length === 0) {
+        this.waiting.shift();
+        batch.settle(this.dropped);
+      }
+    }
+    if (count > 0) {
+      this.buffer.splice(0, count);
+    }
   }
 
   // Fires once the oldest buffered event is batchFlushSeconds old. Unref'd so it never

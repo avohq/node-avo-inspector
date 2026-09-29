@@ -310,7 +310,11 @@ export class AvoInspector {
     }
     this.batchQueue = new AvoBatchQueue<SendOutcome>(
       { ...batchOptions, batchSize: this.batchSize },
-      (batch) => this.sendBatch(batch)
+      (batch) => this.sendBatch(batch),
+      "failed",
+      // A batch is in flight from the moment it is swapped out, even while it waits for a
+      // send slot, so flush() waits for it.
+      (outcome) => this.trackPending(outcome)
     );
 
     // Initialize event spec validation for dev/staging only
@@ -647,7 +651,7 @@ export class AvoInspector {
         return "failed";
       }
     );
-    return this.trackPending(send);
+    return send;
   }
 
   private isValidationActive(): boolean {
