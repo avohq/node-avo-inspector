@@ -80,12 +80,33 @@ export class AvoInspector {
   private batchSize: number;
   private batchQueue: AvoBatchQueue<SendOutcome>;
   private destroyed = false;
+  // Settles each track still waiting on a spec fetch or an immediate send when destroy()
+  // runs. Entries remove themselves once their wait settles, so none outlive their call.
+  private destroyWaiters: Set<() => void> = new Set();
 
   // In-flight work (spec fetches before enqueue, and batch sends) that flush() awaits.
   // Nothing here keeps the process alive: callers flush() or await before exit.
   private pending: Set<Promise<unknown>> = new Set();
   // Pending entries that are event spec validations, keyed by their pending promise.
   private validations: Map<Promise<unknown>, { flushRequested: boolean }> = new Map();
+
+  // Mirrors `promise`, but resolves `onDestroy` instead if destroy() runs first.
+  private untilDestroyed<T>(promise: Promise<T>, onDestroy: T): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const cancel = () => resolve(onDestroy);
+      this.destroyWaiters.add(cancel);
+      promise.then(
+        (value) => {
+          this.destroyWaiters.delete(cancel);
+          resolve(value);
+        },
+        (reason) => {
+          this.destroyWaiters.delete(cancel);
+          reject(reason);
+        }
+      );
+    });
+  }
 
   private get pendingCount(): number {
     return this.pending.size;
@@ -524,7 +545,10 @@ export class AvoInspector {
     // A flush() that starts while this validation is in progress sets flushRequested:
     // the event then goes out as soon as it is queued, and flush() waits for that send.
     const validation = { flushRequested: false };
-    const outcome = this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId)
+    const outcome = this.untilDestroyed<ValidationResult | null>(
+      this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId),
+      null
+    )
       .catch((err): ValidationResult | null => {
         if (AvoInspector.shouldLog) {
           console.warn("Avo Inspector: Event spec validation failed for event: " + eventName + ". Sending without validation. " + err);
@@ -566,9 +590,13 @@ export class AvoInspector {
     const send = this.batchQueue.enqueue(body);
     this.updateExitDrain();
     if (this.batchSize === 1 && send !== null) {
-      // Immediate send: the HTTP outcome is observable per call.
+      // Immediate send: the HTTP outcome is observable per call. An event whose send is
+      // abandoned by destroy() is not delivered, so it resolves [] like a non-200.
       return {
-        result: send.then((outcome) => (outcome === "non200" ? [] : eventSchema)),
+        result: this.untilDestroyed(
+          send.then((outcome) => (outcome === "non200" || this.destroyed ? [] : eventSchema)),
+          []
+        ),
         send,
       };
     }
@@ -812,10 +840,14 @@ export class AvoInspector {
   /**
    * Cancels and cleans up: discards the pending batch unsent, abandons in-flight
    * requests and stops the flush timer. Does not flush. After destroy() the instance
-   * is terminated and trackSchemaFromEvent resolves [] without sending.
+   * is terminated and trackSchemaFromEvent resolves [] without sending; a call still
+   * waiting on a spec fetch or on its immediate send also resolves [].
    */
   destroy(): void {
     this.destroyed = true;
+    const waiters = Array.from(this.destroyWaiters);
+    this.destroyWaiters.clear();
+    waiters.forEach((settle) => settle());
     this.batchQueue.clear();
     this.pending.clear();
     this.validations.clear();

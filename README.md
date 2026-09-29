@@ -84,7 +84,7 @@ process.on("SIGTERM", async () => {
 });
 ```
 
-`destroy()` is different: it discards buffered events without sending them, abandons in-flight requests and stops the timer. After `destroy()`, `trackSchemaFromEvent` resolves `[]` and sends nothing.
+`destroy()` is different: it discards buffered events without sending them, abandons in-flight requests and stops the timer. After `destroy()`, `trackSchemaFromEvent` resolves `[]` and sends nothing; a call still waiting on its send or on an event spec fetch when `destroy()` runs also resolves `[]`.
 
 # Integrating with Avo Codegen
 

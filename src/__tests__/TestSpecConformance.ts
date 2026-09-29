@@ -647,6 +647,48 @@ describe("batching", () => {
     expect(inspector.apiKey).toBe("test-key");
   });
 
+  // Resolves with the promise's value, or "pending" if it has not settled within `ms`.
+  const settledWithin = (promise: Promise<unknown>, ms: number) =>
+    Promise.race([
+      promise.then((value) => ({ value }), (reason) => ({ reason })),
+      new Promise((resolve) => setTimeout(() => resolve("pending"), ms)),
+    ]);
+
+  test("destroy() resolves a dev track whose send is in flight with [], not the schema", async () => {
+    let received!: () => void;
+    const arrived = new Promise<void>((resolve) => (received = resolve));
+    responders.push(() => received()); // never answers
+    const inspector = dev();
+
+    const tracked = inspector.trackSchemaFromEvent("E", { a: 1 });
+    await arrived;
+    inspector.destroy();
+
+    expect(await settledWithin(tracked, 1000)).toEqual({ value: [] });
+  });
+
+  test("settled tracks leave no destroy waiters behind", async () => {
+    const inspector = dev();
+    for (let i = 0; i < 5; i++) {
+      await inspector.trackSchemaFromEvent("E" + i, { a: i });
+    }
+
+    expect((inspector as any).destroyWaiters.size).toBe(0);
+    inspector.destroy();
+  });
+
+  test("destroy() resolves a track waiting on an event spec fetch with [], even if the fetch never calls back", async () => {
+    jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
+    const fetch = jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation(() => {});
+    const inspector = staging({ batchSize: 30 });
+
+    const tracked = inspector.trackSchemaFromEvent("E", { a: 1 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    inspector.destroy();
+
+    expect(await settledWithin(tracked, 1000)).toEqual({ value: [] });
+  });
+
   test("flush waits for an in-progress event spec fetch, then sends the validated event", async () => {
     // Validation is skipped under the mock endpoint, so take the real-endpoint path with
     // the network stubbed out.

@@ -11,12 +11,25 @@ beforeAll(() => {
   ]);
 }, 60_000);
 
-function runHarnessRaw(input: string) {
-  const result = spawnSync(process.execPath, [harness], {
+// spawnSync blocks the Jest worker, so Jest's own test timeout cannot stop a hung harness;
+// the child gets a deadline of its own and a timeout fails the test with a clear message.
+const HARNESS_TIMEOUT_MS = 20_000;
+
+function spawnHarness(args: string[], input: string, timeout = HARNESS_TIMEOUT_MS) {
+  return spawnSync(process.execPath, args, {
     input,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
+    timeout,
+    killSignal: "SIGKILL",
   });
+}
+
+function runHarnessRaw(input: string) {
+  const result = spawnHarness([harness], input);
+  if (result.error) {
+    throw new Error("harness did not complete: " + result.error.message);
+  }
   return { status: result.status, output: JSON.parse(result.stdout.trim()) };
 }
 
@@ -150,6 +163,15 @@ describe("conformance harness", () => {
 
     expect(status).toBe(0);
     expect(output.actual).toEqual([]);
+  });
+
+  test("a child that outlives the deadline is killed and reported, not waited on", () => {
+    const started = Date.now();
+    const hang = spawnHarness(["-e", "setInterval(() => {}, 1000)"], "", 500);
+
+    expect(hang.signal).toBe("SIGKILL");
+    expect((hang.error as NodeJS.ErrnoException).code).toBe("ETIMEDOUT");
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   test("a large output envelope reaches the pipe in full before the harness exits", () => {
