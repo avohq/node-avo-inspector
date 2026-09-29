@@ -5,6 +5,7 @@ import { EventEmitter } from "events";
 
 import { AvoInspector } from "../AvoInspector";
 import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
+import { trackingEndpoint } from "./constants";
 
 // AVO_INSPECTOR_MOCK_ENDPOINT: the test-only override of the track URL (SPEC §7.1).
 
@@ -70,6 +71,23 @@ function stubHttps() {
   }) as any);
   return urls;
 }
+
+describe("default endpoint", () => {
+  test("without the override, track requests go to https://api.avo.app/inspector/v2/track", async () => {
+    delete process.env.AVO_INSPECTOR_MOCK_ENDPOINT;
+    const urls = stubHttps();
+    const inspector = create("dev");
+
+    await inspector.trackSchemaFromEvent("E", { a: 1 });
+
+    const tracks = urls.filter((url) => !url.includes("/trackingPlan/"));
+    expect(tracks).toEqual([trackingEndpoint]);
+    const url = new URL(tracks[0]);
+    expect([url.protocol, url.hostname, url.port, url.pathname]).toEqual([
+      "https:", "api.avo.app", "", "/inspector/v2/track",
+    ]);
+  });
+});
 
 describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
   test("a redirected send warns once, on stderr, with only scheme, host and port", async () => {
