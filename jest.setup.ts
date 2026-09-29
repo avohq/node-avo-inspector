@@ -42,9 +42,9 @@ if (!guarded.__blockedHosts) {
   } as any;
 }
 
-beforeAll(() => {
-  guarded.__blockedHosts!.length = 0;
-});
+// This module runs once per test file, before the file itself is evaluated, so the reset
+// here keeps connections attempted by imports and top-level code in the file's record.
+guarded.__blockedHosts!.length = 0;
 
 afterAll(() => {
   const blocked = guarded.__blockedHosts!;
