@@ -51,6 +51,8 @@ Public fields: `environment`, `apiKey`, `version`, `avoNetworkCallsHandler`, `av
 
 Static `AvoInspector.shouldLog` (getter/setter) is one flag shared by every instance.
 
+Module export `INTERNAL_ERROR_MESSAGE = "Avo Inspector: something went wrong. Please report to support@avo.app."`, marked `@internal` (stripped from the published typings, not re-exported from the package index); `AvoBatchQueue` logs it for a synchronous dispatch throw.
+
 Internal state: event spec fetcher/cache/validator (null in prod); an empty generated anonymous id used when no stream id is given; the batch queue; a `destroyed` flag; the set of pending promises (spec validations before enqueue, and batch sends) that `flush()` awaits; per-validation `flushRequested` markers; waiters settled by `destroy()`.
 
 Static state shared by all instances: the set of instances with work, whether the `beforeExit` listener is armed, and one exit deadline.
@@ -89,7 +91,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 
 1. Reads the current sampling rate and stamps `createdAt` at call time. If `Math.random() > rate`, the event is dropped (logged) and the call resolves with the schema.
 2. Body: validated body (`buildEventProperties` + `bodyForValidatedEventSchemaCall`) when a validation result exists, else `bodyForEventSchemaCall`; both receive the resolved track options. The body's `samplingRate` and `createdAt` are overwritten with the values captured at call time.
-3. Validation inactive (prod, after destroy, or while the mock-endpoint override is in effect): the body is enqueued immediately.
+3. Validation inactive (prod, after destroy, or while a valid mock-endpoint override is in effect, i.e. `AvoNetworkCallsHandler.mockEndpointFor(env)` is non-null): the body is enqueued immediately. An invalid override value is ignored, so validation stays on.
 4. Validation active: `fetchAndValidate` runs first. A rejection is logged as a warning and the event is sent without validation. If `destroy()` ran meanwhile, resolves `[]`. A body-building error logs the internal error and rejects with the internal error message. Otherwise the body is enqueued. The work (validation, plus any send the enqueue triggered) is pending until it settles.
 5. `flush()` marks validations pending at its start; when such a validation enqueues without triggering a send, one drain is scheduled (`setImmediate`) and shared by every marked validation that settles in the same event-loop turn.
 6. Resolution:
