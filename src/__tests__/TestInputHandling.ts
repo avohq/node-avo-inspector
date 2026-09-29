@@ -146,3 +146,48 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
     ]);
   });
 });
+
+describe("non-string streamId", () => {
+  test.each([
+    [12345, "12345"],
+    [BigInt(10), "10"],
+    [true, "true"],
+  ])("%p is sent as the string %p and the call resolves", async (streamId, expected) => {
+    const schema = await dev().trackSchemaFromEvent("Login", { a: 1 }, streamId as any);
+
+    expect(schema).toEqual([{ propertyName: "a", propertyType: "int" }]);
+    expect(captured[0][0].streamId).toBe(expected);
+  });
+
+  test.each([
+    ["an object", { id: 1 }],
+    ["a symbol", Symbol("s")],
+    ["a function", () => 1],
+  ])("%s is treated as absent, with a warning when logging is on", async (_label, streamId) => {
+    const schema = await dev().trackSchemaFromEvent("Login", { a: 1 }, streamId as any);
+
+    expect(schema).toHaveLength(1);
+    expect(captured[0][0].streamId).toBe("");
+    expect(console.warn).toHaveBeenCalledWith(
+      "[Avo Inspector] Warning: streamId must be a string; ignoring a value of type " + typeof streamId
+    );
+  });
+
+  test("no warning for an ignored streamId when logging is off", async () => {
+    const inspector = new AvoInspector({ apiKey: "test-key", env: "staging", version: "1.0.0" });
+    await inspector.trackSchemaFromEvent("Login", {}, { id: 1 } as any);
+
+    expect(console.warn).not.toHaveBeenCalled();
+    inspector.destroy();
+  });
+
+  test("the Codegen entry applies the same rule", async () => {
+    const inspector = dev();
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent("Login", { a: 1 }, "id", "hash", 42);
+    // @ts-ignore
+    await inspector._avoFunctionTrackSchemaFromEvent("Logout", { a: 1 }, "id", "hash", { id: 1 });
+
+    expect(captured.map((batch) => batch[0].streamId)).toEqual(["42", ""]);
+  });
+});
