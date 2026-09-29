@@ -55,7 +55,7 @@ Module export `INTERNAL_ERROR_MESSAGE = "Avo Inspector: something went wrong. Pl
 
 Internal state: event spec fetcher/cache/validator (null in prod); an empty generated anonymous id used when no stream id is given; the batch queue; a `destroyed` flag; the set of pending promises (spec validations before enqueue, and batch sends) that `flush()` awaits; per-validation `flushRequested` markers; waiters settled by `destroy()`.
 
-Static state shared by all instances: the set of instances with work, whether the `beforeExit` listener is armed, and one exit deadline.
+Static state shared by all instances: the set of instances with work, whether the `beforeExit` listener is armed, and one exit-drain deadline.
 
 ## Users and permissions
 
@@ -115,7 +115,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 ### Exit drain
 
 - An instance is registered while it is not destroyed and has buffered events or pending work; a single `process.once("beforeExit")` listener is armed while any instance is registered and removed when none are (which also resets the exit deadline).
-- On `beforeExit`: sets one 10 s deadline for the whole exit (first firing only); if time remains, holds the process with a timer for the remaining time, calls `flush(remaining)` on every registered instance, clears the timer when all settle, and re-arms for work added during the drain. Past the deadline it does nothing and the rest is dropped.
+- On `beforeExit`: sets one 10 s deadline for the whole exit drain (first firing only); if time remains, holds the process with a timer for the remaining time, calls `flush(remaining)` on every registered instance, clears the timer when all settle, and re-arms for work added during the drain. Past the deadline it does nothing and the rest is dropped.
 - Nothing else keeps the process alive; `process.exit()`, signals and serverless freezes need an explicit `flush()`.
 
 ### Event spec validation (fetchAndValidate)
@@ -145,7 +145,7 @@ Terminates the instance: marks it destroyed; settles every track waiting on a sp
 
 ## Non-functional requirements
 
-- **IMPORTANT:** the SDK never keeps an idle process alive; only the exit drain holds it, for at most the 10 s exit deadline.
+- **IMPORTANT:** the SDK never keeps an idle process alive; only the exit drain holds it, for at most its 10 s deadline. Other handles in the process can keep it running longer.
 - Events are batched outside dev; the track promise means "queued", not "delivered". Events whose spec must be fetched join the queue later, so batch order is not call order; `createdAt` preserves call time.
 - An instance with buffered or pending work is strongly referenced by static state until its work finishes or it is destroyed.
 - Send failures never reject the track promise; only synchronous internal errors or body-building errors do. Validation failures degrade to an unvalidated send.

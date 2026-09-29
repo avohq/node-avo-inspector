@@ -39,7 +39,7 @@ Events are buffered in memory and sent in batches. All options are optional:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `batchSize` | `30` | Send when this many events are buffered. Always `1` in `dev`, so every event is sent immediately. |
+| `batchSize` | `30` | Send when this many events are buffered. Always `1` in `dev`, so every event is sent on its own as soon as it is queued. |
 | `batchFlushSeconds` | `30` | Send once the oldest buffered event is this many seconds old. |
 | `maxQueueSize` | `1000` | Maximum events buffered before a batch is formed; the oldest are dropped first when it is exceeded. Batches already formed and waiting to be sent have their own limit (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)). |
 | `disableBatchTimer` | `false` | Start no background flush timer. Set it to `true` in serverless functions. |
@@ -59,9 +59,9 @@ While an instance has events that are buffered or still being sent, the SDK keep
 
 ### High-volume and backfill scripts
 
-At most 4 requests are sent at once. Batches formed while all 4 are busy wait their turn, and up to 10,000 events can wait. Beyond that the oldest waiting events are dropped (and the drop is logged), so memory stays bounded when the endpoint is slow or down.
+At most 4 requests are sent at once. Batches formed while all 4 are busy wait their turn, and up to 10,000 events can wait. Beyond that the oldest waiting events are dropped (and the drop is logged), so the number of events held for sending stays bounded when the endpoint is slow or down.
 
-A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush()` every few thousand events so nothing is dropped:
+A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush()` every few thousand events so events are not dropped for lack of room while they wait:
 
 ```javascript
 for (let i = 0; i < rows.length; i++) {
@@ -75,7 +75,7 @@ await inspector.flush();
 
 Buffered events live in memory only and are lost if the process exits first. Delivery is at-most-once: a batch that fails to send is dropped, never retried.
 
-When a process ends because it has nothing left to do, the SDK sends what is still buffered on its own: it listens for Node's `beforeExit` event and flushes (bounded by the 10-second flush timeout). This is a best-effort safety net, not a guarantee. The SDK never keeps an idle process alive, and `beforeExit` does **not** fire when:
+When a process ends because it has nothing left to do, the SDK sends what is still buffered on its own: it listens for Node's `beforeExit` event and flushes, holding the process for at most 10 seconds for this drain. The deadline bounds the SDK's own drain, not the process: other work in your process can keep it running longer. This is a best-effort safety net, not a guarantee. The SDK never keeps an idle process alive, and `beforeExit` does **not** fire when:
 
 - the process calls `process.exit()`;
 - the process is stopped by a signal such as `SIGTERM` or `SIGINT` (container shutdown, Ctrl-C);
