@@ -110,3 +110,47 @@ describe("bounded concurrent batch sends", () => {
     expect(send).toHaveBeenCalledTimes(6);
   });
 });
+
+describe("deduplicator cleanup", () => {
+  const { AvoDeduplicator } = require("../AvoDeduplicator");
+
+  test("cleanup cost does not grow with the number of distinct milliseconds in the window", () => {
+    const dedup = new AvoDeduplicator();
+    let now = 1_000_000;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+
+    // One registration per millisecond keeps ~500 distinct timestamps inside the window.
+    const started = process.hrtime.bigint();
+    for (let i = 0; i < 30_000; i++) {
+      now++;
+      dedup.shouldRegisterEvent("E" + (i % 50), { i }, i % 2 === 0, "s");
+    }
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+
+    expect(elapsedMs).toBeLessThan(1000);
+  });
+
+  test("every registration expires after 500 ms, even one sharing its millisecond with another", () => {
+    const dedup = new AvoDeduplicator();
+    let now = 1_000_000;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+
+    dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
+    dedup.shouldRegisterEvent("B", { b: 1 }, true, "s"); // same millisecond as A
+    now += 600;
+
+    // Past 500 ms the Codegen registration of A is gone, so a manual A is not a duplicate.
+    expect(dedup.shouldRegisterEvent("A", { a: 1 }, false, "s")).toBe(true);
+  });
+
+  test("within 500 ms a manual call matching a Codegen call is still a duplicate", () => {
+    const dedup = new AvoDeduplicator();
+    let now = 1_000_000;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+
+    dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
+    now += 400;
+
+    expect(dedup.shouldRegisterEvent("A", { a: 1 }, false, "s")).toBe(false);
+  });
+});
