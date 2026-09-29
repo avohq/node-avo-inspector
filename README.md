@@ -131,6 +131,27 @@ inspector.trackSchemaFromEvent("Event name", {
 
 `trackSchemaFromEvent` returns a promise that resolves with the extracted schema once the event is queued. In `dev` the event is sent within the call, and the promise resolves `[]` if the Inspector API answers with a non-200 status. You can pass an optional stream id as the third argument to correlate events.
 
+## Schema extraction limits
+
+Schema extraction runs on your thread, inside `trackSchemaFromEvent`. Without limits, a payload such as an ORM object or a full API response could make that work unbounded, so extraction stops expanding a value:
+
+- more than 10 levels deep, where each step into an object or into a list element counts as one level;
+- that contains itself (a cycle);
+- once 10,000 objects and lists have been expanded in one call (the event properties object and every list count).
+
+A property cut off this way is reported as `"object"` with empty `children`; a list element cut off this way is reported as the type string `"object"`. Strings, numbers and booleans never count toward the limits, whatever their size.
+
+For example, an object that refers to itself:
+
+```javascript
+const order = { id: 7 };
+order.self = order;
+inspector.extractSchema({ order });
+// [{ propertyName: "order", propertyType: "object", children: [
+//   { propertyName: "id", propertyType: "int" },
+//   { propertyName: "self", propertyType: "object", children: [] } ] }]
+```
+
 ## Event order
 
 Each event carries its own `createdAt`, stamped when `trackSchemaFromEvent` is called. Events in a batch are not guaranteed to be in call order: in `dev` and `staging`, an event whose spec must first be fetched for validation joins the queue when the fetch completes, so it can be sent after events tracked later. Use `createdAt` if you need the call order.
