@@ -176,7 +176,7 @@ describe("wire protocol", () => {
     "constructor rejects an API key containing another control character such as %j",
     (ch) => {
       expect(() => dev({ apiKey: "test" + ch + "key" })).toThrow(
-        new Error("Avo Inspector: apiKey must not contain control characters")
+        new Error("[Avo Inspector] apiKey must not contain control characters")
       );
     }
   );
@@ -199,7 +199,7 @@ describe("wire protocol", () => {
 
   test.each(["\u2014", "\u{1F600}"])("constructor rejects an API key containing %j, which a header cannot carry", (ch) => {
     expect(() => dev({ apiKey: "test" + ch + "key" })).toThrow(
-      new Error("Avo Inspector: apiKey must only contain characters that can be sent in an HTTP header")
+      new Error("[Avo Inspector] apiKey must only contain characters that can be sent in an HTTP header")
     );
   });
 

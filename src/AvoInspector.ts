@@ -245,10 +245,10 @@ export class AvoInspector {
         "[Avo Inspector] API key contains a control character. The API key is sent as a request header and cannot contain CR, LF, or NUL."
       );
     } else if (hasHeaderControlChar(options.apiKey)) {
-      throw new Error("Avo Inspector: apiKey must not contain control characters");
+      throw new Error("[Avo Inspector] apiKey must not contain control characters");
     } else if (hasNonLatin1Char(options.apiKey)) {
       throw new Error(
-        "Avo Inspector: apiKey must only contain characters that can be sent in an HTTP header"
+        "[Avo Inspector] apiKey must only contain characters that can be sent in an HTTP header"
       );
     } else {
       this.apiKey = options.apiKey;
