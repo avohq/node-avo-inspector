@@ -177,6 +177,11 @@ inspector.enableLogging(true | false);
   - it resolves with the HTTP status code instead of `undefined`;
   - besides network errors and timeouts, it rejects with `"Request failed"` without sending when a header value contains a control character (anything but tab) or a character above U+00FF.
 - **An API key containing a control character (anything but tab) or a character above U+00FF now throws in the constructor**, because the key is sent as a request header.
+- **At most 4 batches are sent at once**, and up to 10,000 events can wait to be sent; beyond that the oldest waiting events are dropped. A loop that tracks without yielding to I/O should call `await inspector.flush()` every few thousand events (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)).
+- **A non-string `streamId` is converted, not rejected.** A number, bigint or boolean is sent as its string form; any other non-string is ignored. In 1.x the track promise rejected.
+- **A non-string `env` falls back to `dev`** with a warning. In 1.x the constructor threw a `TypeError`.
+- **`NaN`, `±Infinity` and exponent-form numbers such as `1e-7` are classified `float`.** 1.x classified them `int`.
+- **Node.js 14 or later is required** (`"engines": { "node": ">=14" }`).
 - **Wire changes:** requests go to `https://api.avo.app/inspector/v2/track` and carry the API key and env as `api-key` and `env` headers. Bodies of 1024 bytes or more are gzipped. Events no longer carry `sessionId` or `trackingId`, and every event now carries `streamId`. `sessionId` is not sent; ingestion treats it as optional.
 
 Unchanged from 1.x, but easy to trip over: the logging flag is shared by every instance in the process, and each constructor resets it (on for `dev`, off otherwise). Creating a `prod` instance after a `dev` one turns logging off for both. Call `enableLogging` after constructing your instances if you need a specific setting.
