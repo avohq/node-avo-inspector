@@ -272,6 +272,9 @@ export class AvoNetworkCallsHandler {
         res.on("close", truncated);
       });
       this.inFlightRequests.add(req);
+      // An in-flight send must not hold the process open: at exit the beforeExit drain
+      // keeps it alive, under one deadline, while it sends what is left.
+      req.on("socket", (socket) => socket.unref());
 
       // A wall-clock budget for the whole request, not just socket idleness.
       const timer = setTimeout(() => {

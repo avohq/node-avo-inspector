@@ -4,6 +4,7 @@ import { AddressInfo } from "net";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { gunzipSync } from "zlib";
 
 import { AvoInspector } from "../AvoInspector";
 
@@ -43,7 +44,7 @@ beforeEach(() => {
 });
 
 // Runs `script` in a child Node process with the compiled SDK as `AvoInspector`.
-function runChild(script: string): Promise<{ elapsedMs: number }> {
+function runChild(script: string, target: string = endpoint): Promise<{ elapsedMs: number }> {
   const started = Date.now();
   const source =
     `const { AvoInspector } = require(${JSON.stringify(join(distDir, "index.js"))});\n` + script;
@@ -54,7 +55,7 @@ function runChild(script: string): Promise<{ elapsedMs: number }> {
       {
         env: {
           ...process.env,
-          AVO_INSPECTOR_MOCK_ENDPOINT: endpoint,
+          AVO_INSPECTOR_MOCK_ENDPOINT: target,
           NODE_PATH: join(repoRoot, "node_modules"),
         },
         timeout: 30_000,
@@ -68,6 +69,43 @@ const trackWithoutFlush = `
   const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
   inspector.trackSchemaFromEvent("Exit Event", { a: 1 });
 `;
+
+describe("exit against an endpoint that never answers", () => {
+  let hung: Server;
+  let hungEndpoint: string;
+  let hungRequests: number[] = [];
+
+  beforeAll(async () => {
+    hung = createServer((req) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const raw = Buffer.concat(chunks);
+        const body = req.headers["content-encoding"] === "gzip" ? gunzipSync(raw) : raw;
+        hungRequests.push(JSON.parse(body.toString("utf8")).length);
+      });
+    });
+    await new Promise<void>((resolve) => hung.listen(0, "127.0.0.1", resolve));
+    hungEndpoint = "http://127.0.0.1:" + (hung.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    hung.closeAllConnections();
+    await new Promise((resolve) => hung.close(resolve));
+  });
+
+  test("a natural exit sends the in-flight batch and the tail together, within about 10 s", async () => {
+    hungRequests = [];
+    // 45 events with batchSize 30: one size-triggered batch, and a 15-event tail at exit.
+    const { elapsedMs } = await runChild(`
+      const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
+      for (let i = 0; i < 45; i++) inspector.trackSchemaFromEvent("E" + i, { i });
+    `, hungEndpoint);
+
+    expect(hungRequests.sort((a, b) => a - b)).toEqual([15, 30]);
+    expect(elapsedMs).toBeLessThan(12_000);
+  }, 40_000);
+});
 
 describe("drain on beforeExit", () => {
   test("a process that returns without flush() still delivers its buffered event", async () => {

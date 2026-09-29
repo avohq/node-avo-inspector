@@ -144,18 +144,32 @@ export class AvoInspector {
   // on signals; callers flush() there.
   private static instancesWithWork: Set<AvoInspector> = new Set();
   private static exitDrainArmed = false;
+  // One deadline for the whole exit, however often "beforeExit" fires during it. Cleared
+  // once every instance has drained, in case the process carries on.
+  private static exitDeadline: number | null = null;
 
   private static drainOnExit = (): void => {
     AvoInspector.exitDrainArmed = false;
     const instances = Array.from(AvoInspector.instancesWithWork);
-    instances.forEach((inspector) => {
-      inspector.flush();
-    });
-    // The sends just started keep the loop alive; re-arm so anything they leave behind
-    // is drained at the next "beforeExit".
-    if (AvoInspector.instancesWithWork.size > 0) {
-      AvoInspector.armExitDrain();
+    if (instances.length === 0) {
+      return;
     }
+    if (AvoInspector.exitDeadline === null) {
+      AvoInspector.exitDeadline = Date.now() + DEFAULT_FLUSH_TIMEOUT_MS;
+    }
+    const remaining = AvoInspector.exitDeadline - Date.now();
+    if (remaining <= 0) {
+      // Out of time: let the process exit; what is still unsent is dropped.
+      return;
+    }
+    // Request sockets are unref'd, so this timer is what keeps the process alive while
+    // everything left is sent at once (within the in-flight cap).
+    const keepAlive = setTimeout(() => {}, remaining);
+    Promise.allSettled(instances.map((inspector) => inspector.flush(remaining))).then(() => {
+      clearTimeout(keepAlive);
+    });
+    // Re-arm so work added during the drain is sent at the next "beforeExit".
+    AvoInspector.armExitDrain();
   };
 
   private static armExitDrain(): void {
@@ -182,6 +196,7 @@ export class AvoInspector {
       AvoInspector.instancesWithWork.delete(this);
       if (AvoInspector.instancesWithWork.size === 0) {
         AvoInspector.disarmExitDrain();
+        AvoInspector.exitDeadline = null;
       }
     }
   }
