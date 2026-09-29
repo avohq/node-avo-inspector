@@ -52,21 +52,55 @@ describe("bounded concurrent batch sends", () => {
     expect(names(batches).flat()).toEqual(Array.from({ length: 20 }, (_, i) => "E" + i));
   });
 
-  test("events waiting for a send slot count toward maxQueueSize; the oldest are dropped first", async () => {
+  test("events waiting for a send slot do not count toward maxQueueSize", async () => {
     const inspector = staging({ batchSize: 2, maxQueueSize: 6 });
-    inspector.enableLogging(true);
     const { batches, releaseAll } = holdSends(inspector);
 
     for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent("E" + i, {});
-    expect((inspector as any).batchQueue.length).toBe(6);
+    await releaseAll();
+
+    expect(names(batches).flat()).toEqual(Array.from({ length: 20 }, (_, i) => "E" + i));
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringMatching(/dropped/));
+  });
+
+  test("a tight loop of 9,000 events that never yields, then flush(), delivers all 9,000", async () => {
+    const inspector = staging();
+    const { batches, releaseAll } = holdSends(inspector);
+
+    for (let i = 0; i < 9000; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    const flushing = inspector.flush();
+    await releaseAll();
+    await flushing;
+
+    expect(names(batches).flat()).toEqual(Array.from({ length: 9000 }, (_, i) => "E" + i));
+  });
+
+  test("past 10,000 waiting events the oldest waiting ones are dropped, and the drop is logged", async () => {
+    const inspector = staging();
+    inspector.enableLogging(true);
+    const { batches, releaseAll } = holdSends(inspector);
+
+    let maxWaiting = 0;
+    for (let i = 0; i < 20_000; i++) {
+      await inspector.trackSchemaFromEvent("E" + i, {});
+      maxWaiting = Math.max(maxWaiting, (inspector as any).batchQueue.waitingLength);
+    }
+    expect(maxWaiting).toBe(10_000);
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringMatching(/pending batch is full \(maxQueueSize 6\), dropped 1 oldest event/)
+      expect.stringMatching(/batches waiting to be sent exceed 10000 events, dropped \d+ oldest event/)
     );
 
+    const flushing = inspector.flush();
     await releaseAll();
-    // E0-E7 were already being sent; of the rest only the newest 6 were kept.
-    expect(names(batches).flat()).toEqual(["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7",
-      "E14", "E15", "E16", "E17", "E18", "E19"]);
+    await flushing;
+
+    // Sent at once: the first 4 batches (E0-E119). Kept: the newest 10,000 events, including
+    // the 20-event buffer that flush() swapped out last (E10000-E19999).
+    const expected = [
+      ...Array.from({ length: 120 }, (_, i) => "E" + i),
+      ...Array.from({ length: 10_000 }, (_, i) => "E" + (10_000 + i)),
+    ];
+    expect(names(batches).flat()).toEqual(expected);
   });
 
   test("flush() waits for batches still waiting for a send slot", async () => {

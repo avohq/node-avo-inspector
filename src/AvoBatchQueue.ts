@@ -8,6 +8,11 @@ export const MAX_TIMER_MS = 2_147_483_647;
 // a fast producer or a slow endpoint cannot open an unbounded number of requests.
 export const MAX_IN_FLIGHT_SENDS = 4;
 
+// Events that may wait for a send slot, across all waiting batches. Separate from
+// maxQueueSize, which bounds only the unsent buffer; past this the oldest waiting events
+// are dropped.
+export const MAX_WAITING_EVENTS = 10_000;
+
 export interface AvoBatchOptions {
   batchSize: number;
   batchFlushSeconds: number;
@@ -46,9 +51,14 @@ export class AvoBatchQueue<T> {
     private track: (outcome: Promise<T>) => Promise<T> = (outcome) => outcome
   ) {}
 
-  /** Events not yet handed to dispatch: the buffer plus batches waiting for a slot. */
+  /** Events in the unsent buffer (bounded by maxQueueSize). */
   get length(): number {
-    return this.buffer.length + this.waitingEvents;
+    return this.buffer.length;
+  }
+
+  /** Events in batches waiting for a send slot (bounded by MAX_WAITING_EVENTS). */
+  get waitingLength(): number {
+    return this.waitingEvents;
   }
 
   /**
@@ -58,9 +68,9 @@ export class AvoBatchQueue<T> {
   enqueue(event: InspectorBody): Promise<T> | null {
     this.buffer.push(event);
 
-    const overflow = this.length - this.options.maxQueueSize;
+    const overflow = this.buffer.length - this.options.maxQueueSize;
     if (overflow > 0) {
-      this.dropOldest(overflow);
+      this.buffer.splice(0, overflow);
       if (AvoInspector.shouldLog) {
         console.warn(
           "Avo Inspector: pending batch is full (maxQueueSize " +
@@ -89,6 +99,16 @@ export class AvoBatchQueue<T> {
     });
     this.waitingEvents += batch.length;
     this.startSends();
+    const excess = this.waitingEvents - MAX_WAITING_EVENTS;
+    if (excess > 0) {
+      this.dropOldestWaiting(excess);
+      if (AvoInspector.shouldLog) {
+        console.warn(
+          "Avo Inspector: batches waiting to be sent exceed " + MAX_WAITING_EVENTS +
+            " events, dropped " + excess + " oldest event(s)."
+        );
+      }
+    }
     return this.track(outcome);
   }
 
@@ -116,8 +136,7 @@ export class AvoBatchQueue<T> {
     }
   }
 
-  // Oldest first: waiting batches were swapped out before anything still in the buffer.
-  private dropOldest(count: number): void {
+  private dropOldestWaiting(count: number): void {
     while (count > 0 && this.waiting.length > 0) {
       const batch = this.waiting[0];
       const removed = batch.events.splice(0, Math.min(count, batch.events.length)).length;
@@ -127,9 +146,6 @@ export class AvoBatchQueue<T> {
         this.waiting.shift();
         batch.settle(this.dropped);
       }
-    }
-    if (count > 0) {
-      this.buffer.splice(0, count);
     }
   }
 

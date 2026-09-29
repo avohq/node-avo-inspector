@@ -41,7 +41,7 @@ Events are buffered in memory and sent in batches. All options are optional:
 |---|---|---|
 | `batchSize` | `30` | Send when this many events are buffered. Always `1` in `dev`, so every event is sent immediately. |
 | `batchFlushSeconds` | `30` | Send once the oldest buffered event is this many seconds old. |
-| `maxQueueSize` | `1000` | Maximum buffered events; the oldest are dropped first when it is exceeded. At most 4 batches are sent at once, and events in batches waiting to be sent count toward this limit, so memory stays bounded when the endpoint is slow or down. |
+| `maxQueueSize` | `1000` | Maximum events buffered before a batch is formed; the oldest are dropped first when it is exceeded. Batches already formed and waiting to be sent have their own limit (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)). |
 | `disableBatchTimer` | `false` | Start no background flush timer. Set it to `true` in serverless functions. |
 
 ```javascript
@@ -56,6 +56,20 @@ let inspector = new Inspector.AvoInspector({
 ```
 
 While an instance has events that are buffered or still being sent, the SDK keeps a reference to it so they can be sent when the process ends. Such an instance is not garbage-collected until its events are sent or it is destroyed, even if your code has dropped it. With `disableBatchTimer: true` and no `flush()`, buffered events leave only on a size trigger or at exit, so the instance and its buffer stay in memory until then. Call `flush()` or `destroy()` when you are done with an instance.
+
+### High-volume and backfill scripts
+
+At most 4 requests are sent at once. Batches formed while all 4 are busy wait their turn, and up to 10,000 events can wait. Beyond that the oldest waiting events are dropped (and the drop is logged), so memory stays bounded when the endpoint is slow or down.
+
+A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush()` every few thousand events so nothing is dropped:
+
+```javascript
+for (let i = 0; i < rows.length; i++) {
+  inspector.trackSchemaFromEvent(rows[i].event, rows[i].properties);
+  if (i % 5000 === 4999) await inspector.flush();
+}
+await inspector.flush();
+```
 
 # Flushing before exit (required)
 
