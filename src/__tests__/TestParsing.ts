@@ -150,6 +150,30 @@ describe("Schema Parsing", () => {
     expect(res[0].propertyType).toBe(type.FLOATLIST);
   });
 
+  describe("a null list element is the type null (spec §9.2)", () => {
+    test.each([
+      [["a", null], ["string", "null"]],
+      [[null, 1], ["null", "int"]],
+    ])("%j maps its elements to %j", (list, children) => {
+      const [entry] = inspector.extractSchema({ v: list });
+
+      expect(entry.children).toEqual(children);
+    });
+
+    test("a null inside a list of objects is typed, not dropped", () => {
+      expect(inspector.extractSchema({ v: [{ a: null, b: [null] }] })).toEqual([
+        {
+          propertyName: "v",
+          propertyType: "list(object)",
+          children: [[
+            { propertyName: "a", propertyType: "null" },
+            { propertyName: "b", propertyType: "list(string)", children: ["null"] },
+          ]],
+        },
+      ]);
+    });
+  });
+
   describe("a root that is not a plain object", () => {
     test.each([
       ["a string", "abc"],

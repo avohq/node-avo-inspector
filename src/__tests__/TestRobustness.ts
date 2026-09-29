@@ -158,7 +158,7 @@ describe("deduplicator cleanup", () => {
   test("cleanup cost does not grow with the number of distinct milliseconds in the window", () => {
     const dedup = new AvoDeduplicator();
     let now = 1_000_000;
-    jest.spyOn(Date, "now").mockImplementation(() => now);
+    dedup.now = () => now;
 
     // One registration per millisecond keeps ~500 distinct timestamps inside the window.
     const started = process.hrtime.bigint();
@@ -174,7 +174,7 @@ describe("deduplicator cleanup", () => {
   test("every registration expires after 500 ms, even one sharing its millisecond with another", () => {
     const dedup = new AvoDeduplicator();
     let now = 1_000_000;
-    jest.spyOn(Date, "now").mockImplementation(() => now);
+    dedup.now = () => now;
 
     dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
     dedup.shouldRegisterEvent("B", { b: 1 }, true, "s"); // same millisecond as A
@@ -187,7 +187,7 @@ describe("deduplicator cleanup", () => {
   test("within 500 ms a manual call matching a Codegen call is still a duplicate", () => {
     const dedup = new AvoDeduplicator();
     let now = 1_000_000;
-    jest.spyOn(Date, "now").mockImplementation(() => now);
+    dedup.now = () => now;
 
     dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
     now += 400;

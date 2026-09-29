@@ -202,6 +202,7 @@ inspector.enableLogging(true | false);
 - **A non-string `streamId` is converted, not rejected.** A number, bigint or boolean is sent as its string form; any other non-string is ignored. In 1.x the track promise rejected.
 - **A non-string `env` falls back to `dev`** with a warning. In 1.x the constructor threw a `TypeError`.
 - **`NaN`, `±Infinity` and exponent-form numbers such as `1e-7` are classified `float`.** 1.x classified them `int`.
+- **A `null` list element is typed `"null"`.** `{ v: [null, 1] }` has children `["null", "int"]`; 1.x reported the null element as `[]`.
 - **Node.js 14 or later is required** (`"engines": { "node": ">=14" }`).
 - **Wire changes:** requests go to `https://api.avo.app/inspector/v2/track` and carry the API key and env as `api-key` and `env` headers. Bodies of 1024 bytes or more are gzipped. Events no longer carry `sessionId` or `trackingId`, and every event now carries `streamId`. `sessionId` is not sent; ingestion treats it as optional.
 

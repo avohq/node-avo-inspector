@@ -34,7 +34,7 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 2. Mapping a value:
    - Array: map every element recursively, then de-duplicate.
    - Object: for each own enumerable string key (`Object.keys`), emit `{ propertyName, propertyType }`; if the value is a non-null object or array, add `children` = mapping of the value.
-   - Primitive: its type string.
+   - Primitive, `null` or `undefined` (including a list element): its type string. **IMPORTANT:** a `null` list element maps to `"null"` (spec §9.2), not to `[]` as the JS reference did (the §9.3.4 quirk, not a conformance gate).
 3. Recursion is bounded. A complex value is a **leaf** when any of:
    - its depth has reached `MAX_DEPTH`;
    - it is one of its own ancestors on the current path (a cycle);
@@ -77,4 +77,8 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 
 <example>
 Root `"abc"`, `42`, `[1, 2]` or `() => 1` -> `[]`
+</example>
+
+<example>
+`{ v: ["a", null] }` -> `[{v,"list(string)",children:["string","null"]}]`; `{ v: [null, 1] }` -> children `["null","int"]`
 </example>

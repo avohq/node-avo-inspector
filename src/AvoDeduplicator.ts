@@ -16,6 +16,9 @@ export class AvoDeduplicator {
   private avoFunctionsHead = 0;
   private manualHead = 0;
   private msToConsiderOld = 500;
+  // Milliseconds from a monotonic clock: the log must stay in time order, and a wall clock
+  // stepping back (NTP, manual change) would stall expiry. Replaceable in tests.
+  private now: () => number = () => Number(process.hrtime.bigint()) / 1e6;
   // The generation of each key's latest registration. A key's params always belong to its
   // latest registration, so only that registration's expiry may delete them.
   private avoFunctionsLatest: { [key: string]: number } = {};
@@ -42,7 +45,7 @@ export class AvoDeduplicator {
 
     const key = AvoDeduplicator.dedupKey(eventName, streamId);
 
-    const registration = { time: Date.now(), key, generation: this.nextGeneration++ };
+    const registration = { time: this.now(), key, generation: this.nextGeneration++ };
     if (fromAvoFunction) {
       this.avoFunctionsEvents.push(registration);
       this.avoFunctionsLatest[key] = registration.generation;
@@ -134,7 +137,7 @@ export class AvoDeduplicator {
   }
 
   private clearOldEvents() {
-    const now = Date.now();
+    const now = this.now();
     this.avoFunctionsHead = this.expire(
       this.avoFunctionsEvents, this.avoFunctionsHead, this.avoFunctionsEventsParams, this.avoFunctionsLatest, now
     );

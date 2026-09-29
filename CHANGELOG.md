@@ -10,6 +10,7 @@ Input handling. All of these behaved the same way in 1.x:
 - **A non-string `streamId` no longer rejects.** A number, bigint or boolean (a numeric user id, say) is sent as its string form. Any other non-string is treated as absent, with a warning when logging is on. Before, the track promise rejected, and a call without `.catch()` crashed the process with an unhandled rejection.
 - **A non-string `env` falls back to `dev`** with a warning instead of throwing `value.trim is not a function`.
 - **Non-whole numbers in exponent form are `float`.** `1e-7` and `5e-324` were classified `int`. A number is now `int` when it is a whole number and `float` otherwise; `NaN` and `±Infinity` are `float`.
+- **A `null` list element is typed `"null"`.** `{ v: [null, 1] }` now has children `["null", "int"]`, following the spec's schema pseudocode; 1.x reported the null element as `[]`.
 - **Invalid constructor arguments throw the documented messages.** A non-string `apiKey`, missing options (`new AvoInspector()`) or `null` options throw "[Avo Inspector] No API key provided…", and a non-string `version` throws "[Avo Inspector] No version provided…", instead of a `TypeError`.
 - `package.json` declares `"types"` and `"engines": { "node": ">=14" }`.
 

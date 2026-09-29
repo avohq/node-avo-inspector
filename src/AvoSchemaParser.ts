@@ -58,7 +58,9 @@ export class AvoSchemaParser {
           return isLeaf(x, depth) ? "object" : mapping(x, depth + 1);
         });
         return this.removeDuplicates(list);
-      } else if (typeof object === "object") {
+      } else if (isComplex(object)) {
+        // isComplex, not typeof: a null list element is the type "null" (spec §9.2), not
+        // an object to enumerate.
         let mappedResult: any = [];
         // Object.keys, not object.hasOwnProperty: a null-prototype object has no such method,
         // and a property named "hasOwnProperty" would shadow it.

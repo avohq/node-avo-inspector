@@ -18,6 +18,7 @@ Suppresses the second report of the same observation when both Codegen (Avo Func
   - a latest map: `{ [key: string]: number }`, holding the `generation` of each key's latest registration.
 - `generation` is a per-instance counter, incremented on every registration.
 - `msToConsiderOld = 500` (ms).
+- **IMPORTANT:** registration times come from a monotonic clock in milliseconds (`process.hrtime.bigint()`), never the wall clock, so a clock step (NTP, manual change) cannot stall or hasten expiry. The clock is an internal `now` field, replaceable in tests. Event `createdAt` timestamps are unaffected; they stay wall-clock.
 
 <invariant>
 Every registration gets its own log entry, including registrations of the same source in the same millisecond.
@@ -32,7 +33,7 @@ Every registration gets its own log entry, including registrations of the same s
 ### `shouldRegisterEvent(eventName, params, fromAvoFunction, streamId = ""): boolean`
 
 1. Expire old registrations (see Cleanup).
-2. Append a registration `{ time: Date.now(), key, generation }` for the caller's source, record `generation` as the key's latest, and store `params` as that key's params in the source's params map (overwriting any previous params for the key).
+2. Append a registration `{ time: now(), key, generation }` (monotonic ms) for the caller's source, record `generation` as the key's latest, and store `params` as that key's params in the source's params map (overwriting any previous params for the key).
 3. Look up the same key in the OTHER source's params map. It is a duplicate when params exist there and `deepEquals(params, otherParams)`.
 4. On a duplicate, delete the key's params from BOTH params maps (a pair is consumed once).
 5. Return `true` (send it) when no duplicate was found, `false` when it is a duplicate.
@@ -46,7 +47,7 @@ Every registration gets its own log entry, including registrations of the same s
 ### Cleanup
 
 - On each `shouldRegisterEvent`, each source's log is popped from `head` while the head entry is more than 500 ms old. For each popped entry, the key's params and latest entry are deleted **only if** the popped `generation` is still the key's latest; an older registration's expiry never deletes params written by a newer one.
-- Popping stops at the first unexpired entry (the log is assumed time-ordered).
+- Popping stops at the first unexpired entry; the log is in time order because the clock is monotonic.
 - When `head > 1024` and more than half the log is expired, the log is compacted (sliced from `head`, `head` reset to 0).
 
 ### `_clearEvents()` (tests only)
