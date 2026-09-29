@@ -69,7 +69,7 @@ type SendOutcome = "ok" | "non200" | "failed";
 // send its enqueue triggered, if any.
 type Enqueued = {
   result: Promise<Array<SchemaEntry>> | null;
-  send: Promise<SendOutcome> | null;
+  send: Promise<SendOutcome | null> | null;
 };
 
 type ValidationResult = {
@@ -102,6 +102,20 @@ export class AvoInspector {
   private pending: Set<Promise<unknown>> = new Set();
   // Pending entries that are event spec validations, keyed by their pending promise.
   private validations: Map<Promise<unknown>, { flushRequested: boolean }> = new Map();
+  // One drain for every flush-marked validation that settles in the same event-loop turn.
+  private drainScheduled: Promise<SendOutcome | null> | null = null;
+
+  private drainThisTurn(): Promise<SendOutcome | null> {
+    if (this.drainScheduled === null) {
+      this.drainScheduled = new Promise((resolve) => {
+        setImmediate(() => {
+          this.drainScheduled = null;
+          resolve(this.destroyed ? null : this.batchQueue.drain());
+        });
+      });
+    }
+    return this.drainScheduled;
+  }
 
   // Mirrors `promise`, but resolves `onDestroy` instead if destroy() runs first.
   private untilDestroyed<T>(promise: Promise<T>, onDestroy: T): Promise<T> {
@@ -579,7 +593,8 @@ export class AvoInspector {
     }
 
     // A flush() that starts while this validation is in progress sets flushRequested:
-    // the event then goes out as soon as it is queued, and flush() waits for that send.
+    // the event then goes out once it is queued, in the drain shared by every validation
+    // that settles in the same event-loop turn, and flush() waits for that send.
     const validation = { flushRequested: false };
     const outcome = this.untilDestroyed<ValidationResult | null>(
       this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId),
@@ -606,7 +621,7 @@ export class AvoInspector {
         const enqueued = this.enqueue(body, eventSchema);
         return {
           result: enqueued.result,
-          send: enqueued.send || (validation.flushRequested ? this.batchQueue.drain() : null),
+          send: enqueued.send || (validation.flushRequested ? this.drainThisTurn() : null),
         };
       });
 

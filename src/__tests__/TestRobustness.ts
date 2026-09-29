@@ -154,3 +154,28 @@ describe("deduplicator cleanup", () => {
     expect(dedup.shouldRegisterEvent("A", { a: 1 }, false, "s")).toBe(false);
   });
 });
+
+describe("flush() during event spec validation", () => {
+  const { AvoNetworkCallsHandler } = require("../AvoNetworkCallsHandler");
+  const { AvoEventSpecFetcher } = require("../eventSpec/AvoEventSpecFetcher");
+
+  test("events whose validations settle together go out in one batch", async () => {
+    jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
+    // Every spec response arrives in the same timers phase.
+    jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((...args: any[]) => {
+      setTimeout(() => args[2](null), 20);
+    });
+    const inspector = staging({ batchSize: 30 });
+    const { send, batches, releaseAll } = holdSends(inspector);
+
+    const tracks = Array.from({ length: 20 }, (_, i) => inspector.trackSchemaFromEvent("E" + i, {}));
+    const flushing = inspector.flush();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await releaseAll();
+    await flushing;
+    await Promise.all(tracks);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(batches[0]).toHaveLength(20);
+  });
+});
