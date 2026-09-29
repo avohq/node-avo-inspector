@@ -1,4 +1,4 @@
-import { AvoInspector } from "./AvoInspector";
+import { AvoInspector, INTERNAL_ERROR_MESSAGE } from "./AvoInspector";
 import { InspectorBody } from "./AvoNetworkCallsHandler";
 
 // setTimeout fires almost at once for delays above this (2^31 - 1 ms, about 24.8 days).
@@ -132,7 +132,15 @@ export class AvoBatchQueue<T> {
         batch.settle(outcome);
         this.startSends();
       };
-      this.dispatch(batch.events).then(done, () => done(this.dropped));
+      let sent: Promise<T>;
+      try {
+        sent = this.dispatch(batch.events);
+      } catch (err) {
+        // A dispatch that throws synchronously still frees its slot and settles its batch.
+        console.error(INTERNAL_ERROR_MESSAGE, err);
+        sent = Promise.resolve(this.dropped);
+      }
+      sent.then(done, () => done(this.dropped));
     }
   }
 

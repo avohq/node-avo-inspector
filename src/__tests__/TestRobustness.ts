@@ -213,3 +213,30 @@ describe("flush() during event spec validation", () => {
     expect(batches[0]).toHaveLength(20);
   });
 });
+
+describe("a batch send that throws synchronously", () => {
+  test("releases its slot, settles its batch, logs, and does not block later sends", async () => {
+    const inspector = staging({ batchSize: 1 });
+    let calls = 0;
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockImplementation(() => {
+      calls++;
+      if (calls <= 4) {
+        throw new Error("boom");
+      }
+      return Promise.resolve(200);
+    });
+
+    const results = [];
+    for (let i = 0; i < 8; i++) results.push(await inspector.trackSchemaFromEvent("E" + i, { a: i }));
+    const started = Date.now();
+    await inspector.flush();
+
+    expect(calls).toBe(8);
+    expect(results.every((schema) => schema.length === 1)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(console.error).toHaveBeenCalledWith(
+      "Avo Inspector: something went wrong. Please report to support@avo.app.",
+      expect.objectContaining({ message: "boom" })
+    );
+  }, 10_000);
+});

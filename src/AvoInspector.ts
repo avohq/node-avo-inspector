@@ -41,7 +41,8 @@ const valueToString = (value: unknown): string => {
 const NO_API_KEY_MESSAGE =
   "[Avo Inspector] No API key provided. Inspector can't operate without API key.";
 
-const INTERNAL_ERROR_MESSAGE =
+/** @internal Shared with AvoBatchQueue; not part of the public API. */
+export const INTERNAL_ERROR_MESSAGE =
   "Avo Inspector: something went wrong. Please report to support@avo.app.";
 
 /**
