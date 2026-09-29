@@ -58,30 +58,30 @@ export class AvoSchemaParser {
         return this.removeDuplicates(list);
       } else if (typeof object === "object") {
         let mappedResult: any = [];
-        for (var key in object) {
-          if (object.hasOwnProperty(key)) {
-            let val = object[key];
+        // Object.keys, not object.hasOwnProperty: a null-prototype object has no such method,
+        // and a property named "hasOwnProperty" would shadow it.
+        for (const key of Object.keys(object)) {
+          let val = object[key];
 
-            let mappedEntry: {
-              propertyName: string;
-              propertyType: string;
-              children?: any;
-            } = {
-              propertyName: key,
-              propertyType: this.getPropValueType(val),
-            };
+          let mappedEntry: {
+            propertyName: string;
+            propertyType: string;
+            children?: any;
+          } = {
+            propertyName: key,
+            propertyType: this.getPropValueType(val),
+          };
 
-            if (isComplex(val)) {
-              if (isLeaf(val, depth)) {
-                mappedEntry.propertyType = "object";
-                mappedEntry["children"] = [];
-              } else {
-                mappedEntry["children"] = mapping(val, depth + 1);
-              }
+          if (isComplex(val)) {
+            if (isLeaf(val, depth)) {
+              mappedEntry.propertyType = "object";
+              mappedEntry["children"] = [];
+            } else {
+              mappedEntry["children"] = mapping(val, depth + 1);
             }
-
-            mappedResult.push(mappedEntry);
           }
+
+          mappedResult.push(mappedEntry);
         }
 
         return mappedResult;

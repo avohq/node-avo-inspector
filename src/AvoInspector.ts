@@ -28,6 +28,16 @@ const DEFAULT_BATCH_FLUSH_SECONDS = 30;
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_FLUSH_TIMEOUT_MS = 10_000;
 
+// String() for regex validation; a value with no string conversion (a null-prototype object)
+// falls back to its tag, e.g. "[object Object]", which String() gives a plain object.
+const valueToString = (value: unknown): string => {
+  try {
+    return String(value);
+  } catch (e) {
+    return Object.prototype.toString.call(value);
+  }
+};
+
 const INTERNAL_ERROR_MESSAGE =
   "Avo Inspector: something went wrong. Please report to support@avo.app.";
 
@@ -782,7 +792,7 @@ export class AvoInspector {
         propertyName: prop.propertyName,
         propertyType: prop.propertyType,
         ...(rawEventProperties && rawEventProperties[prop.propertyName] !== undefined
-          ? { propertyValue: String(rawEventProperties[prop.propertyName]) }
+          ? { propertyValue: valueToString(rawEventProperties[prop.propertyName]) }
           : {}),
       }));
 

@@ -14,11 +14,12 @@ function deepEquals(x: any, y: any, comparing: Map<object, Set<object>> = new Ma
     return true;
   }
 
-  if (!(x instanceof Object) || !(y instanceof Object)) {
+  // typeof, not instanceof Object: a null-prototype object is not an instance of Object.
+  if (x === null || y === null || typeof x !== "object" || typeof y !== "object") {
     return false;
   }
 
-  if (x.constructor !== y.constructor) {
+  if (Object.getPrototypeOf(x) !== Object.getPrototypeOf(y)) {
     return false;
   }
 
@@ -32,12 +33,9 @@ function deepEquals(x: any, y: any, comparing: Map<object, Set<object>> = new Ma
   }
   partners.add(y);
 
-  for (var p in x) {
-    if (!x.hasOwnProperty(p)) {
-      continue;
-    }
-
-    if (!y.hasOwnProperty(p)) {
+  // hasOwn, not x.hasOwnProperty: user objects may lack the method or shadow it.
+  for (const p of Object.keys(x)) {
+    if (!hasOwn(y, p)) {
       return false;
     }
 
@@ -54,13 +52,16 @@ function deepEquals(x: any, y: any, comparing: Map<object, Set<object>> = new Ma
     }
   }
 
-  for (p in y) {
-    if (y.hasOwnProperty(p) && !x.hasOwnProperty(p)) {
+  for (const p of Object.keys(y)) {
+    if (!hasOwn(x, p)) {
       return false;
     }
   }
   return true;
 }
+
+const hasOwn = (object: object, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(object, key);
 
 /** Trims a gateway option value; anything that is not a non-blank string is absent. */
 const normalizeOption = (value: unknown): string | undefined => {
