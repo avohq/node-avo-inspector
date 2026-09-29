@@ -41,7 +41,7 @@ Events are buffered in memory and sent in batches. All options are optional:
 |---|---|---|
 | `batchSize` | `30` | Send when this many events are buffered. Always `1` in `dev`, so every event is sent immediately. |
 | `batchFlushSeconds` | `30` | Send once the oldest buffered event is this many seconds old. |
-| `maxQueueSize` | `1000` | Maximum buffered events; the oldest are dropped first when it is exceeded. |
+| `maxQueueSize` | `1000` | Maximum buffered events; the oldest are dropped first when it is exceeded. At most 4 batches are sent at once, and events in batches waiting to be sent count toward this limit, so memory stays bounded when the endpoint is slow or down. |
 | `disableBatchTimer` | `false` | Start no background flush timer. Set it to `true` in serverless functions. |
 
 ```javascript
