@@ -211,3 +211,29 @@ describe("non-string env", () => {
     inspector.destroy();
   });
 });
+
+describe("number classification", () => {
+  const typeOf = (v: unknown) => dev().extractSchema({ v })[0].propertyType;
+
+  test.each([[1e-7], [5e-324], [1.5e-10], [0.5], [3.14], [-2.5]])("non-whole %p is float", (v) => {
+    expect(typeOf(v)).toBe("float");
+  });
+
+  test.each([[0], [-3], [42], [1e21], [Number.MAX_SAFE_INTEGER]])("whole %p is int", (v) => {
+    expect(typeOf(v)).toBe("int");
+  });
+
+  test("a bigint is int", () => {
+    expect(typeOf(BigInt(10))).toBe("int");
+  });
+
+  test.each([[NaN], [Infinity], [-Infinity]])("%p is float (not a whole number)", (v) => {
+    expect(typeOf(v)).toBe("float");
+  });
+
+  test("the list element type follows the same rule", () => {
+    expect(dev().extractSchema({ v: [1e-7, 2] })).toEqual([
+      { propertyName: "v", propertyType: "list(float)", children: ["float", "int"] },
+    ]);
+  });
+});

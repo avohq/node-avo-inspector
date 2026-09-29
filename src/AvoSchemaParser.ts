@@ -119,12 +119,12 @@ export class AvoSchemaParser {
       return "null";
     } else if (propType === "string") {
       return "string";
-    } else if (propType === "number" || propType === "bigint") {
-      if ((propValue + "").indexOf(".") >= 0) {
-        return "float";
-      } else {
-        return "int";
-      }
+    } else if (propType === "bigint") {
+      return "int";
+    } else if (propType === "number") {
+      // Whole numbers (including 0.0, which JS cannot tell from 0) are "int"; everything
+      // else, including exponent forms like 1e-7, NaN and ±Infinity, is "float".
+      return Number.isInteger(propValue) ? "int" : "float";
     } else if (propType === "boolean") {
       return "boolean";
     } else if (propType === "object") {
