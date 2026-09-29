@@ -112,21 +112,22 @@ export class AvoNetworkCallsHandler {
     if (!override) {
       return null;
     }
+    // The warnings name the reason only, never the value: it may carry credentials or tokens.
+    // The value is used solely as the key that keeps each warning to one per value.
     let url: URL;
     try {
       url = new URL(override);
     } catch (e) {
       AvoNetworkCallsHandler.warnOnce(
         "invalid:" + override,
-        '[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT "' + override + '": not a valid URL'
+        "[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT: not a valid URL"
       );
       return null;
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       AvoNetworkCallsHandler.warnOnce(
         "invalid:" + override,
-        '[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT "' + override +
-          '": unsupported protocol ' + url.protocol
+        "[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT: unsupported protocol " + url.protocol
       );
       return null;
     }

@@ -1,4 +1,4 @@
-import { request, Agent } from "https";
+import { request, Agent, RequestOptions } from "https";
 import { ClientRequest } from "http";
 import { EventSpecResponse, EventSpec, EventSpecMetadata, PropertyConstraint } from "./AvoEventSpecFetchTypes";
 import { AvoInspector } from "../AvoInspector";
@@ -23,9 +23,9 @@ export class AvoEventSpecFetcher {
   private requests: Set<ClientRequest> = new Set();
 
   private static specEndpoint = "/trackingPlan/eventSpec";
-  // Wall-clock budget per fetch, from the moment it is requested. The socket timeout alone
-  // starts only once the shared agent assigns a socket, so a fetch queued behind 8 hung
-  // ones would otherwise wait for theirs first.
+  // Wall-clock budget per fetch, from the moment it is requested, and the only timeout: a
+  // socket-idle timeout would start only once the shared agent assigns a socket, so a fetch
+  // queued behind 8 hung ones would wait for theirs first.
   private static fetchTimeoutMs = 10_000;
 
   constructor(apiKey: string) {
@@ -84,15 +84,43 @@ export class AvoEventSpecFetcher {
     }
 
     // Created before the request: a response can settle synchronously inside request().
+    // `req` stays undefined if request() throws, so the callback must not assume it.
+    let req: ClientRequest | undefined;
     const deadline = setTimeout(() => {
       if (AvoInspector.shouldLog) {
-        console.error("Avo Inspector: [network] Spec fetch timed out after 10s");
+        console.error("Avo Inspector: [network] Spec fetch timed out after " + AvoEventSpecFetcher.fetchTimeoutMs + "ms");
       }
-      req.destroy();
+      if (req) {
+        req.destroy();
+      }
       settle(null);
     }, AvoEventSpecFetcher.fetchTimeoutMs);
     deadline.unref();
 
+    try {
+      req = this.send(options, eventName, settle);
+    } catch (e) {
+      if (AvoInspector.shouldLog) {
+        console.error("Avo Inspector: [network] Spec fetch error: " + e);
+      }
+      settle(null);
+      return;
+    }
+    const sent = req;
+    this.requests.add(sent);
+    sent.on("close", () => {
+      clearTimeout(deadline);
+      this.requests.delete(sent);
+    });
+    sent.end();
+  }
+
+  // Starts the GET; every outcome (response, parse failure, transport error) goes to settle.
+  private send(
+    options: RequestOptions,
+    eventName: string,
+    settle: (result: EventSpecResponse | null) => void
+  ): ClientRequest {
     const req = request(options, (res) => {
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: [network] Spec response status: " + res.statusCode + " " + res.statusMessage);
@@ -134,22 +162,7 @@ export class AvoEventSpecFetcher {
       }
       settle(null);
     });
-
-    req.setTimeout(10_000);
-    req.on("timeout", () => {
-      if (AvoInspector.shouldLog) {
-        console.error("Avo Inspector: [network] Spec fetch timed out after 10s");
-      }
-      req.destroy();
-      settle(null);
-    });
-
-    this.requests.add(req);
-    req.on("close", () => {
-      clearTimeout(deadline);
-      this.requests.delete(req);
-    });
-    req.end();
+    return req;
   }
 
   private resolveCallbacks(

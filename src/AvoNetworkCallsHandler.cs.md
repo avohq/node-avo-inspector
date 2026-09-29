@@ -61,7 +61,7 @@ Test-only endpoint override, and the only place its value is checked.
 
 1. **IMPORTANT: fail-closed** — `envName === "prod"` returns `null` before the variable is even read: no validation, no warning.
 2. Unset or empty `AVO_INSPECTOR_MOCK_ENDPOINT` returns `null`.
-3. A value that does not parse as a URL, or whose protocol is not `http:` or `https:`, returns `null` (the override is ignored) and prints, once per process per value, `[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT "<value>": <reason>` where the reason is `not a valid URL` or `unsupported protocol <protocol>`.
+3. A value that does not parse as a URL, or whose protocol is not `http:` or `https:`, returns `null` (the override is ignored) and prints, once per process per value, `[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT: <reason>` where the reason is `not a valid URL` or `unsupported protocol <protocol>`. **IMPORTANT:** the value itself is never printed (it may carry credentials or tokens); it is used only as the once-per-value key.
 4. Otherwise returns the value. When `redirecting` is true (a real send), it also prints, once per process, `[Avo Inspector] AVO_INSPECTOR_MOCK_ENDPOINT is set: sending to <protocol>//<host> instead of api.avo.app (ignored in prod).` — scheme, host and port only, never the path, the query or the API key.
 
 Both warnings use `console.warn` (stderr) whatever `AvoInspector.shouldLog` says. Callers therefore only ever see a valid URL or `null`; the validation-disable logic in `AvoInspector` treats an invalid value as unset (validation stays on).

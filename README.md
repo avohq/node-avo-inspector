@@ -215,7 +215,7 @@ To test against a local mock server, set the `AVO_INSPECTOR_MOCK_ENDPOINT` envir
 - It is ignored when `env` is `prod`, whatever its value.
 - While it is set, event spec validation is turned off, because a mock server does not serve event specs.
 - The first redirected send prints a one-time warning naming the scheme, host and port (never the path, the query or the API key).
-- A value that is not an `http` or `https` URL is ignored with a one-time warning, and requests go to Avo as usual.
+- A value that is not an `http` or `https` URL is ignored with a one-time warning that gives the reason but never the value, and requests go to Avo as usual.
 
 # Development
 

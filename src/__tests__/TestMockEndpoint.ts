@@ -125,8 +125,23 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     // The value is ignored, so event spec validation stays on and fetches as usual.
     expect(urls.filter((url) => url.endsWith("/trackingPlan/eventSpec"))).toHaveLength(2);
     expect(warningsAbout(console.warn)).toEqual([
-      `[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT "${value}": ${reason}`,
+      `[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT: ${reason}`,
     ]);
+  });
+
+  test.each([
+    ["ftp://mock.example/private-path?k=hidden-value", "unsupported protocol ftp:"],
+    ["hidden-value is not a url", "not a valid URL"],
+  ])("an invalid value is never printed, only the reason (%j)", (value, reason) => {
+    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = value;
+
+    expect(AvoNetworkCallsHandler.mockEndpointFor("staging")).toBeNull();
+
+    const printed = (console.warn as jest.Mock).mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(printed).toContain(reason);
+    expect(printed).not.toContain("hidden-value");
+    expect(printed).not.toContain("private-path");
+    expect(printed).not.toContain("mock.example");
   });
 
   test("an invalid value leaves event spec validation on", () => {

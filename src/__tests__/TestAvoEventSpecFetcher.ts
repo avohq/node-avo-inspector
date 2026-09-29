@@ -195,23 +195,48 @@ describe("AvoEventSpecFetcher", () => {
     });
   });
 
-  test("timeout resolves callback with null", (done) => {
-    const mockReq = new MockClientRequest();
+  describe("deadline", () => {
+    afterEach(() => {
+      (AvoEventSpecFetcher as any).fetchTimeoutMs = 10_000;
+    });
 
-    (mockedHttps.request as jest.Mock).mockImplementation(
-      (_options: any, _callback: (res: any) => void) => {
-        // Simulate timeout: never call the response callback,
-        // instead emit "timeout" on next tick
-        process.nextTick(() => mockReq.emit("timeout"));
-        return mockReq;
-      }
-    );
+    test("a request that never answers is destroyed and resolves null at the deadline (fetchTimeoutMs = 0)", (done) => {
+      (AvoEventSpecFetcher as any).fetchTimeoutMs = 0;
+      const mockReq = new MockClientRequest();
+      (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq); // never answers
 
-    fetcher.fetch("click", "stream1", (result) => {
-      expect(result).toBeNull();
-      expect(mockReq.destroy).toHaveBeenCalled();
-      expect(mockedHttps.request).toHaveBeenCalledTimes(1);
-      done();
+      fetcher.fetch("click", "stream1", (result) => {
+        expect(result).toBeNull();
+        expect(mockReq.destroy).toHaveBeenCalled();
+        expect(mockedHttps.request).toHaveBeenCalledTimes(1);
+        done();
+      });
+    });
+
+    test("no socket-idle timeout is set: the wall-clock deadline is the only one", () => {
+      const mockReq = new MockClientRequest();
+      (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq);
+
+      fetcher.fetch("click", "stream1", () => {});
+
+      expect(mockReq.setTimeout).not.toHaveBeenCalled();
+    });
+
+    test("request() throwing synchronously resolves null, frees the key and leaves no deadline behind", async () => {
+      (AvoEventSpecFetcher as any).fetchTimeoutMs = 0;
+      (mockedHttps.request as jest.Mock).mockImplementationOnce(() => {
+        throw new TypeError("invalid options");
+      });
+      const results: Array<EventSpecResponse | null> = [];
+
+      expect(() => fetcher.fetch("click", "stream1", (r) => results.push(r))).not.toThrow();
+      expect(results).toEqual([null]);
+
+      // Past the (zero) deadline nothing fires, and the key is free for a new request.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      setupMockRequest(200, { events: [], metadata: {} });
+      fetcher.fetch("click", "stream1", () => {});
+      expect(mockedHttps.request).toHaveBeenCalledTimes(2);
     });
   });
 
