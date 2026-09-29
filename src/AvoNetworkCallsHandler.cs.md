@@ -1,0 +1,122 @@
+---
+import:
+  - src/AvoInspectorVersion.cs.md
+  - src/utils.cs.md
+---
+# AvoNetworkCallsHandler
+
+Builds Inspector wire bodies for tracked events (optionally encrypting property values) and POSTs batches of them to the Avo Inspector track endpoint, adopting the sampling rate the server returns.
+
+## Tech stack
+
+- TypeScript, Node.js `https` and `http`, `zlib.gzip`.
+- Depends on `AvoGuid` (message ids), `AvoEncryption` (encryption decision, list-type check, value encryption), `AvoInspector.shouldLog` (global logging flag), event-spec types `EventSpecMetadata` / `PropertyValidationResult`.
+- `LIB_PLATFORM` (`"node"`) from `AvoInspectorVersion`; `hasHeaderControlChar` / `hasNonLatin1Char` from `utils`.
+
+## Data
+
+```ts
+interface BaseBody {
+  apiKey: string; appName: string; appVersion: string | null; libVersion: string;
+  env: string; libPlatform: "node"; messageId: string;
+  streamId: string;
+  anonymousId: string; createdAt: string; samplingRate: number;
+  publicEncryptionKey?: string;
+}
+// Per-event gateway fields, already normalized by the caller.
+interface ResolvedTrackOptions {
+  appVersion: string | null;
+  outputReference?: string;
+  originHint?: string;
+  gatewayScoped: boolean; // true when at least one non-blank gateway option was supplied
+}
+type EventProperty = (EventPropertyEncrypted | EventPropertyPlain) & EventPropertyValidation;
+// EventPropertyPlain:     { propertyName; propertyType; children? }
+// EventPropertyEncrypted: EventPropertyPlain & { encryptedPropertyValue: string }
+// EventPropertyValidation:{ failedEventIds?: string[]; passedEventIds?: string[] }
+interface EventSchemaBody extends BaseBody {
+  type: "event"; eventName: string; eventProperties: EventProperty[];
+  avoFunction: boolean; eventId: string | null; eventHash: string | null;
+  outputReference?: string; originHint?: string;
+  eventSpecMetadata?: EventSpecMetadata;
+}
+type InspectorBody = EventSchemaBody;
+```
+
+Instance state: `apiKey`, `envName`, `appName`, `appVersion`, `libVersion`, optional `publicEncryptionKey` (all from the constructor), and `samplingRate` (starts at `1.0`, updated from server responses). Also a set of in-flight requests and a sticky `aborted` flag.
+
+Endpoint: `https://api.avo.app/inspector/v2/track`, unless overridden (see `mockEndpointFor`). Constants: request timeout 10 000 ms, gzip threshold 1024 bytes.
+
+## Functional requirements
+
+### Constructor
+
+`new AvoNetworkCallsHandler(apiKey, envName, appName, appVersion, libVersion, publicEncryptionKey?)` stores the values; no I/O.
+
+### static mockEndpointFor(envName): string | null
+
+Test-only endpoint override. **IMPORTANT: fail-closed** — returns `null` when `envName === "prod"`, whatever the process environment says. Otherwise returns `process.env.AVO_INSPECTOR_MOCK_ENDPOINT` when non-empty, else `null`.
+
+### getSamplingRate(): number / _setSamplingRateForTesting(rate)
+
+Return / overwrite (unvalidated, test-only) the current sampling rate. Sampling decisions are made by the caller, per event, using this value.
+
+### abortInFlight(): void
+
+Sets the sticky `aborted` flag, empties the in-flight set and destroys each request. Every later send (including one still being compressed) rejects with `"Request failed"` without opening a request. Destroyed requests settle their promises via the error/truncation/timeout paths.
+
+### callInspectorWithBatchBody(inEvents): Promise<number | void>
+
+1. Drop `null`/`undefined` entries. If none remain, resolve immediately (with `undefined`) without sending.
+2. No sampling is applied here.
+3. When logging, print each event's name, a ` (validated)` marker when it has `eventSpecMetadata`, and its `propertyName: propertyType` pairs.
+4. Serialize `events` to UTF-8 JSON. If it is ≥ 1024 bytes, gzip it asynchronously; on a gzip error send the uncompressed bytes instead.
+5. If `aborted`, reject with `"Request failed"`.
+6. Headers: `api-key: apiKey`, `env: envName`, `X-Avo-Client: "node"`, `Accept: application/json`, `Content-Type: application/json`, `Content-Length`, and `Content-Encoding: gzip` when compressed. If any string header value contains a control character (other than tab) or a character above U+00FF, log (when logging) and reject with `"Request failed"` without sending.
+7. POST to the mock endpoint or the default endpoint, using `http` for an `http:` URL and `https` otherwise. The request is tracked in the in-flight set and its socket is unref'd.
+8. On response end:
+   - status 200: parse the body as JSON; if it is non-null and `samplingRate` is a number in `[0, 1]`, adopt it. A parse failure is logged (when logging) and ignored.
+   - any other status: logged (when logging).
+   - Resolve with the HTTP status code in both cases (non-200 is not an error).
+9. A response that is aborted, errors or closes before its body is complete: reject with `"Request failed"`.
+10. On request `error`: reject with the string `"Request failed"`.
+11. Wall-clock timeout of 10 s for the whole request (unref'd timer): reject with `"Request timed out"` and destroy the request.
+
+**IMPORTANT:** a batch is sent at most once; this method never retries. The promise settles exactly once; later events are ignored (and not logged), and settling clears the timer and removes the request from the in-flight set.
+
+### bodyForEventSchemaCall(anonymousId, eventName, eventProperties, eventId, eventHash, rawEventProperties?, trackOptions?): EventSchemaBody
+
+Base body (see below) plus `type: "event"`, `eventName`, and `eventProperties` — encrypted via `encryptProperties` when `AvoEncryption.shouldEncrypt(envName, publicEncryptionKey)` and `rawEventProperties` is given, otherwise passed through. Avo-function fields: if `eventId != null` then `avoFunction: true, eventId, eventHash`; else `avoFunction: false, eventId: null, eventHash: null`.
+
+### buildEventProperties(eventProperties, rawEventProperties?): EventProperty[]
+
+Same encryption decision as above, returning just the property list.
+
+### bodyForValidatedEventSchemaCall(anonymousId, eventName, eventProperties, eventId, eventHash, eventSpecMetadata, propertyResults, trackOptions?): EventSchemaBody
+
+1. Index `propertyResults` by `propertyName` (last one wins).
+2. For each property with a result, copy it and attach `failedEventIds` / `passedEventIds` only when the respective array is non-empty; properties without a result pass through unchanged.
+3. Base body plus `type: "event"`, `eventName`, merged `eventProperties`, `eventSpecMetadata`, and the same Avo-function fields as above. Properties are not encrypted here (callers pass already-built properties).
+
+### encryptProperties (private)
+
+For each property:
+- list-typed (`AvoEncryption.isListType`) → omitted entirely;
+- value = `JSON.stringify(raw[propertyName]) ?? "null"`; a value that cannot be serialized (e.g. cyclic) → property omitted with an unconditional `console.warn`;
+- encrypted with `publicEncryptionKey`;
+- encryption returns `null` → property omitted (the encryption module logs);
+- otherwise emit `{ propertyName, propertyType, encryptedPropertyValue, children? }` (`children` only when defined).
+
+### createBaseCallBody (private)
+
+`{ apiKey, appName, appVersion, libVersion, env: envName, libPlatform: "node", messageId: new GUID, streamId: anonymousId, anonymousId, createdAt: now ISO, samplingRate: current rate }`, plus `publicEncryptionKey` when it is non-empty.
+
+With `trackOptions`: `appVersion` is taken from `trackOptions.appVersion` (may be `null`) instead of the constructor value; `outputReference` / `originHint` are added only when defined — never sent as `null` or `""`.
+
+## Non-functional requirements
+
+- Logging is gated on the global `AvoInspector.shouldLog`.
+- An in-flight request does not keep the process alive (socket and timer are unref'd); exit-time delivery relies on the caller's `beforeExit` drain.
+- Sampling rate is per-instance, mutable, and is only changed by a valid 200 response (or the test hook).
+- Compression runs off the event loop.
+- `abortInFlight` is terminal for the instance.
