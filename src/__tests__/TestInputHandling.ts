@@ -115,11 +115,15 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
     expect(captured).toHaveLength(1);
   });
 
-  test("event spec validation handles a null-prototype property value", async () => {
+  test.each([
+    // The value is checked as "[object Object]", the string a plain object gives.
+    ["^\\[object Object\\]$", undefined],
+    ["^nope$", ["E"]],
+  ])("event spec validation checks a null-prototype property value against %p", async (regex, failedEventIds) => {
     jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
     jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((eventName, _s, callback) =>
       callback({
-        eventSpec: { eventName, properties: [{ propertyName: "query", propertyType: "object", regex: ".*" }] },
+        eventSpec: { eventName, properties: [{ propertyName: "query", propertyType: "object", regex }] },
         metadata: { schemaId: "s", branchId: "b", latestActionId: "a", sourceId: "src" },
       })
     );
@@ -131,7 +135,9 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
     await inspector.trackSchemaFromEvent("E", { query: nullProto({ a: "1" }) });
     await inspector.flush();
 
-    expect(send.mock.calls[0][0][0].eventSpecMetadata).toBeDefined();
+    const event = send.mock.calls[0][0][0];
+    expect(event.eventSpecMetadata).toBeDefined();
+    expect(event.eventProperties[0].failedEventIds).toEqual(failedEventIds);
   });
 
   test("encryption handles a null-prototype property value", async () => {
@@ -141,9 +147,15 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
 
     await inspector.trackSchemaFromEvent("E", { query: nullProto({ a: "1" }) });
 
-    expect(captured[0][0].eventProperties).toEqual([
-      expect.objectContaining({ propertyName: "query", encryptedPropertyValue: expect.any(String) }),
-    ]);
+    const [property] = captured[0][0].eventProperties;
+    expect(property.propertyName).toBe("query");
+    // Decrypt: [version][65-byte ephemeral key][16-byte IV][16-byte tag][ciphertext].
+    const wire = Buffer.from(property.encryptedPropertyValue, "base64");
+    const aesKey = crypto.createHash("sha256").update(ecdh.computeSecret(wire.subarray(1, 66))).digest();
+    const decipher = crypto.createDecipheriv("aes-256-gcm", aesKey, wire.subarray(66, 82), { authTagLength: 16 });
+    decipher.setAuthTag(wire.subarray(82, 98));
+    const plaintext = Buffer.concat([decipher.update(wire.subarray(98)), decipher.final()]).toString("utf8");
+    expect(plaintext).toBe(JSON.stringify({ a: "1" }));
   });
 });
 

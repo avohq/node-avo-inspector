@@ -232,16 +232,18 @@ describe("wire protocol", () => {
   test("a 200 response cut off after its headers fails the send promptly", async () => {
     responders.push((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "100" });
-      res.write('{"samplingRate":');
+      res.write('{"samplingRate":1');
       setTimeout(() => res.socket!.destroy(), 20);
     });
     const handler = new AvoNetworkCallsHandler("test-key", "dev", "", "1.0.0", VERSION);
+    // Not the default of 1, so a truncated body that changed or reset it would show.
+    handler._setSamplingRateForTesting(0.5);
     const body = handler.bodyForEventSchemaCall("", "E", [], null, null);
 
     const started = Date.now();
     await expect(handler.callInspectorWithBatchBody([body])).rejects.toBe("Request failed");
     expect(Date.now() - started).toBeLessThan(5000);
-    expect(handler.getSamplingRate()).toBe(1);
+    expect(handler.getSamplingRate()).toBe(0.5);
   }, 15_000);
 
   test("a 3xx is a non-200 response and is never followed", async () => {
@@ -624,7 +626,10 @@ describe("batching", () => {
 
     const started = Date.now();
     await expect(inspector.flush(100)).resolves.toBeUndefined();
-    expect(Date.now() - started).toBeLessThan(5000);
+    const elapsed = Date.now() - started;
+    // It really waited for the send, up to its timeout, and no longer.
+    expect(elapsed).toBeGreaterThanOrEqual(90);
+    expect(elapsed).toBeLessThan(5000);
     inspector.destroy();
   });
 

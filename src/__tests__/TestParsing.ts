@@ -291,7 +291,8 @@ describe("Schema Parsing", () => {
         });
       walk(inspector.extractSchema(level));
 
-      expect(expanded).toBeLessThan(10000);
+      // The root counts toward the 10,000 but is not an entry.
+      expect(expanded).toBe(9999);
       expect(truncated).toBeGreaterThan(0);
     });
 
@@ -302,7 +303,9 @@ describe("Schema Parsing", () => {
 
       // Expanded elements are distinct arrays, so removeDuplicates keeps each; the
       // "object" strings past the budget collapse into one.
-      expect(entry.children.length).toBeLessThan(10000);
+      // The event properties object and the list count toward the 10,000: 9,998 expanded
+      // elements, then one collapsed "object".
+      expect(entry.children.length).toBe(9999);
       expect(entry.children[0]).toEqual([{ propertyName: "v", propertyType: "int" }]);
       expect(entry.children[entry.children.length - 1]).toBe("object");
     });
@@ -316,8 +319,10 @@ describe("Schema Parsing", () => {
 
     const res = inspector.extractSchema(eventProperties);
 
-    expect(res[0].propertyType).toBe(type.OBJECTLIST);
-    expect(res[1].propertyType).toBe(type.OBJECTLIST);
+    expect(res).toEqual([
+      { propertyName: "prop0", propertyType: type.OBJECTLIST, children: ["unknown", "string"] },
+      { propertyName: "prop1", propertyType: type.OBJECTLIST, children: ["unknown"] },
+    ]);
   });
 
 

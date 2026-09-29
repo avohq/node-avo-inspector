@@ -54,13 +54,15 @@ describe("bounded concurrent batch sends", () => {
 
   test("events waiting for a send slot do not count toward maxQueueSize", async () => {
     const inspector = staging({ batchSize: 2, maxQueueSize: 6 });
+    // Logging on, so a drop would be logged and the check below could fail.
+    inspector.enableLogging(true);
     const { batches, releaseAll } = holdSends(inspector);
 
     for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringMatching(/dropped/));
     await releaseAll();
 
     expect(names(batches).flat()).toEqual(Array.from({ length: 20 }, (_, i) => "E" + i));
-    expect(console.warn).not.toHaveBeenCalledWith(expect.stringMatching(/dropped/));
   });
 
   test("a tight loop of 9,000 events that never yields, then flush(), delivers all 9,000", async () => {
@@ -121,13 +123,16 @@ describe("bounded concurrent batch sends", () => {
 
   test("destroy() discards batches still waiting for a send slot", async () => {
     const inspector = staging({ batchSize: 2 });
-    const { send } = holdSends(inspector);
+    const { send, batches, releaseAll } = holdSends(inspector);
     for (let i = 0; i < 12; i++) await inspector.trackSchemaFromEvent("E" + i, {});
 
     inspector.destroy();
-    await new Promise((resolve) => setImmediate(resolve));
+    expect((inspector as any).batchQueue.waitingLength).toBe(0);
+    // Freeing the 4 slots must not start the discarded batches.
+    await releaseAll();
 
     expect(send).toHaveBeenCalledTimes(4);
+    expect(names(batches).flat()).toEqual(["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7"]);
     expect((inspector as any).batchQueue.length).toBe(0);
     expect((inspector as any).pending.size).toBe(0);
   });
@@ -140,7 +145,9 @@ describe("bounded concurrent batch sends", () => {
     expect(send).toHaveBeenCalledTimes(4);
 
     await releaseAll();
-    await expect(Promise.all(tracks)).resolves.toHaveLength(6);
+    await expect(Promise.all(tracks)).resolves.toEqual(
+      Array.from({ length: 6 }, () => [{ propertyName: "a", propertyType: "int" }])
+    );
     expect(send).toHaveBeenCalledTimes(6);
   });
 });
