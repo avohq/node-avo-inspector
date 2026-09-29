@@ -19,7 +19,8 @@ class AvoEventSpecFetcher {
 }
 ```
 
-- In-flight map: dedupe key `"<apiKey>:<streamId>:<eventName>"` -> list of waiting callbacks.
+- In-flight map: dedupe key `"<apiKey>:<streamId>:<eventName>"` -> `{ callbacks, owner }`: the waiting callbacks and an owner token identifying the request that serves the key.
+- Per-fetch deadline: `private static fetchTimeoutMs = 10_000` (overridable in tests), a wall-clock budget from the moment the fetch is requested.
 - Connection pool: **one module-level keep-alive `https.Agent` shared by every instance**, `maxSockets: 8`, `maxFreeSockets: 2`. Idle sockets are unref'd and do not keep the process alive.
 - Request set: each instance tracks its own open `ClientRequest`s; a request leaves the set on `close`.
 
@@ -41,13 +42,14 @@ internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, r
 ### fetch
 
 1. Build the dedupe key. If a request for that key is already in flight, append the callback and return (no new request).
-2. Otherwise register `[callback]` and send `GET https://api.avo.app:443/trackingPlan/eventSpec?apiKey=&eventName=&streamId=` with `Accept: application/json`, through the shared agent, and add the request to the instance's request set.
+2. Otherwise register `{ callbacks: [callback], owner }` with a fresh owner token, start the fetch's deadline timer (unref'd), then send `GET https://api.avo.app:443/trackingPlan/eventSpec?apiKey=&eventName=&streamId=` with `Accept: application/json`, through the shared agent, and add the request to the instance's request set. The deadline is created before the request because a response can settle synchronously.
 3. On response end:
-   - status != 200 -> resolve all callbacks with `null`.
-   - status 200 -> `JSON.parse` the body and `parseWireResponse`; a parse/convert exception resolves with `null`.
-4. Request `error` -> resolve with `null`.
-5. **10 s socket timeout** -> destroy the request and resolve with `null`.
-6. Resolving removes the key from the in-flight map first, then invokes every queued callback in registration order; an exception thrown by one callback is swallowed and does not stop the others.
+   - status != 200 -> settle with `null`.
+   - status 200 -> `JSON.parse` the body and `parseWireResponse`; a parse/convert exception settles with `null`.
+4. Request `error` -> settle with `null`.
+5. **Deadline:** `fetchTimeoutMs` (10 s) after the fetch was requested, queue time for a socket included -> destroy the request and settle with `null`. The 10 s socket-idle timeout also still applies (destroy and settle with `null`).
+6. **IMPORTANT:** a request settles at most once, and only while it still owns its key. Settling clears the deadline. If the key's in-flight entry has a different owner (a newer fetch registered after this request settled), the settlement is ignored.
+7. Settling removes the key from the in-flight map first, then invokes every queued callback in registration order; an exception thrown by one callback is swallowed and does not stop the others.
 
 ### parseWireResponse
 
@@ -65,5 +67,14 @@ internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, r
 
 - **IMPORTANT:** callbacks are always invoked asynchronously and with `null` on any failure; `fetch` never throws for network, status or parse problems.
 - Logging (request URL without apiKey/streamId, status, raw body, parsed spec, errors) only when `AvoInspector.shouldLog` is true; non-200 bodies and the full response body are logged in that mode.
-- A request that times out may also emit `error` afterwards; the second resolve for the key is a no-op unless a new fetch for the same key has been registered meanwhile.
-- At most 8 concurrent spec requests per process to the API host (across all instances); further requests queue in the agent, and their 10 s timeout starts only once they obtain a socket.
+- A request that times out may also emit `error` afterwards (from `destroy`); that late event never settles a newer fetch of the same key.
+- At most 8 concurrent spec requests per process to the API host (across all instances); further requests queue in the agent. Every fetch settles within about `fetchTimeoutMs` of being requested, however long it queued.
+
+## Examples
+
+<example>
+20 fetches for different events against an API that never answers → requests 9–20 wait in the agent for a socket, yet every callback receives `null` about 10 s after its fetch was requested (not after about 30 s).
+</example>
+<example>
+A fetch for key K times out and settles with `null`; one of its callbacks fetches K again → the new request owns K. The timed-out request's later `error` is ignored, and the new fetch settles only from its own response.
+</example>
