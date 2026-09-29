@@ -1,14 +1,19 @@
 {
   "name": "node-avo-inspector",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Avo Inspector for Node.js",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "files": [
     "dist",
     "!dist/__tests__",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
+  "engines": {
+    "node": ">=14"
+  },
   "repository": "https://github.com/avohq/node-avo-inspector",
   "author": "Avo (https://www.avo.app)",
   "license": "MIT",
