@@ -269,6 +269,43 @@ describe("Schema Parsing", () => {
         { propertyName: "b", propertyType: "object", children: [{ propertyName: "v", propertyType: "int" }] },
       ]);
     });
+
+    test("shared references expand at most 10000 objects per call; the rest map to object", () => {
+      // Every level holds the next under 3 keys: a DAG, not a cycle, so the ancestor check
+      // does not apply. Unbounded, it expands 3^10 (~59k) objects.
+      let level: any = { v: 1 };
+      for (let i = 0; i < 12; i += 1) level = { a: level, b: level, c: level };
+
+      let expanded = 0;
+      let truncated = 0;
+      const walk = (entries: any[]) =>
+        entries.forEach((entry) => {
+          if (!entry.children) return;
+          if (entry.children.length === 0) {
+            truncated += 1;
+            expect(entry.propertyType).toBe("object");
+          } else {
+            expanded += 1;
+            walk(entry.children);
+          }
+        });
+      walk(inspector.extractSchema(level));
+
+      expect(expanded).toBeLessThan(10000);
+      expect(truncated).toBeGreaterThan(0);
+    });
+
+    test("an array element past the expansion budget maps to the type string object", () => {
+      const list = Array.from({ length: 10001 }, () => ({ v: 1 }));
+
+      const [entry] = inspector.extractSchema({ list });
+
+      // Expanded elements are distinct arrays, so removeDuplicates keeps each; the
+      // "object" strings past the budget collapse into one.
+      expect(entry.children.length).toBeLessThan(10000);
+      expect(entry.children[0]).toEqual([{ propertyName: "v", propertyType: "int" }]);
+      expect(entry.children[entry.children.length - 1]).toBe("object");
+    });
   });
 
   test("A list whose first element has no JSON type is list(object), never list(unknown)", () => {

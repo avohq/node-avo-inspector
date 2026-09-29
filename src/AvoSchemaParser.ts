@@ -8,11 +8,15 @@ let isComplex = (value: any): boolean => {
 
 // Deeper complex values are reported as "object" instead of being descended into.
 const MAX_DEPTH = 10;
+// Complex values expanded per extractSchema call. Shared references that are not cycles
+// can otherwise expand exponentially; the rest are reported as "object" like the depth cap.
+const MAX_EXPANSIONS = 10000;
 
 export class AvoSchemaParser {
   /**
    * Maps each property to its name, type and (for objects and lists) child schema.
-   * Values nested deeper than MAX_DEPTH, and cyclic references, are reported as "object".
+   * Values nested deeper than MAX_DEPTH, cyclic references, and complex values past the
+   * MAX_EXPANSIONS budget are reported as "object".
    */
   static extractSchema(eventProperties: {
     [propName: string]: any;
@@ -29,12 +33,15 @@ export class AvoSchemaParser {
     // is its own ancestor (a cycle) is reported like one past the depth cap, so an object
     // holding itself under several keys cannot expand exponentially.
     const ancestors = new Set<any>();
+    let expansions = 0;
     const isLeaf = (value: any, depth: number): boolean =>
-      isComplex(value) && (depth >= MAX_DEPTH || ancestors.has(value));
+      isComplex(value) &&
+      (depth >= MAX_DEPTH || ancestors.has(value) || expansions >= MAX_EXPANSIONS);
 
     let mapping = (object: any, depth: number) => {
       if (isComplex(object)) {
         ancestors.add(object);
+        expansions += 1;
       }
       try {
         return mapValue(object, depth);
