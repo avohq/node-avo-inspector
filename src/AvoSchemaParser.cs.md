@@ -30,7 +30,7 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 
 ## Functional requirements
 
-1. `null` / `undefined` input returns `[]`.
+1. A root that is not a non-array object returns `[]`: `null` / `undefined`, a primitive (string, number, boolean, symbol), a function, or an array.
 2. Mapping a value:
    - Array: map every element recursively, then de-duplicate.
    - Object: for each own enumerable string key (`Object.keys`), emit `{ propertyName, propertyType }`; if the value is a non-null object or array, add `children` = mapping of the value.
@@ -73,4 +73,8 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 
 <example>
 `{ fn: [() => 1] }` -> `[{fn,"list(object)",children:["unknown"]}]`
+</example>
+
+<example>
+Root `"abc"`, `42`, `[1, 2]` or `() => 1` -> `[]`
 </example>

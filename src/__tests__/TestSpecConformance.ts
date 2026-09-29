@@ -144,6 +144,15 @@ describe("wire protocol", () => {
     expect(captured).toHaveLength(0);
   });
 
+  test("a track whose properties root is an array sends eventProperties [] and resolves []", async () => {
+    const inspector = dev();
+
+    await expect(inspector.trackSchemaFromEvent("E", [1, 2] as any)).resolves.toEqual([]);
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].body[0].eventProperties).toEqual([]);
+  });
+
   test("non-string gateway option values are treated as absent", async () => {
     const inspector = dev();
     await inspector.trackSchemaFromEvent("purchase", { a: 1 }, "s", {

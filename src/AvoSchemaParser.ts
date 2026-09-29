@@ -25,7 +25,9 @@ export class AvoSchemaParser {
     propertyType: string;
     children?: any;
   }> {
-    if (eventProperties === null || eventProperties === undefined) {
+    // Only a plain object has named properties. JavaScript callers can pass anything, and
+    // mapping a primitive or an array root would return a bare type or an element list.
+    if (!isComplex(eventProperties) || isArray(eventProperties)) {
       return [];
     }
 

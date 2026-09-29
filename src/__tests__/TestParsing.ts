@@ -1,4 +1,5 @@
 import { AvoInspector } from "../AvoInspector";
+import { AvoSchemaParser } from "../AvoSchemaParser";
 import { defaultOptions, type } from "./constants";
 
 describe("Schema Parsing", () => {
@@ -147,6 +148,22 @@ describe("Schema Parsing", () => {
 
     // Then
     expect(res[0].propertyType).toBe(type.FLOATLIST);
+  });
+
+  describe("a root that is not a plain object", () => {
+    test.each([
+      ["a string", "abc"],
+      ["an int", 42],
+      ["a float", 1.5],
+      ["a boolean", true],
+      ["an array", [1, 2]],
+      ["an array of objects", [{ a: 1 }]],
+      ["a function", () => 1],
+      ["a symbol", Symbol("s")],
+    ])("maps to [] for %s, not a bare type or a list", (_name, root) => {
+      expect(AvoSchemaParser.extractSchema(root as any)).toEqual([]);
+      expect(inspector.extractSchema(root as any)).toEqual([]);
+    });
   });
 
   describe("depth cap (10 levels)", () => {
