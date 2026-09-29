@@ -80,9 +80,12 @@ describe("conformance harness", () => {
     ["fixture_id is not a string", "extract", { fixture_id: 7 }],
     ["suite is missing", "extract", { suite: undefined }],
     ["suite is not a string", "extract", { suite: ["schema-extraction"] }],
+    ["suite is not a contract suite id", "extract", { suite: "unknown", operation: "extractSchema" }],
+    ["suite differs from a contract id only by case", "extract", { suite: "Batching" }],
     ["operation is not a string", "track", { operation: 1 }],
     ["operation is missing outside schema-extraction", "track", { operation: undefined }],
     ["operation is unsupported", "track", { operation: "identify" }],
+    ["operation differs from a contract operation only by case", "track", { operation: "TrackSchemaFromEvent" }],
     ["constructor is an array", "extract", { constructor: [] }],
     ["extractSchema input is missing", "extract", { input: undefined }],
     ["extractSchema input is an array", "extract", { input: [1] }],
@@ -100,6 +103,7 @@ describe("conformance harness", () => {
     ["steps is an object", "sequence", { steps: {} }],
     ["a step is null", "sequence", { steps: [null] }],
     ["a step action is unsupported", "sequence", { steps: [{ action: "reset" }] }],
+    ["a step action is missing", "sequence", { steps: [{ type: "flush" }] }],
     ["a track step lacks eventProperties", "sequence", { steps: [{ action: "track", eventName: "E" }] }],
     ["a track step has array options", "sequence", { steps: [{ action: "track", ...track, options: [] }] }],
     ["a trackN count is 0", "sequence", { steps: [{ action: "trackN", count: 0 }] }],
@@ -133,6 +137,13 @@ describe("conformance harness", () => {
   test.each(Object.keys(bases))("the well-formed %s base envelope runs (exit 0)", (base) => {
     expect(runHarness(bases[base]).status).toBe(0);
   });
+
+  test.each(["schema-extraction", "wire-protocol", "error-handling", "batching"])(
+    "every contract suite id is accepted (%s)",
+    (suite) => {
+      expect(runHarness({ ...bases.track, suite }).status).toBe(0);
+    }
+  );
 
   test("an extractSchema input of null is passed through (fixture-8)", () => {
     const { status, output } = runHarness({ ...bases.extract, input: null });

@@ -40,6 +40,10 @@ function configError(fixtureId, message) {
   exitWith(2, { fixture_id: fixtureId ?? null, passed: false, actual: null, outcome: "resolve", error: message });
 }
 
+// The suite identifiers of runner-contract.md; operations and step actions are checked
+// against their own sets in validateEnvelope and validateStep.
+const SUITES = ["schema-extraction", "wire-protocol", "error-handling", "batching"];
+
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
@@ -99,7 +103,9 @@ function validateStep(step, index, fixtureId) {
 function validateEnvelope(envelope) {
   const fixtureId = envelope.fixture_id;
   if (typeof fixtureId !== "string") configError(null, "fixture_id must be a string");
-  if (typeof envelope.suite !== "string") configError(fixtureId, "suite must be a string");
+  if (!SUITES.includes(envelope.suite)) {
+    configError(fixtureId, `suite must be one of ${SUITES.join(", ")}`);
+  }
   if (has(envelope, "operation") && typeof envelope.operation !== "string") {
     configError(fixtureId, "operation must be a string");
   }
