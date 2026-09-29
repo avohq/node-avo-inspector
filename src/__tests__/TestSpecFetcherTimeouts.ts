@@ -62,7 +62,6 @@ describe("settling a fetch", () => {
       const req: any = new EventEmitter();
       req.callback = callback;
       req.end = () => {};
-      req.setTimeout = () => {};
       req.destroy = () => process.nextTick(() => req.emit("error", new Error("destroyed")));
       created.push(req);
       return req;
@@ -71,9 +70,8 @@ describe("settling a fetch", () => {
   }
 
   test("a timed-out request's late error does not settle a newer fetch of the same key", async () => {
-    // Long enough that only the stale error, not the second fetch's own deadline, could
-    // settle the second fetch within the check below.
-    (AvoEventSpecFetcher as any).fetchTimeoutMs = 1000;
+    // The first fetch times out at a short wall-clock deadline.
+    (AvoEventSpecFetcher as any).fetchTimeoutMs = 20;
     const created = fakeRequests();
     const fetcher = new AvoEventSpecFetcher("key");
 
@@ -82,11 +80,11 @@ describe("settling a fetch", () => {
       fetcher.fetch("E", "s", (first) => {
         expect(first).toBeNull();
         // Fetch the same key again from inside the timeout's settlement, before the old
-        // request's destroy() error arrives.
+        // request's destroy() error arrives. Its own deadline is long enough that only the
+        // stale error could settle it within the check below.
+        (AvoEventSpecFetcher as any).fetchTimeoutMs = 1000;
         resolveOuter({ second: new Promise((resolve) => fetcher.fetch("E", "s", resolve)) });
       });
-      // Times out the first request through its socket-idle "timeout" event.
-      created[0].emit("timeout");
     });
 
     // The first request's late error fires on the next tick; the second fetch must not see it.
@@ -97,4 +95,44 @@ describe("settling a fetch", () => {
     expect(created).toHaveLength(2);
     fetcher.destroy();
   });
+});
+
+describe("a spec response cut off mid-body", () => {
+  let cutting: http.Server;
+  let cuttingPort: number;
+
+  beforeAll(async () => {
+    // Sends the headers and part of the promised body, then drops the connection.
+    cutting = http.createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "1000" });
+      res.write('{"events":[');
+      setTimeout(() => res.socket!.destroy(), 20);
+    });
+    await new Promise<void>((resolve) => cutting.listen(0, "127.0.0.1", resolve));
+    cuttingPort = (cutting.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    cutting.closeAllConnections();
+    await new Promise((resolve) => cutting.close(resolve));
+  });
+
+  test("settles null promptly, and a later fetch of the same key starts a new request", async () => {
+    const requests: string[] = [];
+    jest.spyOn(https, "request").mockImplementation(((options: any, callback: any) => {
+      requests.push(options.path);
+      return http.request({ host: "127.0.0.1", port: cuttingPort, path: options.path, method: "GET" }, callback);
+    }) as any);
+    const fetcher = new AvoEventSpecFetcher("key");
+    const fetchOnce = () => new Promise((resolve) => fetcher.fetch("E", "s", resolve));
+
+    // Far below the 10 s deadline: only the cut itself can settle it this fast.
+    const started = Date.now();
+    await expect(fetchOnce()).resolves.toBeNull();
+    expect(Date.now() - started).toBeLessThan(2000);
+
+    await expect(fetchOnce()).resolves.toBeNull();
+    expect(requests).toHaveLength(2);
+    fetcher.destroy();
+  }, 15_000);
 });

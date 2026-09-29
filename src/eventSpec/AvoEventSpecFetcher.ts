@@ -154,6 +154,19 @@ export class AvoEventSpecFetcher {
         }
         settle(result);
       });
+      // A response cut off mid-body emits neither "end" nor a request "error"; without this
+      // the fetch would wait for its deadline, holding the key for every same-key fetch.
+      const truncated = () => {
+        if (!res.complete) {
+          if (AvoInspector.shouldLog) {
+            console.error("Avo Inspector: [network] Spec response ended before its body was complete");
+          }
+          settle(null);
+        }
+      };
+      res.on("aborted", truncated);
+      res.on("error", truncated);
+      res.on("close", truncated);
     });
 
     req.on("error", (err) => {

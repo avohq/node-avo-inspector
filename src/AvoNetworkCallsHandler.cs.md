@@ -136,7 +136,7 @@ With `trackOptions`: `appVersion` is taken from `trackOptions.appVersion` (may b
 `AVO_INSPECTOR_MOCK_ENDPOINT=http://127.0.0.1:9876/path?token=x`, env `dev`, 5 sends → all 5 go to that URL; one warning: `... sending to http://127.0.0.1:9876 instead of api.avo.app (ignored in prod).`
 </example>
 <example>
-`AVO_INSPECTOR_MOCK_ENDPOINT=ftp://x`, env `dev` → `[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT "ftp://x": unsupported protocol ftp:` once; sends go to `https://api.avo.app/inspector/v2/track`.
+`AVO_INSPECTOR_MOCK_ENDPOINT=ftp://x`, env `dev` → `[Avo Inspector] Ignoring invalid AVO_INSPECTOR_MOCK_ENDPOINT: unsupported protocol ftp:` once (the value is not printed); sends go to `https://api.avo.app/inspector/v2/track`.
 </example>
 <example>
 Any value, env `prod` → `mockEndpointFor` returns `null` with no warning; sends go to the default endpoint.
