@@ -18,6 +18,10 @@ import {
   PropertyValidationResult,
 } from "./eventSpec/AvoEventSpecFetchTypes";
 import { VERSION } from "./AvoInspectorVersion";
+import { AvoLog, INTERNAL_ERROR_MESSAGE } from "./AvoLog";
+
+/** @internal Re-exported for callers that import it from here; not part of the public API. */
+export { INTERNAL_ERROR_MESSAGE };
 
 import { hasHeaderControlChar, hasNonLatin1Char, isValueEmpty, normalizeOption } from "./utils";
 
@@ -41,9 +45,6 @@ const valueToString = (value: unknown): string => {
 const NO_API_KEY_MESSAGE =
   "[Avo Inspector] No API key provided. Inspector can't operate without API key.";
 
-/** @internal Shared with AvoBatchQueue; not part of the public API. */
-export const INTERNAL_ERROR_MESSAGE =
-  "Avo Inspector: something went wrong. Please report to support@avo.app.";
 
 /**
  * Gateway coordinates for a gateway-scoped Inspector API key. All optional; blank
@@ -503,7 +504,7 @@ export class AvoInspector {
         return Promise.resolve([]);
       }
     } catch (e) {
-      console.error(INTERNAL_ERROR_MESSAGE, e);
+      AvoLog.internal(e);
       return Promise.reject(INTERNAL_ERROR_MESSAGE);
     }
   }
@@ -615,7 +616,7 @@ export class AvoInspector {
           body = buildBody(validationResult);
         } catch (err) {
           // Same outcome as a synchronous internal error before enqueue (SPEC §4.2 step 5).
-          console.error(INTERNAL_ERROR_MESSAGE, err);
+          AvoLog.internal(err);
           return { result: null, send: null };
         }
         const enqueued = this.enqueue(body, eventSchema);
@@ -661,6 +662,10 @@ export class AvoInspector {
     const send = this.avoNetworkCallsHandler.callInspectorWithBatchBody(batch).then(
       (status): SendOutcome => {
         if (typeof status === "number" && status !== 200) {
+          // Not logged for a send abandoned by destroy().
+          if (!this.destroyed) {
+            AvoLog.rejected(status);
+          }
           return "non200";
         }
         if (AvoInspector.shouldLog) {
@@ -676,7 +681,7 @@ export class AvoInspector {
       (err): SendOutcome => {
         // At-most-once: a failed batch is dropped, never re-queued or retried.
         if (!this.destroyed) {
-          console.error("Avo Inspector: schema sending failed: " + err + ".");
+          AvoLog.failed(String(err));
         }
         return "failed";
       }
@@ -782,10 +787,7 @@ export class AvoInspector {
 
       return schema;
     } catch (e) {
-      console.error(
-        "Avo Inspector: something went wrong. Please report to support@avo.app.",
-        e
-      );
+      AvoLog.internal(e);
       return [];
     }
   }

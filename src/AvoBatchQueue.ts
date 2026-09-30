@@ -1,4 +1,4 @@
-import { AvoInspector, INTERNAL_ERROR_MESSAGE } from "./AvoInspector";
+import { AvoLog } from "./AvoLog";
 import { InspectorBody } from "./AvoNetworkCallsHandler";
 
 // setTimeout fires almost at once for delays above this (2^31 - 1 ms, about 24.8 days).
@@ -71,12 +71,7 @@ export class AvoBatchQueue<T> {
     const overflow = this.buffer.length - this.options.maxQueueSize;
     if (overflow > 0) {
       this.buffer.splice(0, overflow);
-      if (AvoInspector.shouldLog) {
-        console.warn(
-          "Avo Inspector: pending batch is full (maxQueueSize " +
-            this.options.maxQueueSize + "), dropped " + overflow + " oldest event(s)."
-        );
-      }
+      AvoLog.dropped(overflow, "queue full");
     }
 
     if (this.buffer.length >= this.options.batchSize) {
@@ -102,12 +97,7 @@ export class AvoBatchQueue<T> {
     const excess = this.waitingEvents - MAX_WAITING_EVENTS;
     if (excess > 0) {
       this.dropOldestWaiting(excess);
-      if (AvoInspector.shouldLog) {
-        console.warn(
-          "Avo Inspector: batches waiting to be sent exceed " + MAX_WAITING_EVENTS +
-            " events, dropped " + excess + " oldest event(s)."
-        );
-      }
+      AvoLog.dropped(excess, "send backlog full");
     }
     return this.track(outcome);
   }
@@ -137,7 +127,7 @@ export class AvoBatchQueue<T> {
         sent = this.dispatch(batch.events);
       } catch (err) {
         // A dispatch that throws synchronously still frees its slot and settles its batch.
-        console.error(INTERNAL_ERROR_MESSAGE, err);
+        AvoLog.internal(err);
         sent = Promise.resolve(this.dropped);
       }
       sent.then(done, () => done(this.dropped));

@@ -41,7 +41,7 @@ Events are buffered in memory and sent in batches. All options are optional:
 |---|---|---|
 | `batchSize` | `30` | Send when this many events are buffered. Always `1` in `dev`, so every event is sent on its own as soon as it is queued. |
 | `batchFlushSeconds` | `30` | Send once the oldest buffered event is this many seconds old. |
-| `maxQueueSize` | `1000` | Maximum events buffered before a batch is formed; the oldest are dropped first when it is exceeded. Batches already formed and waiting to be sent have their own limit (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)). |
+| `maxQueueSize` | `1000` | Maximum events buffered before a batch is formed; the oldest are dropped first when it is exceeded, and the drop is logged. Batches already formed and waiting to be sent have their own limit (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)). |
 | `disableBatchTimer` | `false` | Start no background flush timer. Set it to `true` in serverless functions. |
 
 ```javascript
@@ -59,7 +59,7 @@ While an instance has events that are buffered or still being sent, the SDK keep
 
 ### High-volume and backfill scripts
 
-At most 4 requests are sent at once. Batches formed while all 4 are busy wait their turn, and up to 10,000 events can wait. Beyond that the oldest waiting events are dropped (and the drop is logged), so the number of events held for sending stays bounded when the endpoint is slow or down.
+At most 4 requests are sent at once. Batches formed while all 4 are busy wait their turn, and up to 10,000 events can wait. Beyond that the oldest waiting events are dropped and the drop is logged, so the number of events held for sending stays bounded when the endpoint is slow or down.
 
 A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush()` every few thousand events so events are not dropped for lack of room while they wait:
 
@@ -186,6 +186,15 @@ inspector.enableLogging(true | false);
 ```
 
 The logging flag is shared by every instance in the process, and each constructor resets it, so creating a `dev` instance turns logging on for a `prod` instance too. Log lines show event names and the extracted schema (property names and types), never property values, so enabling logs does not print user data such as emails. The API key is never logged.
+
+Some lines are printed whatever the logging flag, on stderr, because they report lost data or failed sends:
+
+- `Avo Inspector: dropped N event(s) (queue full) in the last 10s.` or `(send backlog full)`: events dropped because the buffer (`maxQueueSize`) or the 10,000-event send backlog is full;
+- `Avo Inspector: N batch(es) rejected with HTTP <status> in the last 10s.`: the Inspector API answered with a status other than 200 (only the status is printed);
+- `Avo Inspector: schema sending failed: Request failed.` or `Request timed out.`: a batch could not be sent;
+- `Avo Inspector: something went wrong. Please report to support@avo.app.`: an internal error.
+
+Each kind prints at most one line per 10 seconds (per reason or status): the first occurrence prints at once, and later ones are counted and reported with the next line, for example `(12 more in the last 10s)`. Sends abandoned by `destroy()` and events dropped by sampling are not reported.
 
 # Upgrading from 1.x to 2.0
 

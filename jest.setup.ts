@@ -6,6 +6,7 @@
 //    host other than loopback are refused and recorded, and the test file fails if any
 //    were attempted (a prod instance ignores the mock endpoint, so this catches it too).
 import * as net from "net";
+import { AvoLog } from "./src/AvoLog";
 
 process.env.AVO_INSPECTOR_MOCK_ENDPOINT =
   process.env.AVO_INSPECTOR_MOCK_ENDPOINT || "http://127.0.0.1:1";
@@ -45,6 +46,11 @@ if (!guarded.__blockedHosts) {
 // This module runs once per test file, before the file itself is evaluated, so the reset
 // here keeps connections attempted by imports and top-level code in the file's record.
 guarded.__blockedHosts!.length = 0;
+
+// Always-on log lines are rate-limited per process; each test starts with fresh windows.
+beforeEach(() => {
+  AvoLog._resetForTesting();
+});
 
 afterAll(() => {
   const blocked = guarded.__blockedHosts!;

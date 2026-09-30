@@ -89,7 +89,7 @@ describe("bounded concurrent batch sends", () => {
     }
     expect(maxWaiting).toBe(10_000);
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringMatching(/batches waiting to be sent exceed 10000 events, dropped \d+ oldest event/)
+      expect.stringMatching(/^Avo Inspector: dropped \d+ event\(s\) \(send backlog full\) in the last 10s\.$/)
     );
 
     const flushing = inspector.flush();
