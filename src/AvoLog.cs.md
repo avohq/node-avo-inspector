@@ -22,15 +22,16 @@ class AvoLog {
   static rejected(status: number): void;
   static failed(reason: string): void;
   static internal(error: unknown): void;
+  static streamIdColon(): void;
   static _resetForTesting(): void;       // @internal
 }
 ```
 
-Process-wide state: a map from key to `{ start, suppressed }`: the start of the key's current 10 s window, and the amount counted in it without being printed. Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`.
+Process-wide state: a map from key to `{ start, suppressed }`: the start of the key's current 10 s window, and the amount counted in it without being printed. Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`, `streamid-colon`.
 
 ## Users and permissions
 
-- Internal; called by `AvoBatchQueue` (drops, synchronous dispatch throws) and `AvoInspector` (non-200, send failures, internal errors).
+- Internal; called by `AvoBatchQueue` (drops, synchronous dispatch throws), `AvoInspector` (non-200, send failures, internal errors) and `AvoStreamId` (a stream id containing `':'`).
 
 ## Functional requirements
 
@@ -49,6 +50,7 @@ Process-wide state: a map from key to `{ start, suppressed }`: the start of the 
 | `rejected(status)` | 1 | `console.warn("Avo Inspector: <total> batch(es) rejected with HTTP <status> in the last 10s.")` |
 | `failed(reason)` | 1 | `console.error("Avo Inspector: schema sending failed: <reason>.")`, plus ` (<total - 1> more in the last 10s)` when `total > 1` |
 | `internal(error)` | 1 | `console.error(INTERNAL_ERROR_MESSAGE + suffix, error)`, with the same suffix |
+| `streamIdColon()` | 1 | `console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported" + suffix)`, with the same suffix |
 
 ## Non-functional requirements
 
