@@ -195,23 +195,50 @@ describe("AvoEventSpecFetcher", () => {
     });
   });
 
-  test("timeout resolves callback with null", (done) => {
-    const mockReq = new MockClientRequest();
+  describe("deadline", () => {
+    afterEach(() => {
+      (AvoEventSpecFetcher as any).fetchTimeoutMs = 10_000;
+    });
 
-    (mockedHttps.request as jest.Mock).mockImplementation(
-      (_options: any, _callback: (res: any) => void) => {
-        // Simulate timeout: never call the response callback,
-        // instead emit "timeout" on next tick
-        process.nextTick(() => mockReq.emit("timeout"));
-        return mockReq;
-      }
-    );
+    test("a request that never answers is destroyed and resolves null at the deadline (fetchTimeoutMs = 0)", (done) => {
+      (AvoEventSpecFetcher as any).fetchTimeoutMs = 0;
+      const mockReq = new MockClientRequest();
+      (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq); // never answers
 
-    fetcher.fetch("click", "stream1", (result) => {
-      expect(result).toBeNull();
-      expect(mockReq.destroy).toHaveBeenCalled();
-      expect(mockedHttps.request).toHaveBeenCalledTimes(1);
-      done();
+      fetcher.fetch("click", "stream1", (result) => {
+        expect(result).toBeNull();
+        expect(mockReq.destroy).toHaveBeenCalled();
+        expect(mockedHttps.request).toHaveBeenCalledTimes(1);
+        done();
+      });
+    });
+
+    test("no socket-idle timeout is set: the wall-clock deadline is the only one", () => {
+      const mockReq = new MockClientRequest();
+      (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq);
+
+      fetcher.fetch("click", "stream1", () => {});
+
+      expect(mockReq.setTimeout).not.toHaveBeenCalled();
+    });
+
+    test("request() throwing synchronously resolves null, frees the key and leaves no deadline behind", async () => {
+      (AvoEventSpecFetcher as any).fetchTimeoutMs = 0;
+      (mockedHttps.request as jest.Mock).mockImplementationOnce(() => {
+        throw new TypeError("invalid options");
+      });
+      const results: Array<EventSpecResponse | null> = [];
+
+      expect(() => fetcher.fetch("click", "stream1", (r) => results.push(r))).not.toThrow();
+      // Callbacks are always asynchronous, even on this path...
+      expect(results).toEqual([]);
+      // ...but the key is freed at once: a same-key fetch starts its own request.
+      setupMockRequest(200, { events: [], metadata: {} });
+      fetcher.fetch("click", "stream1", () => {});
+      expect(mockedHttps.request).toHaveBeenCalledTimes(2);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(results).toEqual([null]);
     });
   });
 
@@ -275,5 +302,43 @@ describe("AvoEventSpecFetcher", () => {
     const wire = { events: [], metadata: { schemaId: "s1", branchId: "b1", latestActionId: "a1", sourceId: "src1" } };
     const result = AvoEventSpecFetcher.parseWireResponse(wire, "test");
     expect(result.eventSpec).toBeNull();
+  });
+});
+
+describe("AvoEventSpecFetcher connection reuse", () => {
+  const metadata = { schemaId: "s1", branchId: "b1", latestActionId: "a1", sourceId: "src1" };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test("every fetcher uses one shared agent, and destroy() leaves it usable for the others", async () => {
+    setupMockRequest(200, wireResponse("a", { x: { t: "string" } }, metadata));
+    const first = new AvoEventSpecFetcher("key-1");
+    const second = new AvoEventSpecFetcher("key-2");
+
+    // The fetcher swallows callback exceptions, so assert outside the callbacks.
+    await new Promise((resolve) => first.fetch("a", "s", resolve));
+    first.destroy();
+    const result = await new Promise((resolve) => second.fetch("a", "s", resolve));
+    second.destroy();
+
+    const agents = (mockedHttps.request as jest.Mock).mock.calls.map((call) => call[0].agent);
+    expect(result).not.toBeNull();
+    expect(agents).toHaveLength(2);
+    expect(agents[0]).toBeDefined();
+    expect(agents[1]).toBe(agents[0]);
+    expect(agents[0].destroy).not.toHaveBeenCalled();
+  });
+
+  test("destroy() aborts the fetcher's own in-flight request", () => {
+    const mockReq = new MockClientRequest();
+    (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq);
+    const fetcher = new AvoEventSpecFetcher("key-1");
+
+    fetcher.fetch("a", "s", () => {});
+    fetcher.destroy();
+
+    expect(mockReq.destroy).toHaveBeenCalled();
   });
 });

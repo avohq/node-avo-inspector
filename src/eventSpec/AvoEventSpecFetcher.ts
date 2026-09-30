@@ -1,19 +1,35 @@
-import { request, Agent } from "https";
+import { request, Agent, RequestOptions } from "https";
+import { ClientRequest } from "http";
 import { EventSpecResponse, EventSpec, EventSpecMetadata, PropertyConstraint } from "./AvoEventSpecFetchTypes";
 import { AvoInspector } from "../AvoInspector";
 
 type FetchCallback = (result: EventSpecResponse | null) => void;
 
+// The callbacks waiting on one key, and the request that owns the key.
+interface PendingFetch {
+  callbacks: FetchCallback[];
+  owner: object;
+}
+
+// One keep-alive agent for every instance, so creating many instances (for example one per
+// request) cannot pile up idle TLS sockets. Idle sockets are capped and do not hold the
+// process open.
+const sharedAgent = new Agent({ keepAlive: true, maxSockets: 8, maxFreeSockets: 2 });
+
 export class AvoEventSpecFetcher {
   private apiKey: string;
-  private inFlight: Map<string, FetchCallback[]> = new Map();
-  private agent: Agent;
+  private inFlight: Map<string, PendingFetch> = new Map();
+  private agent: Agent = sharedAgent;
+  private requests: Set<ClientRequest> = new Set();
 
   private static specEndpoint = "/trackingPlan/eventSpec";
+  // Wall-clock budget per fetch, from the moment it is requested, and the only timeout: a
+  // socket-idle timeout would start only once the shared agent assigns a socket, so a fetch
+  // queued behind 8 hung ones would wait for theirs first.
+  private static fetchTimeoutMs = 10_000;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
-    this.agent = new Agent({ keepAlive: true });
   }
 
   fetch(
@@ -25,14 +41,28 @@ export class AvoEventSpecFetcher {
 
     // In-flight dedup: if there's already a request in flight for this key,
     // queue the callback
-    const existingCallbacks = this.inFlight.get(dedupeKey);
-    if (existingCallbacks) {
-      existingCallbacks.push(callback);
+    const existing = this.inFlight.get(dedupeKey);
+    if (existing) {
+      existing.callbacks.push(callback);
       return;
     }
 
     // Register the callback and start the request
-    this.inFlight.set(dedupeKey, [callback]);
+    const owner = {};
+    this.inFlight.set(dedupeKey, { callbacks: [callback], owner });
+    // A request settles its key once. A late event (for example the error from a request
+    // destroyed on timeout) must not settle a newer fetch that has taken the key since.
+    // `deferCallbacks` is for settling inside fetch() itself: the key is freed and the
+    // deadline cleared at once, but callbacks still run asynchronously.
+    let settled = false;
+    const settle = (result: EventSpecResponse | null, deferCallbacks = false) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(deadline);
+      this.resolveCallbacks(dedupeKey, owner, result, deferCallbacks);
+    };
 
     const queryParams = new URLSearchParams({
       apiKey: this.apiKey,
@@ -55,6 +85,44 @@ export class AvoEventSpecFetcher {
       console.log("Avo Inspector: [network] GET https://" + options.hostname + AvoEventSpecFetcher.specEndpoint + "?eventName=" + encodeURIComponent(eventName));
     }
 
+    // Created before the request: a response can settle synchronously inside request().
+    // `req` stays undefined if request() throws, so the callback must not assume it.
+    let req: ClientRequest | undefined;
+    const deadline = setTimeout(() => {
+      if (AvoInspector.shouldLog) {
+        console.error("Avo Inspector: [network] Spec fetch timed out after " + AvoEventSpecFetcher.fetchTimeoutMs + "ms");
+      }
+      if (req) {
+        req.destroy();
+      }
+      settle(null);
+    }, AvoEventSpecFetcher.fetchTimeoutMs);
+    deadline.unref();
+
+    try {
+      req = this.send(options, eventName, settle);
+    } catch (e) {
+      if (AvoInspector.shouldLog) {
+        console.error("Avo Inspector: [network] Spec fetch error: " + e);
+      }
+      settle(null, true);
+      return;
+    }
+    const sent = req;
+    this.requests.add(sent);
+    sent.on("close", () => {
+      clearTimeout(deadline);
+      this.requests.delete(sent);
+    });
+    sent.end();
+  }
+
+  // Starts the GET; every outcome (response, parse failure, transport error) goes to settle.
+  private send(
+    options: RequestOptions,
+    eventName: string,
+    settle: (result: EventSpecResponse | null) => void
+  ): ClientRequest {
     const req = request(options, (res) => {
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: [network] Spec response status: " + res.statusCode + " " + res.statusMessage);
@@ -68,7 +136,7 @@ export class AvoEventSpecFetcher {
             const body = Buffer.concat(chunks).toString();
             console.warn("Avo Inspector: [network] Spec fetch failed with status " + res.statusCode + ": " + body);
           }
-          this.resolveCallbacks(dedupeKey, null);
+          settle(null);
           return;
         }
         try {
@@ -86,44 +154,57 @@ export class AvoEventSpecFetcher {
             console.warn("Avo Inspector: [network] Failed to parse spec response: " + e);
           }
         }
-        this.resolveCallbacks(dedupeKey, result);
+        settle(result);
       });
+      // A response cut off mid-body emits neither "end" nor a request "error"; without this
+      // the fetch would wait for its deadline, holding the key for every same-key fetch.
+      const truncated = () => {
+        if (!res.complete) {
+          if (AvoInspector.shouldLog) {
+            console.error("Avo Inspector: [network] Spec response ended before its body was complete");
+          }
+          settle(null);
+        }
+      };
+      res.on("aborted", truncated);
+      res.on("error", truncated);
+      res.on("close", truncated);
     });
 
     req.on("error", (err) => {
       if (AvoInspector.shouldLog) {
         console.error("Avo Inspector: [network] Spec fetch error: " + err);
       }
-      this.resolveCallbacks(dedupeKey, null);
+      settle(null);
     });
-
-    req.setTimeout(10_000);
-    req.on("timeout", () => {
-      if (AvoInspector.shouldLog) {
-        console.error("Avo Inspector: [network] Spec fetch timed out after 10s");
-      }
-      req.destroy();
-      this.resolveCallbacks(dedupeKey, null);
-    });
-
-    req.end();
+    return req;
   }
 
   private resolveCallbacks(
     key: string,
-    result: EventSpecResponse | null
+    owner: object,
+    result: EventSpecResponse | null,
+    deferCallbacks = false
   ): void {
-    const callbacks = this.inFlight.get(key);
+    const pending = this.inFlight.get(key);
+    if (!pending || pending.owner !== owner) {
+      return;
+    }
     this.inFlight.delete(key);
 
-    if (callbacks) {
-      for (const cb of callbacks) {
+    const invoke = () => {
+      for (const cb of pending.callbacks) {
         try {
           cb(result);
         } catch (e) {
           // Don't let one callback failure affect others
         }
       }
+    };
+    if (deferCallbacks) {
+      process.nextTick(invoke);
+    } else {
+      invoke();
     }
   }
 
@@ -180,7 +261,10 @@ export class AvoEventSpecFetcher {
     return { eventSpec, metadata };
   }
 
+  /** Aborts this instance's in-flight requests; the shared agent stays usable. */
   destroy(): void {
-    this.agent.destroy();
+    const requests = Array.from(this.requests);
+    this.requests.clear();
+    requests.forEach((req) => req.destroy());
   }
 }

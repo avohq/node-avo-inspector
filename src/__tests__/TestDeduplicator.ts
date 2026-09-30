@@ -1,6 +1,8 @@
 import { AvoDeduplicator } from "../AvoDeduplicator";
 import { deepEquals } from "../utils";
 import { AvoInspector } from "../AvoInspector";
+import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
+import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
 import { defaultOptions } from "./constants";
 
 jest
@@ -9,6 +11,20 @@ jest
 
 describe("Deduplicator", () => {
   const deduplicator = new AvoDeduplicator();
+
+  // Keep the Inspector-level tests off the real network: a 200 send and no event spec.
+  beforeAll(() => {
+    jest
+      .spyOn(AvoNetworkCallsHandler.prototype, "callInspectorWithBatchBody")
+      .mockImplementation(() => Promise.resolve(200));
+    jest
+      .spyOn(AvoEventSpecFetcher.prototype, "fetch")
+      .mockImplementation((_eventName, _streamId, callback) => callback(null));
+  });
+
+  afterAll(() => {
+    jest.restoreAllMocks();
+  });
 
   const testObject = {
     "0": "some string",
@@ -165,18 +181,81 @@ describe("Deduplicator", () => {
     expect(avoTrackedSchemaAgain.length).toBe(4);
   });
 
+  describe("expiry keeps the params of a newer registration of the same key", () => {
+    // A deduplicator on an injected clock, set in milliseconds.
+    let t = 0;
+    const clocked = () => {
+      t = 0;
+      const dedup = new AvoDeduplicator();
+      (dedup as any).now = () => t;
+      return dedup;
+    };
+
+    test.each([
+      ["Codegen", true],
+      ["manual", false],
+    ])("%s at 0 ms and 400 ms, then the other kind at 600 ms, is a duplicate", (_kind, first) => {
+      const dedup = clocked();
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, first, "s")).toBe(true);
+      t = 400;
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, first, "s")).toBe(true);
+
+      // The 0 ms registration expires here; the 400 ms one is still inside the window.
+      t = 600;
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, !first, "s")).toBe(false);
+    });
+
+    test("a lone registration older than 500 ms still expires", () => {
+      const dedup = clocked();
+      dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
+
+      t = 600;
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, false, "s")).toBe(true);
+    });
+
+    test("a newer registration with different params replaces the older one's", () => {
+      const dedup = clocked();
+      dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
+      t = 400;
+      dedup.shouldRegisterEvent("A", { a: 2 }, true, "s");
+
+      t = 600;
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, false, "s")).toBe(true);
+      expect(dedup.shouldRegisterEvent("A", { a: 2 }, false, "s")).toBe(false);
+    });
+  });
+
+  describe("expiry uses a monotonic clock, not the wall clock", () => {
+    afterEach(() => jest.setSystemTime(new Date("2020-01-01")));
+
+    test("a registration still expires 600 ms later when the wall clock steps back an hour", () => {
+      const dedup = new AvoDeduplicator();
+      dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
+
+      jest.advanceTimersByTime(600); // monotonic and wall clock both move on 600 ms
+      jest.setSystemTime(Date.now() - 3_600_000); // then the wall clock steps back
+
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, false, "s")).toBe(true);
+    });
+
+    test("a wall-clock jump forward does not expire a registration early", () => {
+      const dedup = new AvoDeduplicator();
+      dedup.shouldRegisterEvent("A", { a: 1 }, true, "s");
+
+      jest.advanceTimersByTime(100);
+      jest.setSystemTime(Date.now() + 3_600_000);
+
+      expect(dedup.shouldRegisterEvent("A", { a: 1 }, false, "s")).toBe(false);
+    });
+  });
+
   test(`Does not deduplicate if more than 500ms pass`, () => {
     const shouldRegisterFromAvo = deduplicator.shouldRegisterEvent(
       "Test",
       testObject,
       true
     );
-    const now = new Date();
-    const dateNowSpy = jest
-      .spyOn(Date, "now")
-      .mockImplementation(() =>
-        now.setMilliseconds(now.getMilliseconds() + 501)
-      );
+    jest.advanceTimersByTime(501);
     const shouldRegisterManual = deduplicator.shouldRegisterEvent(
       "Test",
       testObject,
@@ -185,7 +264,5 @@ describe("Deduplicator", () => {
 
     expect(shouldRegisterFromAvo).toBe(true);
     expect(shouldRegisterManual).toBe(true);
-
-    dateNowSpy.mockRestore();
   });
 });

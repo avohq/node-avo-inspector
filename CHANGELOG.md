@@ -1,0 +1,26 @@
+# Changelog
+
+## 2.0.0
+
+Implements [avohq/spec-first-inspector-server-sdk](https://github.com/avohq/spec-first-inspector-server-sdk) v3.0.1: the `/inspector/v2/track` endpoint, batching with `flush()` and `destroy()`, gzip, and gateway options. This is a breaking release; see [Upgrading from 1.x to 2.0](README.md#upgrading-from-1x-to-20) in the README.
+
+Input handling. All of these behaved the same way in 1.x:
+
+- **Null-prototype objects no longer wipe the schema.** A null-prototype object anywhere in the event properties (for example `querystring.parse()` output), or an object with its own `hasOwnProperty` key, made schema extraction fail: the event was sent with an empty schema and a stack trace was printed. These objects are now extracted exactly like plain objects, and deduplication, event spec validation and encryption handle them too.
+- **A non-string `streamId` no longer rejects.** A number, bigint or boolean (a numeric user id, say) is sent as its string form. Any other non-string is treated as absent, with a warning when logging is on. Before, the track promise rejected, and a call without `.catch()` crashed the process with an unhandled rejection.
+- **A non-string `env` falls back to `dev`** with a warning instead of throwing `value.trim is not a function`.
+- **Non-whole numbers in exponent form are `float`.** `1e-7` and `5e-324` were classified `int`. A number is now `int` when it is a whole number and `float` otherwise; `NaN` and `±Infinity` are `float`.
+- **A `null` list element is typed `"null"`.** `{ v: [null, 1] }` now has children `["null", "int"]`, following the spec's schema pseudocode; 1.x reported the null element as `[]`.
+- **Invalid constructor arguments throw the documented messages.** A non-string `apiKey`, missing options (`new AvoInspector()`) or `null` options throw "[Avo Inspector] No API key provided…", and a non-string `version` throws "[Avo Inspector] No version provided…", instead of a `TypeError`.
+- **Logs never contain property values.** With logging on, 1.x printed each event's raw properties ("Supplied event … with params …"), and because the logging flag is shared by every instance, a `dev` instance could make a `prod` one print user data such as emails. Log lines now show the extracted schema (property names and types) only.
+- **Lost data is always logged.** Events dropped because the buffer or send backlog is full, batches rejected with a non-200 status (1.x did not log these at all), send failures and internal errors are printed on stderr whatever the logging flag, at most one line per kind per 10 seconds with a count of the rest. Sampling drops and debug lines still need logging on.
+- `package.json` declares `"types"` and `"engines": { "node": ">=14" }`.
+
+Robustness under load:
+
+- **At most 4 batches are sent at once.** Further batches wait their turn, and up to 10,000 events can wait; beyond that the oldest waiting events are dropped, and the drop is logged, so a fast producer or a slow or unresponsive endpoint cannot open thousands of requests, and the number of events held for sending stays bounded. `maxQueueSize` bounds only the unsent buffer. `flush()` waits for waiting batches, and `destroy()` discards them. A script that tracks in a tight loop without yielding to I/O should call `flush()` every few thousand events (see the README).
+- **The exit drain is bounded.** In-flight requests do not hold the process open. On `beforeExit` the SDK attempts to send everything left under a single 10-second deadline, and holds the process no longer than that for its own drain; other work in your process can still keep it running longer.
+- **Schema extraction is bounded.** It stops expanding a value more than 10 levels deep, a value that contains itself, and anything past 10,000 objects and lists in one call; such a value is reported as `"object"`. In 1.x a cyclic or very deep payload made extraction fail and the event was sent with an empty schema. See "Schema extraction limits" in the README.
+- **Lower CPU cost per event.** The Codegen/manual deduplicator's cleanup no longer scans every recent timestamp on each call, which took most of the CPU time under load. As a side effect, a registration that shared its millisecond with another now expires after 500 ms like any other.
+- **`flush()` during event spec validation sends batches.** Events whose validations finish together are sent as one batch, not one request per event.
+- **One shared connection pool for event spec fetches.** Every instance reuses one keep-alive agent (at most 8 sockets, 2 kept idle), so creating instances without destroying them no longer adds a connection pool, and its idle connections, per instance.
