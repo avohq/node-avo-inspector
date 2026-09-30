@@ -1,6 +1,6 @@
 # utils
 
-Small shared helpers: blank-string check, structural deep equality used by the deduplicator, option normalization, header-value validation and log-safe JSON.
+Small shared helpers: blank-string check, structural deep equality used by the deduplicator, option normalization and header-value validation.
 
 ## Tech stack
 
@@ -14,7 +14,6 @@ deepEquals(x: any, y: any, comparing?: Map<object, Set<object>>): boolean
 normalizeOption(value: unknown): string | undefined
 hasHeaderControlChar(value: string): boolean
 hasNonLatin1Char(value: string): boolean
-safeStringify(value: unknown): string
 ```
 
 ## Functional requirements
@@ -48,16 +47,10 @@ safeStringify(value: unknown): string
 
 - True if the string contains any character above U+00FF.
 
-### safeStringify
-
-- `JSON.stringify` for log lines. Any object seen earlier in the traversal (cyclic or merely shared) is written as `"[Circular]"`.
-- If serialization throws (e.g. a bigint) -> `"[unserializable]"`. `undefined` input -> `"undefined"`.
-
 ## Non-functional requirements
 
 - `deepEquals` terminates on cyclic input and never calls methods on the compared objects.
 - Objects with no own enumerable keys (e.g. two different `Date`s) compare equal.
-- `safeStringify` never throws.
 - Pure; no side effects.
 
 ## Examples
@@ -68,8 +61,4 @@ safeStringify(value: unknown): string
 
 <example>
 `hasHeaderControlChar("a\tb")` -> false; `hasHeaderControlChar("a\r\nb")` -> true; `hasNonLatin1Char("é")` -> false; `hasNonLatin1Char("€")` -> true.
-</example>
-
-<example>
-`s = { v: 1 }; safeStringify({ a: s, b: s })` -> `{"a":{"v":1},"b":"[Circular]"}`
 </example>
