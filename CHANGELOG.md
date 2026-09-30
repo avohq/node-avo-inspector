@@ -12,6 +12,7 @@ Input handling. All of these behaved the same way in 1.x:
 - **Non-whole numbers in exponent form are `float`.** `1e-7` and `5e-324` were classified `int`. A number is now `int` when it is a whole number and `float` otherwise; `NaN` and `±Infinity` are `float`.
 - **A `null` list element is typed `"null"`.** `{ v: [null, 1] }` now has children `["null", "int"]`, following the spec's schema pseudocode; 1.x reported the null element as `[]`.
 - **Invalid constructor arguments throw the documented messages.** A non-string `apiKey`, missing options (`new AvoInspector()`) or `null` options throw "[Avo Inspector] No API key provided…", and a non-string `version` throws "[Avo Inspector] No version provided…", instead of a `TypeError`.
+- **Logs never contain property values.** With logging on, 1.x printed each event's raw properties ("Supplied event … with params …"), and because the logging flag is shared by every instance, a `dev` instance could make a `prod` one print user data such as emails. Log lines now show the extracted schema (property names and types) only.
 - `package.json` declares `"types"` and `"engines": { "node": ">=14" }`.
 
 Robustness under load:

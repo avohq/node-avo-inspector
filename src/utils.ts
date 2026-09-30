@@ -82,27 +82,4 @@ const hasHeaderControlChar = (value: string): boolean =>
 /** Node sends header values as Latin-1 and throws synchronously on anything above U+00FF. */
 const hasNonLatin1Char = (value: string): boolean => /[^\u0000-\u00FF]/.test(value);
 
-/**
- * JSON for log lines only: a repeated object reference is written as "[Circular]" instead
- * of throwing on cyclic input.
- */
-const safeStringify = (value: unknown): string => {
-  const seen = new WeakSet<object>();
-  try {
-    return String(
-      JSON.stringify(value, (_key, val) => {
-        if (typeof val === "object" && val !== null) {
-          if (seen.has(val)) {
-            return "[Circular]";
-          }
-          seen.add(val);
-        }
-        return val;
-      })
-    );
-  } catch (e) {
-    return "[unserializable]";
-  }
-};
-
-export { isValueEmpty, deepEquals, safeStringify, normalizeOption, hasHeaderControlChar, hasNonLatin1Char };
+export { isValueEmpty, deepEquals, normalizeOption, hasHeaderControlChar, hasNonLatin1Char };

@@ -19,7 +19,7 @@ import {
 } from "./eventSpec/AvoEventSpecFetchTypes";
 import { VERSION } from "./AvoInspectorVersion";
 
-import { hasHeaderControlChar, hasNonLatin1Char, isValueEmpty, normalizeOption, safeStringify } from "./utils";
+import { hasHeaderControlChar, hasNonLatin1Char, isValueEmpty, normalizeOption } from "./utils";
 
 const libVersion = VERSION;
 
@@ -478,15 +478,14 @@ export class AvoInspector {
       if (
         this.shouldRegisterEvent(eventName, eventProperties, fromAvoFunction, anonymousId, trackOptions)
       ) {
+        let eventSchema = this.extractSchema(eventProperties, false);
         if (AvoInspector.shouldLog) {
+          // The schema (names and types), never the values: the logging flag is shared by
+          // every instance, so a prod instance can log once any dev instance turns it on.
           console.log(
-            "Avo Inspector: Supplied event " +
-            eventName +
-            " with params \n" +
-            safeStringify(eventProperties)
+            "Avo Inspector: Supplied event " + eventName + " with schema " + JSON.stringify(eventSchema)
           );
         }
-        let eventSchema = this.extractSchema(eventProperties, false);
 
         return this.sampleAndEnqueue(
           eventName,
@@ -770,10 +769,8 @@ export class AvoInspector {
       }
 
       if (AvoInspector.shouldLog) {
-        console.log(
-          "Avo Inspector: extracting schema from " +
-          safeStringify(eventProperties)
-        );
+        // No property values in logs; the parsed schema is logged below.
+        console.log("Avo Inspector: extracting schema");
       }
 
       const schema = AvoSchemaParser.extractSchema(eventProperties);

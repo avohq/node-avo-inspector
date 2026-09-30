@@ -185,6 +185,8 @@ Logs are enabled by default in the dev mode and disabled in prod mode. You can e
 inspector.enableLogging(true | false);
 ```
 
+The logging flag is shared by every instance in the process, and each constructor resets it, so creating a `dev` instance turns logging on for a `prod` instance too. Log lines show event names and the extracted schema (property names and types), never property values, so enabling logs does not print user data such as emails. The API key is never logged.
+
 # Upgrading from 1.x to 2.0
 
 2.0 implements spec 3.0.1. These are the changes you may notice:
