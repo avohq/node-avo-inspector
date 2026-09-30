@@ -51,7 +51,7 @@ Public fields: `environment`, `apiKey`, `version`, `avoNetworkCallsHandler`, `av
 
 Static `AvoInspector.shouldLog` (getter/setter) is one flag shared by every instance.
 
-Module export `INTERNAL_ERROR_MESSAGE = "Avo Inspector: something went wrong. Please report to support@avo.app."`, marked `@internal` (stripped from the published typings, not re-exported from the package index); `AvoBatchQueue` logs it for a synchronous dispatch throw.
+Module export `INTERNAL_ERROR_MESSAGE = "Avo Inspector: something went wrong. Please report to support@avo.app."`, re-exported from `AvoLog` where it is defined, marked `@internal` (stripped from the published typings, not re-exported from the package index).
 
 Internal state: event spec fetcher/cache/validator (null in prod); an empty generated anonymous id used when no stream id is given; the batch queue; a `destroyed` flag; the set of pending promises (spec validations before enqueue, and batch sends) that `flush()` awaits; per-validation `flushRequested` markers; waiters settled by `destroy()`.
 
@@ -85,14 +85,14 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 3. Gateway options (`resolveTrackOptions`): each field is trimmed; a non-string or blank value is absent, and non-object `options` counts as none. The event is gateway-scoped when any field is present. `appVersion` is `originAppVersion` if present, else `null` when `originHint` is present, else the instance version. `outputReference` / `originHint` are included only when present.
 4. Deduplication: a gateway-scoped event is always registered and never passed to the deduplicator. Otherwise `avoDeduplicator.shouldRegisterEvent(...)`; a duplicate logs "Deduplicated event" and resolves `[]`.
 5. Extracts the schema (`extractSchema(props, false)`); when logging, prints `Supplied event <eventName> with schema <JSON of the schema>` (names, types and children, never values). Then samples and enqueues (below).
-6. A synchronous exception logs the internal error and rejects with `"Avo Inspector: something went wrong. Please report to support@avo.app."`.
+6. A synchronous exception is logged with `AvoLog.internal` (always on, rate-limited) and the call rejects with `"Avo Inspector: something went wrong. Please report to support@avo.app."`.
 
 ### Sampling and enqueue
 
 1. Reads the current sampling rate and stamps `createdAt` at call time. If `Math.random() > rate`, the event is dropped (logged) and the call resolves with the schema.
 2. Body: validated body (`buildEventProperties` + `bodyForValidatedEventSchemaCall`) when a validation result exists, else `bodyForEventSchemaCall`; both receive the resolved track options. The body's `samplingRate` and `createdAt` are overwritten with the values captured at call time.
 3. Validation inactive (prod, after destroy, or while a valid mock-endpoint override is in effect, i.e. `AvoNetworkCallsHandler.mockEndpointFor(env)` is non-null): the body is enqueued immediately. An invalid override value is ignored, so validation stays on.
-4. Validation active: `fetchAndValidate` runs first. A rejection is logged as a warning and the event is sent without validation. If `destroy()` ran meanwhile, resolves `[]`. A body-building error logs the internal error and rejects with the internal error message. Otherwise the body is enqueued. The work (validation, plus any send the enqueue triggered) is pending until it settles.
+4. Validation active: `fetchAndValidate` runs first. A rejection is logged as a warning and the event is sent without validation. If `destroy()` ran meanwhile, resolves `[]`. A body-building error is logged with `AvoLog.internal` and rejects with the internal error message. Otherwise the body is enqueued. The work (validation, plus any send the enqueue triggered) is pending until it settles.
 5. `flush()` marks validations pending at its start; when such a validation enqueues without triggering a send, one drain is scheduled (`setImmediate`) and shared by every marked validation that settles in the same event-loop turn.
 6. Resolution:
    - Batch size 1 (dev): the send happens within the call. Resolves `[]` when the outcome is `"non200"` or the instance was destroyed before the send settled; otherwise the schema (including after a transport failure).
@@ -101,7 +101,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 ### sendBatch(batch)
 
 - After destroy: `"failed"` without sending.
-- `callInspectorWithBatchBody(batch)`: a numeric status other than 200 is `"non200"`; otherwise `"ok"` (logs "Saved event" per event when logging is on). A rejection is `"failed"`, logged as "schema sending failed" unless destroyed.
+- `callInspectorWithBatchBody(batch)`: a numeric status other than 200 is `"non200"`, reported with `AvoLog.rejected(status)` unless destroyed; otherwise `"ok"` (logs "Saved event" per event when logging is on). A rejection is `"failed"`, reported with `AvoLog.failed(reason)` ("schema sending failed: <reason>.") unless destroyed. Both reports are always on and rate-limited; sends abandoned by `destroy()` are not reported.
 - **IMPORTANT:** at-most-once. A failed batch is dropped, never re-queued or retried.
 
 ### flush(timeoutMs = 10000): Promise<void>
@@ -129,7 +129,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 
 ### extractSchema(eventProperties, shouldLogIfEnabled = true)
 
-Returns `AvoSchemaParser.extractSchema(eventProperties)` without tracking. When logging is on and `shouldLogIfEnabled`, warns if Codegen just reported the same properties. When logging, prints `extracting schema` and then the parsed schema's `propertyName: propertyType` pairs, never the input values. Any exception is logged and returns `[]`.
+Returns `AvoSchemaParser.extractSchema(eventProperties)` without tracking. When logging is on and `shouldLogIfEnabled`, warns if Codegen just reported the same properties. When logging, prints `extracting schema` and then the parsed schema's `propertyName: propertyType` pairs, never the input values. Any exception is logged with `AvoLog.internal` (always on, rate-limited) and returns `[]`.
 
 ### enableLogging(enable)
 
