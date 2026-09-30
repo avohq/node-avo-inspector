@@ -65,7 +65,7 @@ A loop that tracks events without ever yielding to I/O (for example a backfill s
 
 ```javascript
 for (let i = 0; i < rows.length; i++) {
-  inspector.trackSchemaFromEvent(rows[i].event, rows[i].properties);
+  await inspector.trackSchemaFromEvent(rows[i].event, rows[i].properties);
   if (i % 5000 === 4999) await inspector.flush();
 }
 await inspector.flush();

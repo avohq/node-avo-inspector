@@ -111,7 +111,7 @@ Same encryption decision as above, returning just the property list.
 
 For each property:
 - list-typed (`AvoEncryption.isListType`) → omitted entirely;
-- value = `JSON.stringify(raw[propertyName]) ?? "null"`; a value that cannot be serialized (e.g. cyclic) → property omitted with an unconditional `console.warn`;
+- value = `JSON.stringify(raw[propertyName]) ?? "null"`; a value that cannot be serialized (e.g. cyclic, or a throwing `toJSON`/getter) → property omitted with an unconditional `console.warn` naming the property and only the error's type (`AvoLog.errorType`), never its message, which may contain the value;
 - encrypted with `publicEncryptionKey`;
 - encryption returns `null` → property omitted (the encryption module logs);
 - otherwise emit `{ propertyName, propertyType, encryptedPropertyValue, children? }` (`children` only when defined).

@@ -71,9 +71,11 @@ export class AvoLog {
     [Error, "Error"],
   ];
 
-  // A fixed label for what was thrown; it never reads a field of the value. A proxy whose
-  // traps throw yields "unknown".
-  private static errorType(error: unknown): string {
+  /**
+   * @internal A fixed label for what was thrown, for any log line that reports a caught
+   * error; it never reads a field of the value. A proxy whose traps throw yields "unknown".
+   */
+  static errorType(error: unknown): string {
     try {
       for (const [type, label] of AvoLog.errorTypes) {
         if (error instanceof type) {

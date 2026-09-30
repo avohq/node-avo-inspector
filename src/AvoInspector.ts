@@ -603,7 +603,8 @@ export class AvoInspector {
     )
       .catch((err): ValidationResult | null => {
         if (AvoInspector.shouldLog) {
-          console.warn("Avo Inspector: Event spec validation failed for event: " + eventName + ". Sending without validation. " + err);
+          // Only the error's type: validation reads property values, which can end up in it.
+          console.warn("Avo Inspector: Event spec validation failed for event: " + eventName + ". Sending without validation. (" + AvoLog.errorType(err) + ")");
         }
         return null;
       })

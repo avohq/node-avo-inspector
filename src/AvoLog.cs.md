@@ -22,6 +22,7 @@ class AvoLog {
   static rejected(status: number): void;
   static failed(reason: string): void;
   static internal(error: unknown): void;
+  static errorType(error: unknown): string; // @internal: the fixed label, also used by other log lines that report a caught error
   static streamIdColon(): void;
   static _resetForTesting(): void;       // @internal
 }

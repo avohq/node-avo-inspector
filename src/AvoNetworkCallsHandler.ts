@@ -1,6 +1,7 @@
 import { AvoGuid } from "./AvoGuid";
 import { AvoInspector } from "./AvoInspector";
 import { AvoEncryption } from "./AvoEncryption";
+import { AvoLog } from "./AvoLog";
 import { LIB_PLATFORM } from "./AvoInspectorVersion";
 import { hasHeaderControlChar, hasNonLatin1Char } from "./utils";
 import { request as httpsRequest } from "https";
@@ -468,8 +469,9 @@ export class AvoNetworkCallsHandler {
         jsonValue = JSON.stringify(rawValue) ?? "null";
       } catch (e) {
         // A value that cannot be serialized (e.g. cyclic) is omitted, like an encryption failure.
+        // Only the error's type is printed: toJSON, getters and proxies can put the value in it.
         console.warn(
-          `[Avo Inspector] Warning: could not serialize property "${prop.propertyName}" for encryption, omitting it. ${e}`
+          `[Avo Inspector] Warning: could not serialize property "${prop.propertyName}" for encryption, omitting it. (${AvoLog.errorType(e)})`
         );
         continue;
       }

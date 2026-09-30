@@ -84,3 +84,39 @@ test("log lines show schema types and never property values or the API key", asy
   expect(text).toMatch(/"profile"[^\n]*object/);
   expect(text).toMatch(/"tags"[^\n]*list\(string\)/);
 });
+
+describe("caught errors never print their message", () => {
+  test("a value whose toJSON throws with a property value is omitted, and the value is not logged", async () => {
+    const ecdh = crypto.createECDH("prime256v1");
+    ecdh.generateKeys();
+    const inspector = new AvoInspector({
+      apiKey: API_KEY, env: "dev", version: "1.0.0", publicEncryptionKey: ecdh.getPublicKey("hex"),
+    });
+    const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+    const secret = { toJSON() { throw new Error("cannot serialize " + MARKER); } };
+
+    await inspector.trackSchemaFromEvent("Encrypted", { secret, ok: "fine" });
+
+    const sent = send.mock.calls[0][0][0];
+    expect(sent.eventProperties.map((p: any) => p.propertyName)).toEqual(["ok"]);
+    expect(logged()).toContain('could not serialize property "secret" for encryption, omitting it. (Error)');
+    expect(logged()).not.toContain(MARKER);
+    inspector.destroy();
+  });
+
+  test("an event spec validation that throws with a property value logs only the error's type", async () => {
+    jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
+    jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((_e, _s, callback) =>
+      callback({ eventSpec: { eventName: "E", properties: [] }, metadata: {} } as any)
+    );
+    const inspector = new AvoInspector({ apiKey: API_KEY, env: "staging", version: "1.0.0", disableBatchTimer: true });
+    inspector.enableLogging(true);
+    jest.spyOn(inspector as any, "fetchAndValidate").mockRejectedValue(new TypeError("bad value " + MARKER));
+
+    await inspector.trackSchemaFromEvent("E", { email: "x" });
+
+    expect(logged()).toContain("Event spec validation failed for event: E. Sending without validation. (TypeError)");
+    expect(logged()).not.toContain(MARKER);
+    inspector.destroy();
+  });
+});
