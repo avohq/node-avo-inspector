@@ -1,4 +1,5 @@
 import { AvoInspector } from "./AvoInspector";
+import { AvoLog } from "./AvoLog";
 
 export class AvoStreamId {
   private _streamId: string;
@@ -8,9 +9,7 @@ export class AvoStreamId {
   constructor(streamId?: unknown) {
     this._streamId = AvoStreamId.normalize(streamId);
     if (this._streamId.includes(":")) {
-      console.warn(
-        "[Avo Inspector] Warning: streamId contains ':' which is not supported"
-      );
+      AvoLog.streamIdColon();
     }
   }
 

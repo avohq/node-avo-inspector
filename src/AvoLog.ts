@@ -56,6 +56,14 @@ export class AvoLog {
     }
   }
 
+  /** A streamId containing ':' (warned on every call before; now once per window). */
+  static streamIdColon(): void {
+    const total = AvoLog.due("streamid-colon", 1);
+    if (total !== null) {
+      console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported" + AvoLog.more(total));
+    }
+  }
+
   /** @internal Test-only: forget every window. */
   static _resetForTesting(): void {
     AvoLog.windows.clear();

@@ -155,3 +155,19 @@ describe("always-on data-loss lines, logging off", () => {
     inspector.destroy();
   });
 });
+
+describe("the streamId ':' warning", () => {
+  test("prints at most once per 10 s, then reports how many it suppressed", async () => {
+    const inspector = staging({ batchSize: 30 });
+    const warning = "[Avo Inspector] Warning: streamId contains ':' which is not supported";
+
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent("E" + i, {}, "user:" + i);
+    expect(matching(/streamId contains ':'/)).toEqual([warning]);
+
+    now += 10_000;
+    // @ts-ignore The Codegen entry goes through the same path.
+    await inspector._avoFunctionTrackSchemaFromEvent("E20", {}, "id", "hash", "user:20");
+    expect(matching(/streamId contains ':'/)).toEqual([warning, warning + " (19 more in the last 10s)"]);
+    inspector.destroy();
+  });
+});
