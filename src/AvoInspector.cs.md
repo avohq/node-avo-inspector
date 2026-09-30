@@ -18,7 +18,7 @@ The public entry class of the Node Avo Inspector SDK. It validates configuration
 ## Tech stack
 
 - TypeScript on Node.js.
-- Collaborators: `AvoNetworkCallsHandler` (body building, HTTP send, sampling rate), `AvoBatchQueue` (buffer, size/time triggers, in-flight cap), `AvoDeduplicator`, `AvoSchemaParser`, `AvoStreamId`, `AvoEventSpecFetcher` / `AvoEventSpecCache` / `EventValidator`, utils (`isValueEmpty`, `normalizeOption`, `safeStringify`, header-character checks).
+- Collaborators: `AvoNetworkCallsHandler` (body building, HTTP send, sampling rate), `AvoBatchQueue` (buffer, size/time triggers, in-flight cap), `AvoDeduplicator`, `AvoSchemaParser`, `AvoStreamId`, `AvoEventSpecFetcher` / `AvoEventSpecCache` / `EventValidator`, utils (`isValueEmpty`, `normalizeOption`, header-character checks).
 - The library version comes from `AvoInspectorVersion.VERSION`.
 
 ## Data
@@ -84,7 +84,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 2. Anonymous id: `streamId` normalized through `AvoStreamId`, else the generated anonymous id (empty).
 3. Gateway options (`resolveTrackOptions`): each field is trimmed; a non-string or blank value is absent, and non-object `options` counts as none. The event is gateway-scoped when any field is present. `appVersion` is `originAppVersion` if present, else `null` when `originHint` is present, else the instance version. `outputReference` / `originHint` are included only when present.
 4. Deduplication: a gateway-scoped event is always registered and never passed to the deduplicator. Otherwise `avoDeduplicator.shouldRegisterEvent(...)`; a duplicate logs "Deduplicated event" and resolves `[]`.
-5. Extracts the schema (`extractSchema(props, false)`), then samples and enqueues (below).
+5. Extracts the schema (`extractSchema(props, false)`); when logging, prints `Supplied event <eventName> with schema <JSON of the schema>` (names, types and children, never values). Then samples and enqueues (below).
 6. A synchronous exception logs the internal error and rejects with `"Avo Inspector: something went wrong. Please report to support@avo.app."`.
 
 ### Sampling and enqueue
@@ -129,7 +129,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 
 ### extractSchema(eventProperties, shouldLogIfEnabled = true)
 
-Returns `AvoSchemaParser.extractSchema(eventProperties)` without tracking. When logging is on and `shouldLogIfEnabled`, warns if Codegen just reported the same properties. Logs input with `safeStringify`. Any exception is logged and returns `[]`.
+Returns `AvoSchemaParser.extractSchema(eventProperties)` without tracking. When logging is on and `shouldLogIfEnabled`, warns if Codegen just reported the same properties. When logging, prints `extracting schema` and then the parsed schema's `propertyName: propertyType` pairs, never the input values. Any exception is logged and returns `[]`.
 
 ### enableLogging(enable)
 
@@ -150,3 +150,4 @@ Terminates the instance: marks it destroyed; settles every track waiting on a sp
 - An instance with buffered or pending work is strongly referenced by static state until its work finishes or it is destroyed.
 - Send failures never reject the track promise; only synchronous internal errors or body-building errors do. Validation failures degrade to an unvalidated send.
 - Logging state is global across instances; constructing any instance resets it.
+- **IMPORTANT:** no log line contains a property value or the API key. Because the flag is global, a prod instance can log once any dev instance turns logging on, so logs show only event names, schema (property names and types), counts, statuses and error messages.
