@@ -129,7 +129,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 
 ### extractSchema(eventProperties, shouldLogIfEnabled = true)
 
-Returns `AvoSchemaParser.extractSchema(eventProperties)` without tracking. When logging is on and `shouldLogIfEnabled`, warns if Codegen just reported the same properties. When logging, prints `extracting schema` and then the parsed schema's `propertyName: propertyType` pairs, never the input values. Any exception is logged with `AvoLog.internal` (always on, rate-limited) and returns `[]`.
+Returns `AvoSchemaParser.extractSchema(eventProperties)` without tracking. When logging is on and `shouldLogIfEnabled`, warns if Codegen just reported the same properties; the Codegen scan (O(recent Codegen entries)) runs only then, never on the tracking path. When logging, prints `extracting schema` and then the parsed schema's `propertyName: propertyType` pairs, never the input values. Any exception is logged with `AvoLog.internal` (always on, rate-limited) and returns `[]`.
 
 ### enableLogging(enable)
 

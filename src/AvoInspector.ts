@@ -764,14 +764,18 @@ export class AvoInspector {
     children?: any;
   }> {
     try {
-      if (this.avoDeduplicator.hasSeenEventParams(eventProperties, true)) {
-        if (shouldLogIfEnabled && AvoInspector.shouldLog) {
-          console.warn(
-            "Avo Inspector: WARNING! You are trying to extract schema shape that was just reported by your Codegen. " +
-            "This is an indicator of duplicate inspector reporting. " +
-            "Please reach out to support@avo.app for advice if you are not sure how to handle this."
-          );
-        }
+      // The scan compares against every recent Codegen entry, so it runs only when its
+      // warning can print (never on the tracking path, which passes false).
+      if (
+        shouldLogIfEnabled &&
+        AvoInspector.shouldLog &&
+        this.avoDeduplicator.hasSeenEventParams(eventProperties, true)
+      ) {
+        console.warn(
+          "Avo Inspector: WARNING! You are trying to extract schema shape that was just reported by your Codegen. " +
+          "This is an indicator of duplicate inspector reporting. " +
+          "Please reach out to support@avo.app for advice if you are not sure how to handle this."
+        );
       }
 
       if (AvoInspector.shouldLog) {

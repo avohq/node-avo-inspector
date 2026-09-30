@@ -251,3 +251,23 @@ describe("a batch send that throws synchronously", () => {
     );
   }, 10_000);
 });
+
+describe("the Codegen duplicate-shape scan in extractSchema", () => {
+  const { AvoDeduplicator } = require("../AvoDeduplicator");
+
+  test("does not run when its warning cannot print (tracking, or logging off)", async () => {
+    const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1", disableBatchTimer: true });
+    const scan = jest.spyOn(AvoDeduplicator.prototype, "hasSeenEventParams");
+
+    inspector.enableLogging(true);
+    await inspector.trackSchemaFromEvent("E", { a: 1 }); // tracking passes shouldLogIfEnabled = false
+    inspector.enableLogging(false);
+    inspector.extractSchema({ a: 1 });
+    expect(scan).not.toHaveBeenCalled();
+
+    inspector.enableLogging(true);
+    inspector.extractSchema({ a: 1 });
+    expect(scan).toHaveBeenCalledTimes(1);
+    inspector.destroy();
+  });
+});
