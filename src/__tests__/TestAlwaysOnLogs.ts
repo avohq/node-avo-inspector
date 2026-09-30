@@ -190,6 +190,31 @@ describe("internal errors never print the caught error's text", () => {
     expect(lines.join("\n")).not.toContain(MARKER);
   });
 
+  test("the type is a fixed label: an error's own name is never printed", () => {
+    const renamed = new TypeError("hidden");
+    renamed.name = MARKER;
+    AvoLog.internal(renamed);
+
+    expect(lines).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (TypeError)",
+    ]);
+  });
+
+  test("a throwing name getter or proxy trap cannot break or leak into the line", () => {
+    const getter = new Error("hidden");
+    Object.defineProperty(getter, "name", { get() { throw new Error(MARKER); } });
+    const proxy = new Proxy({}, { getPrototypeOf() { throw new Error(MARKER); } });
+
+    expect(() => AvoLog.internal(getter)).not.toThrow();
+    now += 10_000;
+    expect(() => AvoLog.internal(proxy)).not.toThrow();
+
+    expect(lines).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (Error)",
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (unknown)",
+    ]);
+  });
+
   test("only the error's type is printed, whatever was thrown", () => {
     AvoLog.internal(new RangeError(MARKER));
     now += 10_000;

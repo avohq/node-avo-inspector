@@ -55,8 +55,34 @@ export class AvoLog {
   static internal(error: unknown): void {
     const total = AvoLog.due("internal", 1);
     if (total !== null) {
-      const type = error instanceof Error ? error.name : typeof error;
-      console.error(INTERNAL_ERROR_MESSAGE + AvoLog.more(total) + " (" + type + ")");
+      console.error(INTERNAL_ERROR_MESSAGE + AvoLog.more(total) + " (" + AvoLog.errorType(error) + ")");
+    }
+  }
+
+  // Built-in error classes, most specific first. Matched by prototype, never by reading the
+  // error's own `name`, which is writable and may be a getter.
+  private static readonly errorTypes: Array<[Function, string]> = [
+    [TypeError, "TypeError"],
+    [RangeError, "RangeError"],
+    [ReferenceError, "ReferenceError"],
+    [SyntaxError, "SyntaxError"],
+    [URIError, "URIError"],
+    [EvalError, "EvalError"],
+    [Error, "Error"],
+  ];
+
+  // A fixed label for what was thrown; it never reads a field of the value. A proxy whose
+  // traps throw yields "unknown".
+  private static errorType(error: unknown): string {
+    try {
+      for (const [type, label] of AvoLog.errorTypes) {
+        if (error instanceof type) {
+          return label;
+        }
+      }
+      return typeof error;
+    } catch (e) {
+      return "unknown";
     }
   }
 
