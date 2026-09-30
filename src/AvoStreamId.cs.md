@@ -8,8 +8,7 @@ Holds the stream id a caller passes to a track call, defaulting to empty.
 
 ## Tech stack
 
-- TypeScript, no dependencies.
-- Reads `AvoInspector.shouldLog` to gate its type warning.
+- TypeScript. Reads `AvoInspector.shouldLog` to gate its type warning, and uses `AvoLog` for the `':'` warning.
 
 ## Data
 
@@ -27,7 +26,13 @@ class AvoStreamId {
    - string -> itself;
    - number, bigint, boolean -> `String(value)` (e.g. `42` -> `"42"`, `false` -> `"false"`, `NaN` -> `"NaN"`);
    - anything else (object, array, symbol, function) -> `""`, and when `AvoInspector.shouldLog` is on, `console.warn("[Avo Inspector] Warning: streamId must be a string; ignoring a value of type <typeof>")`.
-2. If the stored value contains `":"`, `console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported")` (always, regardless of logging settings). The value is kept unchanged.
+2. If the stored value contains `":"`, call `AvoLog.streamIdColon()`: `console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported")` whatever the logging flag, rate-limited to one line per 10 s under the key `streamid-colon`; the next line after a window adds ` (N more in the last 10s)` for the calls it suppressed. The value is kept unchanged.
+
+## Examples
+
+<example>
+20 track calls with stream ids `"user:0"` … `"user:19"` within 10 s → one warning. The next such call after the window → `[Avo Inspector] Warning: streamId contains ':' which is not supported (19 more in the last 10s)`.
+</example>
 
 ## Non-functional requirements
 
