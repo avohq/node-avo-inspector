@@ -49,12 +49,12 @@ Process-wide state: a map from key to `{ start, suppressed }`: the start of the 
 | `dropped(count, reason)` | `count` | `console.warn("Avo Inspector: dropped <total> event(s) (<reason>) in the last 10s.")` |
 | `rejected(status)` | 1 | `console.warn("Avo Inspector: <total> batch(es) rejected with HTTP <status> in the last 10s.")` |
 | `failed(reason)` | 1 | `console.error("Avo Inspector: schema sending failed: <reason>.")`, plus ` (<total - 1> more in the last 10s)` when `total > 1` |
-| `internal(error)` | 1 | `console.error(INTERNAL_ERROR_MESSAGE + suffix, error)`, with the same suffix |
+| `internal(error)` | 1 | `console.error(INTERNAL_ERROR_MESSAGE + suffix + " (<type>)")`, with the same suffix; `<type>` is `error.name` for an `Error`, else `typeof error` |
 | `streamIdColon()` | 1 | `console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported" + suffix)`, with the same suffix |
 
 ## Non-functional requirements
 
-- **IMPORTANT:** never prints the API key, a response body or a property value; only counts, reasons, HTTP status codes and error text.
+- **IMPORTANT:** never prints the API key, a response body or a property value; only counts, reasons, HTTP status codes, send-failure reasons and an internal error's type. An internal error's message and stack are never printed, because a throwing getter or proxy can put a property value in them.
 - At most one line per key per 10 s.
 - Callers do not report sends abandoned by `destroy()`, or sampling drops.
 

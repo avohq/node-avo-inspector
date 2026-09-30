@@ -171,3 +171,33 @@ describe("the streamId ':' warning", () => {
     inspector.destroy();
   });
 });
+
+describe("internal errors never print the caught error's text", () => {
+  test("a property getter that throws with a value in its message: the value is not logged", async () => {
+    const inspector = staging();
+    const props = {
+      get email(): string {
+        throw new TypeError("cannot read " + MARKER);
+      },
+    };
+
+    expect(inspector.extractSchema(props)).toEqual([]);
+
+    const internal = matching(/something went wrong/);
+    expect(internal).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (TypeError)",
+    ]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+  });
+
+  test("only the error's type is printed, whatever was thrown", () => {
+    AvoLog.internal(new RangeError(MARKER));
+    now += 10_000;
+    AvoLog.internal(MARKER);
+
+    expect(lines).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (RangeError)",
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (string)",
+    ]);
+  });
+});

@@ -355,7 +355,7 @@ describe("an internal error while building the body", () => {
     });
 
     await expect(inspector.trackSchemaFromEvent("E", { a: 1 })).rejects.toBe(internalError);
-    expect(console.error).toHaveBeenCalledWith(internalError, expect.any(Error));
+    expect(console.error).toHaveBeenCalledWith(internalError + " (Error)");
     expect((inspector as any).batchQueue.length).toBe(0);
   });
 });

@@ -247,8 +247,7 @@ describe("a batch send that throws synchronously", () => {
     expect(results.every((schema) => schema.length === 1)).toBe(true);
     expect(Date.now() - started).toBeLessThan(1000);
     expect(console.error).toHaveBeenCalledWith(
-      "Avo Inspector: something went wrong. Please report to support@avo.app.",
-      expect.objectContaining({ message: "boom" })
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (Error)"
     );
   }, 10_000);
 });

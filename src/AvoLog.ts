@@ -48,11 +48,15 @@ export class AvoLog {
     }
   }
 
-  /** An internal error; the error object is logged with it. */
+  /**
+   * An internal error. Only its type is printed: the error may come from reading a property
+   * (a throwing getter or proxy), so its message or stack can carry a property value.
+   */
   static internal(error: unknown): void {
     const total = AvoLog.due("internal", 1);
     if (total !== null) {
-      console.error(INTERNAL_ERROR_MESSAGE + AvoLog.more(total), error);
+      const type = error instanceof Error ? error.name : typeof error;
+      console.error(INTERNAL_ERROR_MESSAGE + AvoLog.more(total) + " (" + type + ")");
     }
   }
 

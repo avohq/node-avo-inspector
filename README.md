@@ -192,7 +192,7 @@ Some lines are printed whatever the logging flag, on stderr, because they report
 - `Avo Inspector: dropped N event(s) (queue full) in the last 10s.` or `(send backlog full)`: events dropped because the buffer (`maxQueueSize`) or the 10,000-event send backlog is full;
 - `Avo Inspector: N batch(es) rejected with HTTP <status> in the last 10s.`: the Inspector API answered with a status other than 200 (only the status is printed);
 - `Avo Inspector: schema sending failed: Request failed.` or `Request timed out.`: a batch could not be sent;
-- `Avo Inspector: something went wrong. Please report to support@avo.app.`: an internal error.
+- `Avo Inspector: something went wrong. Please report to support@avo.app. (<error type>)`: an internal error. Only the error's type (for example `TypeError`) is printed, never its message, which could contain a property value.
 
 Each kind prints at most one line per 10 seconds (per reason or status): the first occurrence prints at once, and later ones are counted and reported with the next line, for example `(12 more in the last 10s)`. Sends abandoned by `destroy()` and events dropped by sampling are not reported.
 
