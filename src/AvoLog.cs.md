@@ -16,7 +16,7 @@ Always-on, rate-limited log lines for lost data and failed sends: dropped events
 ```ts
 export const INTERNAL_ERROR_MESSAGE = "Avo Inspector: something went wrong. Please report to support@avo.app."; // @internal
 export const MISSING_EVENT_NAME = "Missing Event Name"; // the name sent for a track call with a missing event name
-export type DropReason = "queue full" | "send backlog full";
+export type DropReason = "queue full" | "send backlog full" | "internal error";
 class AvoLog {
   static now: () => number;              // monotonic milliseconds (process.hrtime); overridable in tests
   static dropped(count: number, reason: DropReason): void;
@@ -34,7 +34,7 @@ Process-wide state: a map from key to `{ start, suppressed }`: the start of the 
 
 ## Users and permissions
 
-- Internal; called by `AvoBatchQueue` (drops, synchronous dispatch throws), `AvoInspector` (non-200, send failures, internal errors, track calls with a missing event name) and `AvoStreamId` (a stream id containing `':'`).
+- Internal; called by `AvoBatchQueue` (drops, and a dispatch that throws or rejects: `internal` plus `dropped` with reason `internal error`), `AvoInspector` (non-200, send failures, internal errors, track calls with a missing event name) and `AvoStreamId` (a stream id containing `':'`).
 
 ## Functional requirements
 

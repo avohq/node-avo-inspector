@@ -122,15 +122,21 @@ export class AvoBatchQueue<T> {
         batch.settle(outcome);
         this.startSends();
       };
+      // A dispatch that throws or rejects is an internal error: its events are lost, so both
+      // are reported. The slot is still freed and the batch still settles.
+      const failedInternally = (err: unknown) => {
+        AvoLog.internal(err);
+        AvoLog.dropped(batch.events.length, "internal error");
+        done(this.dropped);
+      };
       let sent: Promise<T>;
       try {
         sent = this.dispatch(batch.events);
       } catch (err) {
-        // A dispatch that throws synchronously still frees its slot and settles its batch.
-        AvoLog.internal(err);
-        sent = Promise.resolve(this.dropped);
+        // Settled asynchronously, like any other dispatch outcome.
+        sent = Promise.reject(err);
       }
-      sent.then(done, () => done(this.dropped));
+      sent.then(done, failedInternally);
     }
   }
 

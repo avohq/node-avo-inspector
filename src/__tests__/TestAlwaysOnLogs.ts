@@ -287,3 +287,34 @@ describe("a missing event name", () => {
     inspector.destroy();
   });
 });
+
+describe("a batch dispatch that fails internally", () => {
+  const internal = "Avo Inspector: something went wrong. Please report to support@avo.app.";
+
+  test("a dispatch that throws logs the internal error and the dropped events", async () => {
+    const inspector = staging({ batchSize: 2 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockImplementation(() => {
+      throw new Error("boom");
+    });
+
+    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent("E2", {});
+    await inspector.flush();
+
+    expect(matching(/something went wrong/)).toEqual([expect.stringContaining(internal)]);
+    expect(matching(/internal error/)).toEqual(["Avo Inspector: dropped 2 event(s) (internal error) in the last 10s."]);
+    inspector.destroy();
+  });
+
+  test("a dispatch that rejects logs the internal error and the dropped events", async () => {
+    const inspector = staging({ batchSize: 3 });
+    jest.spyOn(inspector as any, "sendBatch").mockImplementation(() => Promise.reject(new Error("boom")));
+
+    for (let i = 0; i < 3; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    await inspector.flush();
+
+    expect(matching(/something went wrong/)).toEqual([expect.stringContaining(internal)]);
+    expect(matching(/internal error/)).toEqual(["Avo Inspector: dropped 3 event(s) (internal error) in the last 10s."]);
+    inspector.destroy();
+  });
+});

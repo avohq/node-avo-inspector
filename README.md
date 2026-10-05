@@ -189,7 +189,7 @@ The logging flag is shared by every instance in the process, and each constructo
 
 Some lines are printed whatever the logging flag, on stderr, because they report lost data or failed sends:
 
-- `Avo Inspector: dropped N event(s) (queue full) in the last 10s.` or `(send backlog full)`: events dropped because the buffer (`maxQueueSize`) or the 10,000-event send backlog is full;
+- `Avo Inspector: dropped N event(s) (queue full) in the last 10s.` or `(send backlog full)`: events dropped because the buffer (`maxQueueSize`) or the 10,000-event send backlog is full; `(internal error)`: events in a batch whose send failed with an internal error (logged with the internal-error line below);
 - `Avo Inspector: N event(s) tracked without an event name in the last 10s, sent as "Missing Event Name".`: track calls whose event name is `null`, `undefined`, not a string, empty or whitespace-only. The event is still sent, under the name `"Missing Event Name"`, and the call resolves its schema as usual;
 - `Avo Inspector: N batch(es) rejected with HTTP <status> in the last 10s.`: the Inspector API answered with a status other than 200 (only the status is printed);
 - `Avo Inspector: schema sending failed: Request failed.` or `Request timed out.`: a batch could not be sent;

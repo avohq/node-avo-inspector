@@ -19,7 +19,7 @@ interface Window {
   suppressed: number;
 }
 
-export type DropReason = "queue full" | "send backlog full";
+export type DropReason = "queue full" | "send backlog full" | "internal error";
 
 export class AvoLog {
   // Milliseconds from a monotonic clock; overridable in tests.

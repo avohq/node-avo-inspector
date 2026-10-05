@@ -46,8 +46,8 @@ State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEve
 ### Sending
 
 - While `inFlight < MAX_IN_FLIGHT_SENDS` and batches are waiting, shift the oldest batch, subtract it from `waitingEvents`, increment `inFlight`, and call `dispatch(events)`.
-- When a dispatch settles: decrement `inFlight`, settle the batch with the dispatch result (or `dropped` if it rejected), then start further sends.
-- **IMPORTANT:** if `dispatch` throws synchronously, log it with `AvoLog.internal(error)` (always on, rate-limited) and treat it as a dispatch that settled with `dropped`: the slot is freed, the batch settles, and the next waiting batch starts.
+- When a dispatch settles: decrement `inFlight`, settle the batch with the dispatch result, then start further sends.
+- **IMPORTANT:** if `dispatch` throws synchronously or rejects, report it with `AvoLog.internal(error)` and `AvoLog.dropped(<batch size>, "internal error")` (both always on, rate-limited), and settle the batch with `dropped` (asynchronously, also for a synchronous throw): the slot is freed, the batch settles, and the next waiting batch starts.
 - Batches are dispatched in the order they were formed.
 
 ### Flush timer
@@ -79,5 +79,5 @@ maxQueueSize 2, batchSize 5, enqueue a, b, c → buffer is [b, c]; `Avo Inspecto
 clear() with 2 batches waiting → both promises resolve with `dropped`; nothing further is dispatched.
 </example>
 <example>
-batchSize 1, a dispatch that throws synchronously for the first 4 batches → each of those settles with `dropped` and logs the internal error; batches 5 onward are dispatched normally (no slot is lost).
+batchSize 1, a dispatch that throws synchronously for the first 4 batches → each of those settles with `dropped`, and the internal error and `dropped 1 event(s) (internal error)` are logged (rate-limited: one line each per 10 s); batches 5 onward are dispatched normally (no slot is lost).
 </example>
