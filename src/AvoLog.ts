@@ -10,6 +10,9 @@ const WINDOW_MS = 10_000;
 export const INTERNAL_ERROR_MESSAGE =
   "Avo Inspector: something went wrong. Please report to support@avo.app.";
 
+/** The event name sent for a track call whose event name is missing. */
+export const MISSING_EVENT_NAME = "Missing Event Name";
+
 // The start of a key's current window, and what was counted in it without being printed.
 interface Window {
   start: number;
@@ -85,6 +88,16 @@ export class AvoLog {
       return typeof error;
     } catch (e) {
       return "unknown";
+    }
+  }
+
+  /** A track call without a usable event name, sent as MISSING_EVENT_NAME. */
+  static missingEventName(): void {
+    const total = AvoLog.due("missing-event-name", 1);
+    if (total !== null) {
+      console.warn(
+        `Avo Inspector: ${total} event(s) tracked without an event name in the last 10s, sent as "${MISSING_EVENT_NAME}".`
+      );
     }
   }
 

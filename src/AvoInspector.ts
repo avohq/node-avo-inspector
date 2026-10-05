@@ -18,7 +18,7 @@ import {
   PropertyValidationResult,
 } from "./eventSpec/AvoEventSpecFetchTypes";
 import { VERSION } from "./AvoInspectorVersion";
-import { AvoLog, INTERNAL_ERROR_MESSAGE } from "./AvoLog";
+import { AvoLog, INTERNAL_ERROR_MESSAGE, MISSING_EVENT_NAME } from "./AvoLog";
 
 /** @internal Re-exported for callers that import it from here; not part of the public API. */
 export { INTERNAL_ERROR_MESSAGE };
@@ -471,6 +471,12 @@ export class AvoInspector {
     try {
       if (this.destroyed) {
         return Promise.resolve([]);
+      }
+      // A missing event name (null, undefined, non-string, empty or whitespace-only) is
+      // still reported to Inspector, under a placeholder name. A valid name is kept as is.
+      if (typeof eventName !== "string" || eventName.trim().length === 0) {
+        AvoLog.missingEventName();
+        eventName = MISSING_EVENT_NAME;
       }
       const avoStreamId = new AvoStreamId(streamId);
       const anonymousId = avoStreamId.streamId || this.generatedAnonymousId;

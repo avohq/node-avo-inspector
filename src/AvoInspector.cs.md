@@ -81,6 +81,7 @@ Called by application code (manual tracking) and by Avo Codegen (`_avoFunctionTr
 Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `eventHash`).
 
 1. After `destroy()`: resolves `[]` and does nothing.
+1a. **Missing event name:** an `eventName` that is `null`, `undefined`, not a string, empty or whitespace-only is replaced by `MISSING_EVENT_NAME` (`"Missing Event Name"`, from `AvoLog`), and `AvoLog.missingEventName()` reports it (always on, rate-limited). The event then goes through every step below like any other: deduplication, extraction, sampling, validation and batching. The call resolves its schema and never throws, in every env. A valid name is used unchanged, surrounding whitespace included.
 2. Anonymous id: `streamId` normalized through `AvoStreamId`, else the generated anonymous id (empty).
 3. Gateway options (`resolveTrackOptions`): each field is trimmed; a non-string or blank value is absent, and non-object `options` counts as none. The event is gateway-scoped when any field is present. `appVersion` is `originAppVersion` if present, else `null` when `originHint` is present, else the instance version. `outputReference` / `originHint` are included only when present.
 4. Deduplication: a gateway-scoped event is always registered and never passed to the deduplicator. Otherwise `avoDeduplicator.shouldRegisterEvent(...)`; a duplicate logs "Deduplicated event" and resolves `[]`.

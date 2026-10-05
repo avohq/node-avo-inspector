@@ -15,6 +15,7 @@ Always-on, rate-limited log lines for lost data and failed sends: dropped events
 
 ```ts
 export const INTERNAL_ERROR_MESSAGE = "Avo Inspector: something went wrong. Please report to support@avo.app."; // @internal
+export const MISSING_EVENT_NAME = "Missing Event Name"; // the name sent for a track call with a missing event name
 export type DropReason = "queue full" | "send backlog full";
 class AvoLog {
   static now: () => number;              // monotonic milliseconds (process.hrtime); overridable in tests
@@ -24,15 +25,16 @@ class AvoLog {
   static internal(error: unknown): void;
   static errorType(error: unknown): string; // @internal: the fixed label, also used by other log lines that report a caught error
   static streamIdColon(): void;
+  static missingEventName(): void;
   static _resetForTesting(): void;       // @internal
 }
 ```
 
-Process-wide state: a map from key to `{ start, suppressed }`: the start of the key's current 10 s window, and the amount counted in it without being printed. Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`, `streamid-colon`.
+Process-wide state: a map from key to `{ start, suppressed }`: the start of the key's current 10 s window, and the amount counted in it without being printed. Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`, `streamid-colon`, `missing-event-name`.
 
 ## Users and permissions
 
-- Internal; called by `AvoBatchQueue` (drops, synchronous dispatch throws), `AvoInspector` (non-200, send failures, internal errors) and `AvoStreamId` (a stream id containing `':'`).
+- Internal; called by `AvoBatchQueue` (drops, synchronous dispatch throws), `AvoInspector` (non-200, send failures, internal errors, track calls with a missing event name) and `AvoStreamId` (a stream id containing `':'`).
 
 ## Functional requirements
 
@@ -52,6 +54,7 @@ Process-wide state: a map from key to `{ start, suppressed }`: the start of the 
 | `failed(reason)` | 1 | `console.error("Avo Inspector: schema sending failed: <reason>.")`, plus ` (<total - 1> more in the last 10s)` when `total > 1` |
 | `internal(error)` | 1 | `console.error(INTERNAL_ERROR_MESSAGE + suffix + " (<type>)")`, with the same suffix; `<type>` is a fixed label: the most specific built-in error class the value is an instance of (`TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `URIError`, `EvalError`, `Error`), else `typeof error`, or `unknown` if the check throws (a proxy trap). The value's own `name` or any other field is never read |
 | `streamIdColon()` | 1 | `console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported" + suffix)`, with the same suffix |
+| `missingEventName()` | 1 | `console.warn('Avo Inspector: <total> event(s) tracked without an event name in the last 10s, sent as "Missing Event Name".')` |
 
 ## Non-functional requirements
 

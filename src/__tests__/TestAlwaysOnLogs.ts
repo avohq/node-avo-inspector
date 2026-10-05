@@ -226,3 +226,64 @@ describe("internal errors never print the caught error's text", () => {
     ]);
   });
 });
+
+describe("a missing event name", () => {
+  // Captures every batch the dev instance sends.
+  const dev = () => {
+    const inspector = new AvoInspector({ apiKey: API_KEY, env: "dev", version: "1.0.0" });
+    const sent: InspectorBody[] = [];
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockImplementation((batch: Array<InspectorBody>) => { sent.push(...batch); return Promise.resolve(200); });
+    return { inspector, sent };
+  };
+  const line = 'Avo Inspector: 1 event(s) tracked without an event name in the last 10s, sent as "Missing Event Name".';
+  const schema = [{ propertyName: "a", propertyType: "int" }];
+
+  test.each([
+    ["null", null], ["undefined", undefined], ["a number", 5], ["an object", {}], ["empty", ""], ["whitespace-only", "  "],
+  ])("a %s event name is sent as \"Missing Event Name\", with one line", async (_label, eventName) => {
+    const { inspector, sent } = dev();
+
+    await expect(inspector.trackSchemaFromEvent(eventName as any, { a: 1 })).resolves.toEqual(schema);
+
+    expect(sent.map((event) => [event.eventName, event.eventProperties])).toEqual([["Missing Event Name", schema]]);
+    expect(matching(/without an event name/)).toEqual([line]);
+    inspector.destroy();
+  });
+
+  test("the Codegen path sends it as \"Missing Event Name\" too", async () => {
+    const { inspector, sent } = dev();
+
+    // @ts-ignore
+    await expect(inspector._avoFunctionTrackSchemaFromEvent(undefined, { a: 1 }, "id", "hash")).resolves.toEqual(schema);
+
+    expect(sent.map((event) => [event.eventName, event.avoFunction, event.eventId])).toEqual([["Missing Event Name", true, "id"]]);
+    expect(matching(/without an event name/)).toEqual([line]);
+    inspector.destroy();
+  });
+
+  test("the line is rate-limited and reports the suppressed count", async () => {
+    const { inspector, sent } = dev();
+
+    for (let i = 0; i < 3; i++) await inspector.trackSchemaFromEvent("", { i });
+    now += 10_000;
+    await inspector.trackSchemaFromEvent(null as any, { i: 3 });
+
+    expect(sent).toHaveLength(4);
+    expect(matching(/without an event name/)).toEqual([
+      line,
+      'Avo Inspector: 3 event(s) tracked without an event name in the last 10s, sent as "Missing Event Name".',
+    ]);
+    inspector.destroy();
+  });
+
+  test("a valid name is sent unchanged, surrounding whitespace included, with no line", async () => {
+    const { inspector, sent } = dev();
+
+    await inspector.trackSchemaFromEvent("  Signed Up ", { a: 1 });
+
+    expect(sent.map((event) => event.eventName)).toEqual(["  Signed Up "]);
+    expect(matching(/without an event name/)).toEqual([]);
+    inspector.destroy();
+  });
+});
