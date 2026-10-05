@@ -38,6 +38,9 @@ export class AvoBatchQueue<T> {
   private waitingEvents = 0;
   private inFlight = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  // Settled with the outcome of the batch that takes the current buffer, whichever drain
+  // swaps it out (or `dropped` if clear() discards it). Created on demand.
+  private bufferOutcome: { promise: Promise<T>; settle: (outcome: T | Promise<T>) => void } | null = null;
 
   /**
    * @param dispatch sends one batch; must not reject.
@@ -81,6 +84,22 @@ export class AvoBatchQueue<T> {
     return null;
   }
 
+  /**
+   * The outcome of the batch that will carry the events buffered now, whichever drain (size
+   * trigger, timer, flush) swaps them out. Null when the buffer is empty.
+   */
+  bufferedBatchOutcome(): Promise<T> | null {
+    if (this.buffer.length === 0) {
+      return null;
+    }
+    if (this.bufferOutcome === null) {
+      let settle!: (outcome: T | Promise<T>) => void;
+      const promise = new Promise<T>((resolve) => (settle = resolve));
+      this.bufferOutcome = { promise, settle };
+    }
+    return this.bufferOutcome.promise;
+  }
+
   /** Swaps out every buffered event and dispatches them as one batch. */
   drain(): Promise<T> | null {
     this.clearTimer();
@@ -92,6 +111,10 @@ export class AvoBatchQueue<T> {
     const outcome = new Promise<T>((settle) => {
       this.waiting.push({ events: batch, settle });
     });
+    if (this.bufferOutcome !== null) {
+      this.bufferOutcome.settle(outcome);
+      this.bufferOutcome = null;
+    }
     this.waitingEvents += batch.length;
     this.startSends();
     const excess = this.waitingEvents - MAX_WAITING_EVENTS;
@@ -106,6 +129,10 @@ export class AvoBatchQueue<T> {
   clear(): void {
     this.clearTimer();
     this.buffer = [];
+    if (this.bufferOutcome !== null) {
+      this.bufferOutcome.settle(this.dropped);
+      this.bufferOutcome = null;
+    }
     const discarded = this.waiting;
     this.waiting = [];
     this.waitingEvents = 0;

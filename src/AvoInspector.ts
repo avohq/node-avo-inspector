@@ -105,18 +105,18 @@ export class AvoInspector {
   // Pending entries that are event spec validations, keyed by their pending promise.
   private validations: Map<Promise<unknown>, { flushRequested: boolean }> = new Map();
   // One drain for every flush-marked validation that settles in the same event-loop turn.
-  private drainScheduled: Promise<SendOutcome | null> | null = null;
+  private drainScheduled = false;
 
-  private drainThisTurn(): Promise<SendOutcome | null> {
-    if (this.drainScheduled === null) {
-      this.drainScheduled = new Promise((resolve) => {
-        setImmediate(() => {
-          this.drainScheduled = null;
-          resolve(this.destroyed ? null : this.batchQueue.drain());
-        });
+  private drainThisTurn(): void {
+    if (!this.drainScheduled) {
+      this.drainScheduled = true;
+      setImmediate(() => {
+        this.drainScheduled = false;
+        if (!this.destroyed) {
+          this.batchQueue.drain();
+        }
       });
     }
-    return this.drainScheduled;
   }
 
   // Mirrors `promise`, but resolves `onDestroy` instead if destroy() runs first.
@@ -627,10 +627,15 @@ export class AvoInspector {
           return { result: null, send: null };
         }
         const enqueued = this.enqueue(body, eventSchema);
-        return {
-          result: enqueued.result,
-          send: enqueued.send || (validation.flushRequested ? this.drainThisTurn() : null),
-        };
+        let send = enqueued.send;
+        if (send === null && validation.flushRequested) {
+          // flush() waits for the batch that carries this event. Another drain (a size
+          // trigger or the timer) may swap it out before the scheduled one runs, so the
+          // wait follows the buffered batch, not this particular drain.
+          send = this.batchQueue.bufferedBatchOutcome();
+          this.drainThisTurn();
+        }
+        return { result: enqueued.result, send };
       });
 
     // In flight until the event is queued and, if that triggered a send, until it settles.

@@ -224,6 +224,38 @@ describe("flush() during event spec validation", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(batches[0]).toHaveLength(20);
   });
+
+  test("waits for a flush-marked event's batch even when another drain sent it first", async () => {
+    jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
+    const specCallbacks: { [name: string]: (result: null) => void } = {};
+    jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((...args: any[]) => {
+      specCallbacks[args[0]] = args[2];
+    });
+    const inspector = staging({ batchSize: 2 });
+    const { send, batches, releaseAll } = holdSends(inspector);
+
+    const a = inspector.trackSchemaFromEvent("A", {});
+    let flushed = false;
+    const flushing = inspector.flush().then(() => { flushed = true; });
+    // B starts after flush(), so it is not flush-marked.
+    const b = inspector.trackSchemaFromEvent("B", {});
+    // Both validations settle in the same turn: A queues (flush-marked, no size trigger), then
+    // B reaches batchSize 2 and its size-triggered drain sends A and B before A's own drain.
+    specCallbacks["A"](null);
+    specCallbacks["B"](null);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(batches[0].map((event: any) => event.eventName)).toEqual(["A", "B"]);
+    // That batch is still in flight, so flush() must not have resolved.
+    expect(flushed).toBe(false);
+
+    await releaseAll();
+    await flushing;
+    expect(flushed).toBe(true);
+    await Promise.all([a, b]);
+    inspector.destroy();
+  });
 });
 
 describe("a batch send that throws synchronously", () => {

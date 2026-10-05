@@ -19,7 +19,7 @@ In-memory batching buffer for Inspector events: collects events, forms a batch o
 - `new AvoBatchQueue<T>(options, dispatch: (batch) => Promise<T> /* should not reject or throw */, dropped: T, track = identity)`.
 - Getters: `length` (unsent buffer), `waitingLength` (events waiting for a send slot), `hasScheduledFlush`.
 
-State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEvents` count, `inFlight` count, optional flush timer.
+State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEvents` count, `inFlight` count, optional flush timer, and an optional `bufferOutcome` (the promise handed out by `bufferedBatchOutcome()` for the current buffer).
 
 ## Users and permissions
 
@@ -34,11 +34,15 @@ State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEve
 3. If the buffer now holds `>= batchSize` events, return `drain()`.
 4. Otherwise schedule the flush timer (if not already scheduled) and return `null`.
 
+### `bufferedBatchOutcome()`
+
+- Empty buffer → `null`. Otherwise returns one promise per buffer generation (every caller for the same buffer gets the same promise): it settles with the outcome of the batch that swaps that buffer out, **whichever drain does it** (size trigger, timer, or an explicit `drain()`), or with `dropped` if `clear()` discards the buffer.
+
 ### `drain()`
 
 1. Cancel the flush timer.
 2. If the buffer is empty, return `null`.
-3. Swap the buffer out as one batch (atomic on the event loop), append it to `waiting` with a fresh outcome promise, and add its size to `waitingEvents`.
+3. Swap the buffer out as one batch (atomic on the event loop), append it to `waiting` with a fresh outcome promise, and add its size to `waitingEvents`. If `bufferedBatchOutcome()` handed out a promise for this buffer, settle it with this outcome and forget it.
 4. Start sends (see below).
 5. If `waitingEvents > MAX_WAITING_EVENTS`, drop the excess oldest waiting events (oldest batch first, trimming a batch partially if needed); every batch emptied this way settles with `dropped`. Report them with `AvoLog.dropped(count, "send backlog full")`.
 6. Return `track(outcome)`. **IMPORTANT:** `track` is called as soon as the batch is swapped out, before it is sent, so the owner can treat waiting batches as in flight.
@@ -58,7 +62,7 @@ State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEve
 
 ### `clear()`
 
-- Cancel the timer, discard the buffer, and settle every waiting batch with `dropped` without sending. In-flight dispatches are not affected and settle normally.
+- Cancel the timer, discard the buffer (settling its `bufferedBatchOutcome()` promise, if any, with `dropped`), and settle every waiting batch with `dropped` without sending. In-flight dispatches are not affected and settle normally.
 
 ## Non-functional requirements
 
