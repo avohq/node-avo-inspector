@@ -151,4 +151,4 @@ Terminates the instance: marks it destroyed; settles every track waiting on a sp
 - An instance with buffered or pending work is strongly referenced by static state until its work finishes or it is destroyed.
 - Send failures never reject the track promise; only synchronous internal errors or body-building errors do. Validation failures degrade to an unvalidated send.
 - Logging state is global across instances; constructing any instance resets it.
-- **IMPORTANT:** no log line contains a property value or the API key. Because the flag is global, a prod instance can log once any dev instance turns logging on, so logs show only event names, schema (property names and types), counts, statuses and error messages.
+- **IMPORTANT:** no log line contains a property value or the API key. Because the flag is global, a prod instance can log once any dev instance turns logging on, so logs show only event names, schema (property names and types), counts, statuses and error types (never a caught error's message). Event and property names are printed as given, so they must not carry personal data.
