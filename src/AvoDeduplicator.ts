@@ -1,4 +1,4 @@
-import { deepEquals } from "./utils";
+import { deepEquals, monotonicNowMs } from "./utils";
 
 // A registration, in time order, so expired ones are popped from the front. `generation`
 // identifies it among registrations of the same key.
@@ -18,7 +18,7 @@ export class AvoDeduplicator {
   private msToConsiderOld = 500;
   // Milliseconds from a monotonic clock: the log must stay in time order, and a wall clock
   // stepping back (NTP, manual change) would stall expiry. Replaceable in tests.
-  private now: () => number = () => Number(process.hrtime.bigint()) / 1e6;
+  private now: () => number = monotonicNowMs;
   // The generation of each key's latest registration. A key's params always belong to its
   // latest registration, so only that registration's expiry may delete them.
   private avoFunctionsLatest: { [key: string]: number } = {};

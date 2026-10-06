@@ -1,3 +1,5 @@
+import { monotonicNowMs } from "./utils";
+
 // Lines about lost data and failed sends, written to stderr whatever the logging flag. Each
 // kind (per drop reason, HTTP status or failure text) prints at most one line per 10 s: the
 // first occurrence prints at once, later ones in the window are counted and reported with
@@ -5,7 +7,8 @@
 
 const WINDOW_MS = 10_000;
 
-// No imports: the jest setup loads this module before test files install their mocks.
+// Imports only utils, which imports nothing: the jest setup loads this module before test
+// files install their mocks, so it must not pull in the rest of the SDK.
 /** @internal The track rejection reason and internal-error log text (SPEC §4.2 step 5). */
 export const INTERNAL_ERROR_MESSAGE =
   "Avo Inspector: something went wrong. Please report to support@avo.app.";
@@ -23,7 +26,7 @@ export type DropReason = "queue full" | "send backlog full" | "internal error";
 
 export class AvoLog {
   // Milliseconds from a monotonic clock; overridable in tests.
-  static now: () => number = () => Number(process.hrtime.bigint()) / 1e6;
+  static now: () => number = monotonicNowMs;
 
   private static windows: Map<string, Window> = new Map();
 

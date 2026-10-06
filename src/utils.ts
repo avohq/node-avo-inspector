@@ -82,4 +82,11 @@ const hasHeaderControlChar = (value: string): boolean =>
 /** Node sends header values as Latin-1 and throws synchronously on anything above U+00FF. */
 const hasNonLatin1Char = (value: string): boolean => /[^\u0000-\u00FF]/.test(value);
 
-export { isValueEmpty, deepEquals, normalizeOption, hasHeaderControlChar, hasNonLatin1Char };
+/**
+ * Milliseconds from a monotonic clock (process.hrtime): only differences are meaningful, and
+ * they never jump with wall-clock changes. Shared by the deduplicator, AvoLog and the exit
+ * drain deadline.
+ */
+const monotonicNowMs = (): number => Number(process.hrtime.bigint()) / 1e6;
+
+export { monotonicNowMs, isValueEmpty, deepEquals, normalizeOption, hasHeaderControlChar, hasNonLatin1Char };

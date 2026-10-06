@@ -9,6 +9,7 @@ Small shared helpers: blank-string check, structural deep equality used by the d
 ## Data
 
 ```ts
+monotonicNowMs(): number
 isValueEmpty(value: string | null | undefined): boolean
 deepEquals(x: any, y: any, comparing?: Map<object, Set<object>>): boolean
 normalizeOption(value: unknown): string | undefined
@@ -17,6 +18,10 @@ hasNonLatin1Char(value: string): boolean
 ```
 
 ## Functional requirements
+
+### monotonicNowMs
+
+- Milliseconds from `process.hrtime.bigint()`: monotonic, so only differences are meaningful and wall-clock steps never affect them. The one clock for the deduplicator, `AvoLog` and the exit drain deadline.
 
 ### isValueEmpty
 

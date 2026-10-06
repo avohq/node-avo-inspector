@@ -19,7 +19,7 @@ import {
 } from "./eventSpec/AvoEventSpecFetchTypes";
 import { VERSION } from "./AvoInspectorVersion";
 import { AvoLog, INTERNAL_ERROR_MESSAGE, MISSING_EVENT_NAME } from "./AvoLog";
-import { hasHeaderControlChar, hasNonLatin1Char, isValueEmpty, normalizeOption } from "./utils";
+import { hasHeaderControlChar, hasNonLatin1Char, isValueEmpty, monotonicNowMs, normalizeOption } from "./utils";
 
 const libVersion = VERSION;
 
@@ -167,9 +167,9 @@ export class AvoInspector {
       return;
     }
     if (AvoInspector.exitDeadline === null) {
-      AvoInspector.exitDeadline = Date.now() + DEFAULT_FLUSH_TIMEOUT_MS;
+      AvoInspector.exitDeadline = monotonicNowMs() + DEFAULT_FLUSH_TIMEOUT_MS;
     }
-    const remaining = AvoInspector.exitDeadline - Date.now();
+    const remaining = AvoInspector.exitDeadline - monotonicNowMs();
     if (remaining <= 0) {
       // Out of time: let the process exit; what is still unsent is dropped.
       return;

@@ -9,7 +9,7 @@ Always-on, rate-limited log lines for lost data and failed sends: dropped events
 
 ## Tech stack
 
-- TypeScript on Node.js; `console.warn` / `console.error` (stderr). No imports, so it can be loaded before anything else (the jest setup resets it per test).
+- TypeScript on Node.js; `console.warn` / `console.error` (stderr). Imports only `monotonicNowMs` from `utils` (which imports nothing), so it can be loaded before the rest of the SDK (the jest setup resets it per test).
 
 ## Data
 
@@ -18,7 +18,7 @@ export const INTERNAL_ERROR_MESSAGE = "Avo Inspector: something went wrong. Plea
 export const MISSING_EVENT_NAME = "Missing Event Name"; // the name sent for a track call with a missing event name
 export type DropReason = "queue full" | "send backlog full" | "internal error";
 class AvoLog {
-  static now: () => number;              // monotonic milliseconds (process.hrtime); overridable in tests
+  static now: () => number;              // utils.monotonicNowMs by default; overridable in tests
   static dropped(count: number, reason: DropReason): void;
   static rejected(status: number): void;
   static failed(reason: string): void;

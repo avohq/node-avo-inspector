@@ -18,7 +18,7 @@ Suppresses the second report of the same observation when both Codegen (Avo Func
   - a latest map: `{ [key: string]: number }`, holding the `generation` of each key's latest registration.
 - `generation` is a per-instance counter, incremented on every registration.
 - `msToConsiderOld = 500` (ms).
-- **IMPORTANT:** registration times come from a monotonic clock in milliseconds (`process.hrtime.bigint()`), never the wall clock, so a clock step (NTP, manual change) cannot stall or hasten expiry. The clock is an internal `now` field, replaceable in tests. Event `createdAt` timestamps are unaffected; they stay wall-clock.
+- **IMPORTANT:** registration times come from the shared monotonic clock `utils.monotonicNowMs` (milliseconds from `process.hrtime.bigint()`), never the wall clock, so a clock step (NTP, manual change) cannot stall or hasten expiry. The clock is an internal `now` field, replaceable in tests. Event `createdAt` timestamps are unaffected; they stay wall-clock.
 
 <invariant>
 Every registration gets its own log entry, including registrations of the same source in the same millisecond.
