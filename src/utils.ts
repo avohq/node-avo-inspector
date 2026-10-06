@@ -3,12 +3,29 @@ const isValueEmpty = (value: string | null | undefined): boolean => {
   return value === null || value === undefined || value.trim().length == 0;
 };
 
+// The schema extraction limits: deepEquals expands no deeper and no more than this.
+const DEEP_EQUALS_MAX_DEPTH = 10;
+const DEEP_EQUALS_MAX_EXPANSIONS = 10_000;
+
 /**
- * Structural equality. `comparing` holds the object pairs already being compared further
- * up the recursion, so cyclic structures terminate: a pair met again is assumed equal
- * (its other properties are still compared where it was first met).
+ * Structural equality, within the schema extraction limits: objects and lists nested more
+ * than 10 levels deep, or past the 10,000th compared in one call, are treated as not equal
+ * (unless they are the same reference), so a huge payload cannot overflow the stack.
  */
-function deepEquals(x: any, y: any, comparing: Map<object, Set<object>> = new Map()) {
+function deepEquals(x: any, y: any): boolean {
+  return deepEqualsWithin(x, y, 0, new Map(), { expansions: 0 });
+}
+
+// `comparing` holds the object pairs already compared, so cyclic structures terminate: a
+// pair met again is assumed equal (its other properties are still compared where it was
+// first met).
+function deepEqualsWithin(
+  x: any,
+  y: any,
+  depth: number,
+  comparing: Map<object, Set<object>>,
+  budget: { expansions: number }
+): boolean {
 
   if (x === y) {
     return true;
@@ -27,6 +44,12 @@ function deepEquals(x: any, y: any, comparing: Map<object, Set<object>> = new Ma
   if (partners && partners.has(y)) {
     return true;
   }
+
+  if (depth >= DEEP_EQUALS_MAX_DEPTH || budget.expansions >= DEEP_EQUALS_MAX_EXPANSIONS) {
+    return false;
+  }
+  budget.expansions++;
+
   if (!partners) {
     partners = new Set();
     comparing.set(x, partners);
@@ -47,7 +70,7 @@ function deepEquals(x: any, y: any, comparing: Map<object, Set<object>> = new Ma
       return false;
     }
 
-    if (!deepEquals(x[p], y[p], comparing)) {
+    if (!deepEqualsWithin(x[p], y[p], depth + 1, comparing, budget)) {
       return false;
     }
   }

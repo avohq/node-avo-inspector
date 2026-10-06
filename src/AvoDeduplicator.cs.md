@@ -34,7 +34,7 @@ Every registration gets its own log entry, including registrations of the same s
 
 1. Expire old registrations (see Cleanup).
 2. Append a registration `{ time: now(), key, generation }` (monotonic ms) for the caller's source, record `generation` as the key's latest, and store `params` as that key's params in the source's params map (overwriting any previous params for the key).
-3. Look up the same key in the OTHER source's params map. It is a duplicate when params exist there and `deepEquals(params, otherParams)`.
+3. Look up the same key in the OTHER source's params map. It is a duplicate when params exist there and `deepEquals(params, otherParams)`. `deepEquals` treats params past the schema extraction limits (10 levels, 10,000 objects and lists) as not equal, so such a pair is never a duplicate.
 4. On a duplicate, delete the key's params from BOTH params maps (a pair is consumed once).
 5. Return `true` (send it) when no duplicate was found, `false` when it is a duplicate.
 

@@ -11,7 +11,7 @@ Small shared helpers: blank-string check, structural deep equality used by the d
 ```ts
 monotonicNowMs(): number
 isValueEmpty(value: string | null | undefined): boolean
-deepEquals(x: any, y: any, comparing?: Map<object, Set<object>>): boolean
+deepEquals(x: any, y: any): boolean
 normalizeOption(value: unknown): string | undefined
 hasHeaderControlChar(value: string): boolean
 hasNonLatin1Char(value: string): boolean
@@ -32,13 +32,14 @@ hasNonLatin1Char(value: string): boolean
 1. `x === y` -> true.
 2. Either side `null` or `typeof !== "object"` -> false (null-prototype objects are compared structurally).
 3. Different prototype (`Object.getPrototypeOf`) -> false.
-4. If the pair `(x, y)` is already recorded in `comparing` -> true (cycle cut); otherwise record it.
-5. For each own enumerable key of `x` (`Object.keys`):
+4. If the pair `(x, y)` was already compared in this call -> true (cycle cut).
+5. **Limits** (the schema extraction limits): if the pair is at depth 10 or more (the top-level pair is depth 0, each step into a property one more), or 10,000 pairs have already been expanded in this call -> false. Otherwise count this pair as expanded and record it.
+6. For each own enumerable key of `x` (`Object.keys`):
    - missing on `y` (`Object.prototype.hasOwnProperty.call`) -> false;
    - strictly equal values -> continue;
    - non-object `x[p]` -> false;
-   - otherwise recurse with the same `comparing`; unequal -> false.
-6. Any own key of `y` missing on `x` -> false. Else true.
+   - otherwise recurse one level deeper, with the same recorded pairs and expansion count; unequal -> false.
+7. Any own key of `y` missing on `x` -> false. Else true.
 
 ### normalizeOption
 
@@ -55,6 +56,7 @@ hasNonLatin1Char(value: string): boolean
 ## Non-functional requirements
 
 - `deepEquals` terminates on cyclic input and never calls methods on the compared objects.
+- Recursion is at most 10 levels deep and expands at most 10,000 pairs, so any payload compares in bounded time and stack, however deep or wide; payloads past the limits compare not equal (the same reference is still equal).
 - Objects with no own enumerable keys (e.g. two different `Date`s) compare equal.
 - Pure; no side effects.
 
