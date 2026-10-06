@@ -17,7 +17,7 @@ In-memory batching buffer for Inspector events: collects events, forms a batch o
 - Exported constants: `MAX_TIMER_MS = 2_147_483_647` (largest safe `setTimeout` delay), `MAX_IN_FLIGHT_SENDS = 4`, `MAX_WAITING_EVENTS = 10_000`.
 - `AvoBatchOptions { batchSize; batchFlushSeconds; maxQueueSize; disableBatchTimer }`.
 - `new AvoBatchQueue<T>(options, dispatch: (batch) => Promise<T> /* should not reject or throw */, dropped: T, track = identity)`.
-- Getters: `length` (unsent buffer), `waitingLength` (events waiting for a send slot), `hasScheduledFlush`.
+- Getters: `length` (unsent buffer), `waitingLength` (events waiting for a send slot), `inFlightEvents` (events in batches being sent), `hasScheduledFlush`.
 
 State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEvents` count, `inFlight` count, optional flush timer, and an optional `bufferOutcome` (the promise handed out by `bufferedBatchOutcome()` for the current buffer).
 

@@ -37,6 +37,7 @@ export class AvoBatchQueue<T> {
   private waiting: Array<WaitingBatch<T>> = [];
   private waitingEvents = 0;
   private inFlight = 0;
+  private inFlightEventCount = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   // Settled with the outcome of the batch that takes the current buffer, whichever drain
   // swaps it out (or `dropped` if clear() discards it). Created on demand.
@@ -62,6 +63,11 @@ export class AvoBatchQueue<T> {
   /** Events in batches waiting for a send slot (bounded by MAX_WAITING_EVENTS). */
   get waitingLength(): number {
     return this.waitingEvents;
+  }
+
+  /** Events in batches being sent. */
+  get inFlightEvents(): number {
+    return this.inFlightEventCount;
   }
 
   /**
@@ -144,8 +150,10 @@ export class AvoBatchQueue<T> {
       const batch = this.waiting.shift()!;
       this.waitingEvents -= batch.events.length;
       this.inFlight++;
+      this.inFlightEventCount += batch.events.length;
       const done = (outcome: T) => {
         this.inFlight--;
+        this.inFlightEventCount -= batch.events.length;
         batch.settle(outcome);
         this.startSends();
       };

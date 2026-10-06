@@ -35,7 +35,13 @@ interface Window {
   print: Printer;
 }
 
-export type DropReason = "queue full" | "send backlog full" | "internal error";
+export type DropReason =
+  | "queue full"
+  | "send backlog full"
+  | "internal error"
+  // At the real exit: events never sent, and events in sends that had not completed.
+  | "unsent at exit"
+  | "unconfirmed at exit";
 
 export class AvoLog {
   // Milliseconds from a monotonic clock; overridable in tests.
@@ -204,9 +210,14 @@ export class AvoLog {
 
   // The real exit (natural, or process.exit()): print everything still pending.
   private static onExit = (): void => {
-    AvoLog.exiting = true;
+    AvoLog.enterExit();
     AvoLog.flushPending();
   };
+
+  /** @internal From now on lines are written synchronously: the process is exiting. */
+  static enterExit(): void {
+    AvoLog.exiting = true;
+  }
 
   private static write(level: "warn" | "error", line: string): void {
     if (!AvoLog.exiting) {

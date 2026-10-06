@@ -49,7 +49,7 @@ beforeEach(() => {
 });
 
 // Runs `script` in a child Node process with the compiled SDK as `AvoInspector`.
-function runChild(script: string, target: string = endpoint): Promise<{ elapsedMs: number; stdout: string }> {
+function runChild(script: string, target: string = endpoint): Promise<{ elapsedMs: number; stdout: string; stderr: string }> {
   const started = Date.now();
   const source =
     `const { AvoInspector } = require(${JSON.stringify(join(distDir, "index.js"))});\n` + script;
@@ -65,7 +65,8 @@ function runChild(script: string, target: string = endpoint): Promise<{ elapsedM
         },
         timeout: 30_000,
       },
-      (err, stdout) => (err ? reject(err) : resolve({ elapsedMs: Date.now() - started, stdout: String(stdout) }))
+      (err, stdout, stderr) =>
+        err ? reject(err) : resolve({ elapsedMs: Date.now() - started, stdout: String(stdout), stderr: String(stderr) })
     );
   });
 }
@@ -150,6 +151,90 @@ describe("exit while a spec fetch hangs", () => {
     expect(elapsedMs).toBeGreaterThan(9_000);
     expect(elapsedMs).toBeLessThan(15_000);
   }, 40_000);
+});
+
+describe("events still unsent at exit are logged", () => {
+  let slow: Server;
+  let slowEndpoint: string;
+  let closeSlowConnections: () => void;
+  let received = 0;
+  let answered = 0;
+
+  beforeAll(async () => {
+    // Answers spec fetches at once and each track request after 3 s.
+    slow = createServer((req, res) => {
+      if (answerSpecFetch(req, res)) {
+        return;
+      }
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const raw = Buffer.concat(chunks);
+        const events = JSON.parse((req.headers["content-encoding"] === "gzip" ? gunzipSync(raw) : raw).toString("utf8")).length;
+        received += events;
+        setTimeout(() => {
+          answered += events;
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ samplingRate: 1.0 }));
+        }, 3000);
+      });
+    });
+    closeSlowConnections = trackConnections(slow);
+    await new Promise<void>((resolve) => slow.listen(0, "127.0.0.1", resolve));
+    slowEndpoint = "http://127.0.0.1:" + (slow.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    closeSlowConnections();
+    await new Promise((resolve) => slow.close(resolve));
+  });
+
+  beforeEach(() => {
+    received = 0;
+    answered = 0;
+  });
+
+  const exitLines = (stderr: string) => stderr.split("\n").filter((line) => line.includes("at exit"));
+  const count = (lines: string[], reason: string) => {
+    const line = lines.find((l) => l.includes(`(${reason})`));
+    return line ? Number(line.match(/dropped (\d+) event/)![1]) : 0;
+  };
+
+  test("process.exit() with buffered events prints them as unsent at exit", async () => {
+    const { stderr } = await runChild(`
+      const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
+      // Held open while validating, so no idle point lets the exit drain send early.
+      setInterval(() => {}, 1000);
+      (async () => {
+        for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent("E" + i, { i });
+        process.exit(0);
+      })();
+    `, slowEndpoint);
+
+    expect(received).toBe(0);
+    expect(exitLines(stderr)).toEqual(["Avo Inspector: dropped 10 event(s) (unsent at exit) in the last 1s."]);
+  }, 40_000);
+
+  test("a natural exit past the deadline prints the unsent and the unconfirmed events", async () => {
+    // 3,000 events in 100 batches; 4 sends at a time, 3 s each: about 12 go out by the deadline.
+    const { stderr } = await runChild(`
+      const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
+      const hold = setInterval(() => {}, 1000);
+      const tracks = [];
+      for (let i = 0; i < 3000; i++) tracks.push(inspector.trackSchemaFromEvent("E" + i, { i }));
+      Promise.all(tracks).then(() => clearInterval(hold));
+    `, slowEndpoint);
+
+    const lines = exitLines(stderr);
+    const unsent = count(lines, "unsent at exit");
+    const unconfirmed = count(lines, "unconfirmed at exit");
+    expect(lines).toHaveLength(2);
+    expect(unconfirmed).toBeGreaterThan(0);
+    expect(unconfirmed).toBeLessThanOrEqual(4 * 30);
+    // Every event is accounted for: answered, in flight at exit, or never sent.
+    expect(answered + unconfirmed + unsent).toBe(3000);
+    expect(unsent).toBe(3000 - received);
+  }, 60_000);
 });
 
 describe("exit while an explicit long flush() runs", () => {
@@ -250,17 +335,19 @@ describe("exit hook registration", () => {
   });
 
   test("one listener serves every instance with work, and destroy() removes it", async () => {
-    const before = process.listenerCount("beforeExit");
+    const counts = () => ["beforeExit", "exit", "SIGTERM", "SIGINT"].map((name) => process.listenerCount(name));
+    const before = counts();
     const inspectors = Array.from({ length: 12 }, () =>
       new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30, disableBatchTimer: true })
     );
-    expect(process.listenerCount("beforeExit")).toBe(before);
+    expect(counts()).toEqual(before);
 
     await Promise.all(inspectors.map((inspector) => inspector.trackSchemaFromEvent("E", {})));
-    expect(process.listenerCount("beforeExit")).toBe(before + 1);
+    // One beforeExit drain and one exit report; never a signal handler.
+    expect(counts()).toEqual([before[0] + 1, before[1] + 1, before[2], before[3]]);
 
     inspectors.forEach((inspector) => inspector.destroy());
-    expect(process.listenerCount("beforeExit")).toBe(before);
+    expect(counts()).toEqual(before);
   });
 });
 

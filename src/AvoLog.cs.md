@@ -16,7 +16,7 @@ Always-on, rate-limited log lines for lost data and failed sends: dropped events
 ```ts
 export const INTERNAL_ERROR_MESSAGE = "Avo Inspector: something went wrong. Please report to support@avo.app."; // @internal
 export const MISSING_EVENT_NAME = "Missing Event Name"; // the name sent for a track call with a missing event name
-export type DropReason = "queue full" | "send backlog full" | "internal error";
+export type DropReason = "queue full" | "send backlog full" | "internal error" | "unsent at exit" | "unconfirmed at exit";
 class AvoLog {
   static now: () => number;              // utils.monotonicNowMs by default; overridable in tests
   static dropped(count: number, reason: DropReason): void;
@@ -27,6 +27,7 @@ class AvoLog {
   static streamIdColon(): void;
   static missingEventName(): void;
   static flushPending(onlyExpired?: boolean): void; // prints pending counts (see Lifecycle)
+  static enterExit(): void;              // @internal: from now on lines are written synchronously (the exit listeners call it)
   static _resetForTesting(): void;       // @internal
 }
 ```
@@ -35,7 +36,7 @@ Process-wide state: a map from key to `{ start, suppressed, print }`: the start 
 
 ## Users and permissions
 
-- Internal; called by `AvoBatchQueue` (drops, and a dispatch that throws or rejects: `internal` plus `dropped` with reason `internal error`), `AvoInspector` (non-200, send failures, internal errors, track calls with a missing event name) and `AvoStreamId` (a stream id containing `':'`).
+- Internal; called by `AvoBatchQueue` (drops, and a dispatch that throws or rejects: `internal` plus `dropped` with reason `internal error`), `AvoInspector` (non-200, send failures, internal errors, track calls with a missing event name, and at the real exit the events still unsent or unconfirmed: it calls `AvoLog.enterExit()` first so those lines are written synchronously) and `AvoStreamId` (a stream id containing `':'`).
 
 ## Functional requirements
 

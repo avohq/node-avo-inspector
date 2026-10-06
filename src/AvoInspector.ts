@@ -159,6 +159,7 @@ export class AvoInspector {
   // on signals; callers flush() there.
   private static instancesWithWork: Set<AvoInspector> = new Set();
   private static exitDrainArmed = false;
+  private static exitReportArmed = false;
   // One deadline for the whole exit, however often "beforeExit" fires during it. Cleared
   // once every instance has drained, in case the process carries on.
   private static exitDeadline: number | null = null;
@@ -166,6 +167,8 @@ export class AvoInspector {
   private static waitingValidations = 0;
   // Frees this instance's places among them; destroy() runs whatever is left.
   private releaseWaiting: Set<() => void> = new Set();
+  // Events whose validation has not finished: not yet queued.
+  private validating = 0;
   // When any instance last tracked an event (monotonic clock).
   private static lastTrackAt = -Infinity;
   // Deadlines of explicit flush() calls still running, by call.
@@ -213,6 +216,26 @@ export class AvoInspector {
     AvoInspector.armExitDrain();
   };
 
+  // At the real exit (natural, or process.exit(); signals do not emit it), reports what
+  // every instance with work still holds, synchronously: events never sent (buffered,
+  // waiting for a slot, or still being validated) and events in sends not yet completed.
+  private static reportOnExit = (): void => {
+    let unsent = 0;
+    let unconfirmed = 0;
+    AvoInspector.instancesWithWork.forEach((inspector) => {
+      unsent += inspector.batchQueue.length + inspector.batchQueue.waitingLength + inspector.validating;
+      unconfirmed += inspector.batchQueue.inFlightEvents;
+    });
+    AvoLog.enterExit();
+    if (unsent > 0) {
+      AvoLog.dropped(unsent, "unsent at exit");
+    }
+    if (unconfirmed > 0) {
+      AvoLog.dropped(unconfirmed, "unconfirmed at exit");
+    }
+    AvoLog.flushPending();
+  };
+
   private static armExitDrain(): void {
     if (!AvoInspector.exitDrainArmed) {
       process.once("beforeExit", AvoInspector.drainOnExit);
@@ -233,10 +256,16 @@ export class AvoInspector {
     if (hasWork) {
       AvoInspector.instancesWithWork.add(this);
       AvoInspector.armExitDrain();
+      if (!AvoInspector.exitReportArmed) {
+        process.on("exit", AvoInspector.reportOnExit);
+        AvoInspector.exitReportArmed = true;
+      }
     } else {
       AvoInspector.instancesWithWork.delete(this);
       if (AvoInspector.instancesWithWork.size === 0) {
         AvoInspector.disarmExitDrain();
+        process.removeListener("exit", AvoInspector.reportOnExit);
+        AvoInspector.exitReportArmed = false;
         AvoInspector.exitDeadline = null;
       }
     }
@@ -635,6 +664,7 @@ export class AvoInspector {
     // the event then goes out once it is queued, in the drain shared by every validation
     // that settles in the same event-loop turn, and flush() waits for that send.
     const validation = { flushRequested: false };
+    this.validating++;
     const outcome = this.untilDestroyed<ValidationResult | null>(
       this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId),
       null
@@ -668,6 +698,11 @@ export class AvoInspector {
           return { result: null, send: null };
         }
       });
+
+    const validated = () => {
+      this.validating--;
+    };
+    outcome.then(validated, validated);
 
     // In flight until the event is queued and, if that triggered a send, until it settles.
     const inFlight = outcome.then(({ send }) => (send ? send.then(() => undefined) : undefined));
