@@ -29,11 +29,13 @@ export class AvoEventSpecFetcher {
   private requests: Set<ClientRequest> = new Set();
 
   private static specEndpoint = "/trackingPlan/eventSpec";
-  // Budget per fetch, from the moment the shared agent assigns it a socket, and the only
-  // timeout. Counting from the request instead would expire fetches queued behind 8 slow
-  // ones before they were ever sent. The wait for a socket is bounded by the cap on
-  // validations waiting for a spec (AvoInspector).
+  // Budget per fetch, from the moment the shared agent assigns it a socket. Counting from
+  // the request instead would expire fetches queued behind 8 slow ones before they were
+  // ever sent.
   private static fetchTimeoutMs = 10_000;
+  // Budget for the wait before a socket is assigned. Without it, fetches queued behind 8
+  // hung ones would wait for every earlier deadline in turn.
+  private static socketWaitTimeoutMs = 10_000;
 
   /** `mockEndpoint`: a valid override URL (AvoNetworkCallsHandler.mockEndpoint), or null. */
   constructor(apiKey: string, mockEndpoint: string | null = null) {
@@ -113,10 +115,21 @@ export class AvoEventSpecFetcher {
     }
     const sent = req;
     this.requests.add(sent);
+    // `deadline` is first the wait for a socket, then the fetch's own budget; settling
+    // clears whichever is armed.
+    deadline = setTimeout(() => {
+      if (AvoInspector.shouldLog) {
+        console.error("Avo Inspector: [network] Spec fetch got no connection within " + AvoEventSpecFetcher.socketWaitTimeoutMs + "ms");
+      }
+      sent.destroy();
+      settle(null);
+    }, AvoEventSpecFetcher.socketWaitTimeoutMs);
+    deadline.unref();
     sent.once("socket", () => {
       if (settled) {
         return;
       }
+      clearTimeout(deadline);
       deadline = setTimeout(() => {
         if (AvoInspector.shouldLog) {
           console.error("Avo Inspector: [network] Spec fetch timed out after " + AvoEventSpecFetcher.fetchTimeoutMs + "ms");

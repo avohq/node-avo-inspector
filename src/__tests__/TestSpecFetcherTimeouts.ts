@@ -29,6 +29,7 @@ afterAll(async () => {
 afterEach(() => {
   jest.restoreAllMocks();
   (AvoEventSpecFetcher as any).fetchTimeoutMs = 10_000;
+  (AvoEventSpecFetcher as any).socketWaitTimeoutMs = 10_000;
 });
 
 describe("event spec fetch deadline", () => {
@@ -77,6 +78,31 @@ describe("event spec fetch deadline", () => {
     // sockets are freed, at the moment a deadline counted from the request would expire.
     expect(results.slice(0, 8)).toEqual(Array(8).fill(null));
     results.slice(8).forEach((result) => expect(result).toEqual(expect.objectContaining({ eventSpec: null })));
+  }, 15_000);
+
+  test("a fetch that waits too long for a socket is abandoned and settles null", async () => {
+    // 8 hung fetches hold every socket far longer than the wait allowed for a 9th.
+    (AvoEventSpecFetcher as any).fetchTimeoutMs = 60_000;
+    (AvoEventSpecFetcher as any).socketWaitTimeoutMs = 300;
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 8 });
+    const created: http.ClientRequest[] = [];
+    jest.spyOn(https, "request").mockImplementation(((options: any, callback: any) => {
+      const req = http.request({ host: "127.0.0.1", port, path: options.path, method: "GET", agent }, callback);
+      created.push(req);
+      return req;
+    }) as any);
+    const fetcher = new AvoEventSpecFetcher("key");
+
+    const holders = Array.from({ length: 8 }, (_, i) => new Promise((resolve) => fetcher.fetch("H" + i, "s", resolve)));
+    const started = Date.now();
+    const queued = await new Promise((resolve) => fetcher.fetch("Q", "s", resolve));
+
+    expect(queued).toBeNull();
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(created[8].destroyed).toBe(true);
+    fetcher.destroy();
+    await Promise.all(holders);
+    agent.destroy();
   }, 15_000);
 
   test("a fetch with a socket that never answers still settles at its deadline", async () => {

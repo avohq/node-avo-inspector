@@ -156,7 +156,7 @@ inspector.extractSchema({ order });
 
 Each event carries its own `createdAt`, stamped when `trackSchemaFromEvent` is called. Events in a batch are not guaranteed to be in call order: in `dev` and `staging`, an event whose spec must first be fetched for validation joins the queue when the fetch completes, so it can be sent after events tracked later. Use `createdAt` if you need the call order.
 
-At most 1,000 events wait for an event spec fetch at once, across every instance in the process. When that many are already waiting (for example when the Avo API is slow), further events are sent at once without validation instead of waiting.
+At most 1,000 events wait for an event spec fetch at once, across every instance in the process. When that many are already waiting (for example when the Avo API is slow), further events are sent at once without validation instead of waiting. A spec fetch that gets no connection within 10 seconds, or no answer within 10 seconds of getting one, is abandoned, and its event is sent without validation.
 
 ## Gateway options
 

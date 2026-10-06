@@ -724,8 +724,8 @@ describe("batching", () => {
   });
 
   test("flush waits for an in-progress event spec fetch, then sends the validated event", async () => {
-    // Validation is skipped under the mock endpoint, so take the real-endpoint path with
-    // the network stubbed out.
+    // Spec fetches are stubbed below; dropping the endpoint override keeps the instance on
+    // the real-endpoint path with no traffic to the mock either.
     jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
     jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((eventName, _streamId, callback) => {
       setTimeout(() => callback({
