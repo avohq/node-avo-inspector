@@ -118,6 +118,19 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     expect(warningsAbout(console.log)).toEqual([]);
   });
 
+  test("debug logging prints only the override's origin, never its path", async () => {
+    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = `http://127.0.0.1:${port}/SECRET-TOKEN/track`;
+    const inspector = create("dev");
+    inspector.enableLogging(true);
+
+    await inspector.trackSchemaFromEvent("E", { a: 1 });
+
+    const logged = (console.log as jest.Mock).mock.calls.map((call) => call.join(" "));
+    expect(logged).toContain(`Avo Inspector: [network] POST http://127.0.0.1:${port}`);
+    expect(logged.some((line) => line.includes("SECRET-TOKEN"))).toBe(false);
+    inspector.destroy();
+  });
+
   test.each([
     ["not a url", "not a valid URL"],
     ["ftp://x", "unsupported protocol ftp:"],

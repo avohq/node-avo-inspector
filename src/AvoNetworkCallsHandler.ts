@@ -264,7 +264,8 @@ export class AvoNetworkCallsHandler {
       const send = url.protocol === "http:" ? httpRequest : httpsRequest;
 
       if (AvoInspector.shouldLog) {
-        console.log("Avo Inspector: [network] POST " + url.origin + url.pathname);
+        // An override's path may carry a token, so only its origin is printed.
+        console.log("Avo Inspector: [network] POST " + url.origin + (this.mockEndpoint ? "" : url.pathname));
         console.log(
           "Avo Inspector: [network] Request body (" + data.length + " bytes" +
             (compressed ? ", gzip" : "") + ")"

@@ -126,6 +126,7 @@ With `trackOptions`: `appVersion` is taken from `trackOptions.appVersion` (may b
 
 ## Non-functional requirements
 
+- The `[network] POST` debug line prints the default endpoint's origin and path, but only the origin of a mock-endpoint override (its path may carry a token).
 - Logging is gated on the global `AvoInspector.shouldLog`, except the two override warnings of `mockEndpointFor` (always printed, once each, on stderr) and the unconditional warning for an unserializable encrypted value.
 - An in-flight request does not keep the process alive (socket and timer are unref'd); sending at exit relies on the caller's `beforeExit` drain.
 - Sampling rate is per-instance, mutable, and is only changed by a valid 200 response (or the test hook).
