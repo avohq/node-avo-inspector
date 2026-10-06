@@ -23,7 +23,7 @@ class AvoEventSpecFetcher {
 - Target: `https://api.avo.app:443` by default. With a `mockEndpoint` (the valid `AVO_INSPECTOR_MOCK_ENDPOINT` override, as read by `AvoNetworkCallsHandler`), that URL's scheme, host and port (default 80/443); its path and query are not used.
 - Per-fetch deadline: `private static fetchTimeoutMs = 10_000` (overridable in tests), counted from the moment the request is assigned a socket.
 - Socket-wait deadline: `private static socketWaitTimeoutMs = 10_000` (overridable in tests), counted from the request until it is assigned a socket.
-- Connection pool: **one module-level keep-alive `https.Agent` shared by every instance**, `maxSockets: 8`, `maxFreeSockets: 2` (and an `http.Agent` with the same settings for an `http:` mock endpoint). Idle sockets are unref'd and do not keep the process alive.
+- Connection pool: **one module-level keep-alive `https.Agent` shared by every instance**, `maxSockets: 8`, `maxFreeSockets: 2` (and an `http.Agent` with the same settings for an `http:` mock endpoint). **IMPORTANT:** every request's socket is unref'd on each `socket` assignment (the keep-alive agent re-refs a socket it reuses), so a spec fetch never holds the process open by itself. At exit, a pending validation is awaited by the exit drain, within its deadline, like a track send.
 - Request set: each instance tracks its own open `ClientRequest`s; a request leaves the set on `close`.
 
 Wire format (input) and internal format (output):

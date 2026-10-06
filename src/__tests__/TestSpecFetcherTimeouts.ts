@@ -8,6 +8,9 @@ import { trackConnections } from "./constants";
 
 // Event spec fetch deadlines, against endpoints that never answer.
 
+// A socket as the fetcher sees it: it only unrefs it.
+const fakeSocket = () => Object.assign(new EventEmitter(), { unref: jest.fn() });
+
 let hung: http.Server;
 let port: number;
 let closeHungConnections: () => void;
@@ -128,7 +131,7 @@ describe("settling a fetch", () => {
       req.end = () => {};
       req.destroy = () => process.nextTick(() => req.emit("error", new Error("destroyed")));
       // Assigned a socket on the next tick, like a real request with a free socket.
-      process.nextTick(() => req.emit("socket", new EventEmitter()));
+      process.nextTick(() => req.emit("socket", fakeSocket()));
       created.push(req);
       return req;
     }) as any);

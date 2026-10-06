@@ -15,6 +15,9 @@ class MockIncomingMessage extends EventEmitter {
   }
 }
 
+// A socket as the fetcher sees it: it only unrefs it.
+const fakeSocket = () => Object.assign(new EventEmitter(), { unref: jest.fn() });
+
 class MockClientRequest extends EventEmitter {
   end = jest.fn();
   destroy = jest.fn();
@@ -220,7 +223,7 @@ describe("AvoEventSpecFetcher", () => {
       const mockReq = new MockClientRequest();
       (mockedHttps.request as jest.Mock).mockImplementation(() => {
         // Gets a socket, then never answers.
-        process.nextTick(() => mockReq.emit("socket", new EventEmitter()));
+        process.nextTick(() => mockReq.emit("socket", fakeSocket()));
         return mockReq;
       });
 
@@ -245,10 +248,24 @@ describe("AvoEventSpecFetcher", () => {
       expect(result).toBe("pending");
       expect(mockReq.destroy).not.toHaveBeenCalled();
 
-      mockReq.emit("socket", new EventEmitter());
+      mockReq.emit("socket", fakeSocket());
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(result).toBeNull();
       expect(mockReq.destroy).toHaveBeenCalled();
+    });
+
+    test("every socket assignment is unref'd, including a reused keep-alive socket", () => {
+      const mockReq = new MockClientRequest();
+      (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq);
+      fetcher.fetch("click", "stream1", () => {});
+
+      // The agent re-refs a socket it reuses, so each assignment must unref again.
+      const first = fakeSocket();
+      const reused = fakeSocket();
+      mockReq.emit("socket", first);
+      mockReq.emit("socket", reused);
+      expect(first.unref).toHaveBeenCalledTimes(1);
+      expect(reused.unref).toHaveBeenCalledTimes(1);
     });
 
     test("no socket-idle timeout is set: the deadline is the only one", () => {

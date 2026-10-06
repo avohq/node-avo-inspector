@@ -107,14 +107,46 @@ describe("exit against an endpoint that never answers", () => {
   test("a natural exit sends the in-flight batch and the tail together, within about 10 s", async () => {
     hungRequests = [];
     // 45 events with batchSize 30: one size-triggered batch, and a 15-event tail at exit.
+    // Spec-fetch sockets do not hold the process, so the script holds it until every event
+    // is validated and queued; otherwise the exit drain would start mid-validation.
     const { elapsedMs } = await runChild(`
       const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
-      for (let i = 0; i < 45; i++) inspector.trackSchemaFromEvent("E" + i, { i });
+      const hold = setInterval(() => {}, 1000);
+      const tracks = [];
+      for (let i = 0; i < 45; i++) tracks.push(inspector.trackSchemaFromEvent("E" + i, { i }));
+      Promise.all(tracks).then(() => clearInterval(hold));
     `, hungEndpoint);
 
     expect(hungRequests.sort((a, b) => a - b)).toEqual([15, 30]);
     // About 10 s: one shared deadline, not two in a row (20 s). Wide upper margin for slow
     // machines; the lower bound shows the exit really waited for the drain.
+    expect(elapsedMs).toBeGreaterThan(9_000);
+    expect(elapsedMs).toBeLessThan(15_000);
+  }, 40_000);
+});
+
+describe("exit while a spec fetch hangs", () => {
+  let silent: Server;
+  let silentEndpoint: string;
+  let closeSilentConnections: () => void;
+
+  beforeAll(async () => {
+    // Answers nothing: neither spec fetches nor track requests.
+    silent = createServer(() => {});
+    closeSilentConnections = trackConnections(silent);
+    await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+    silentEndpoint = "http://127.0.0.1:" + (silent.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    closeSilentConnections();
+    await new Promise((resolve) => silent.close(resolve));
+  });
+
+  test("a hung spec fetch does not hold the process before the exit drain: about 10 s in all", async () => {
+    // Before the fix the fetch's socket held the loop for its own 10 s, then the drain
+    // started its 10 s: about 20 s.
+    const { elapsedMs } = await runChild(trackWithoutFlush, silentEndpoint);
     expect(elapsedMs).toBeGreaterThan(9_000);
     expect(elapsedMs).toBeLessThan(15_000);
   }, 40_000);

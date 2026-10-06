@@ -121,6 +121,10 @@ export class AvoEventSpecFetcher {
         settle(null);
       }, AvoEventSpecFetcher.socketWaitTimeoutMs);
       deadline.unref();
+      // Unref'd like track sockets, so a fetch never holds the process open by itself: at
+      // exit, a pending validation is awaited by the exit drain, within its deadline. On
+      // every assignment, since the keep-alive agent re-refs a socket when it reuses it.
+      sent.on("socket", (socket) => socket.unref());
       sent.once("socket", () => {
         if (settled) {
           return;
