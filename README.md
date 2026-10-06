@@ -61,14 +61,16 @@ While an instance has events that are buffered or still being sent, the SDK keep
 
 At most 4 requests are sent at once. Batches formed while all 4 are busy wait their turn, and up to 10,000 events can wait. Beyond that the oldest waiting events are dropped and the drop is logged, so the number of events held for sending stays bounded when the endpoint is slow or down.
 
-A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush()` every few thousand events so events are not dropped for lack of room while they wait:
+A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush(timeoutMs)` every few thousand events to let them finish.
+
+`flush()` waits at most `timeoutMs` (10 seconds by default), and it resolves the same way whether every send finished or the timeout passed first: it does not report a timeout. So it does not guarantee the backlog has drained. If the Inspector API is slower than the timeout, sends are still running when your loop resumes, and tracking more can still drop the oldest waiting events (the drop is logged). In a backfill, pass a timeout that comfortably covers a slow endpoint, for example 60 seconds:
 
 ```javascript
 for (let i = 0; i < rows.length; i++) {
   await inspector.trackSchemaFromEvent(rows[i].event, rows[i].properties);
-  if (i % 5000 === 4999) await inspector.flush();
+  if (i % 5000 === 4999) await inspector.flush(60_000);
 }
-await inspector.flush();
+await inspector.flush(60_000);
 ```
 
 # Flushing before exit (required)
@@ -212,7 +214,7 @@ Each kind prints at most one line per 10 seconds (per reason or status): the fir
   - it resolves with the HTTP status code instead of `undefined`;
   - besides network errors and timeouts, it rejects with `"Request failed"` without sending when a header value contains a control character (anything but tab) or a character above U+00FF.
 - **An API key containing a control character (anything but tab) or a character above U+00FF now throws in the constructor**, because the key is sent as a request header.
-- **At most 4 batches are sent at once**, and up to 10,000 events can wait to be sent; beyond that the oldest waiting events are dropped. A loop that tracks without yielding to I/O should call `await inspector.flush()` every few thousand events (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)).
+- **At most 4 batches are sent at once**, and up to 10,000 events can wait to be sent; beyond that the oldest waiting events are dropped. A loop that tracks without yielding to I/O should call `await inspector.flush(timeoutMs)` every few thousand events, with a timeout that covers a slow endpoint. `flush()` does not report a timeout, so if sends take longer, tracking more can still drop the oldest waiting events (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)).
 - **A non-string `streamId` is converted, not rejected.** A number, bigint or boolean is sent as its string form; any other non-string is ignored. In 1.x the track promise rejected.
 - **A non-string `env` falls back to `dev`** with a warning. In 1.x the constructor threw a `TypeError`.
 - **`NaN`, `±Infinity` and exponent-form numbers such as `1e-7` are classified `float`.** 1.x classified them `int`.
