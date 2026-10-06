@@ -6,8 +6,9 @@ const repoRoot = join(__dirname, "..", "..");
 const harness = join(repoRoot, "conformance", "avo-inspector-conformance.js");
 
 beforeAll(() => {
-  execFileSync(join(repoRoot, "node_modules", ".bin", "tsc"), [
-    "-p", join(repoRoot, "tsconfig.json"), "--outDir", join(repoRoot, "dist"),
+  // tsc's JS entry point run with this Node (the .bin shim is a .cmd file on Windows).
+  execFileSync(process.execPath, [
+    require.resolve("typescript/bin/tsc"), "-p", join(repoRoot, "tsconfig.json"), "--outDir", join(repoRoot, "dist"),
   ]);
 }, 60_000);
 

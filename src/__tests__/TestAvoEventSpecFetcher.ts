@@ -195,6 +195,21 @@ describe("AvoEventSpecFetcher", () => {
     });
   });
 
+  test("a request that closes with no response and no error settles null and frees its key", async () => {
+    const mockReq = new MockClientRequest();
+    (mockedHttps.request as jest.Mock).mockImplementationOnce(() => {
+      // Destroyed while waiting for a socket: only "close" is emitted.
+      process.nextTick(() => mockReq.emit("close"));
+      return mockReq;
+    });
+    const result = await new Promise((resolve) => fetcher.fetch("click", "stream1", resolve));
+
+    expect(result).toBeNull();
+    setupMockRequest(200, { events: [], metadata: {} });
+    fetcher.fetch("click", "stream1", () => {});
+    expect(mockedHttps.request).toHaveBeenCalledTimes(2);
+  }, 2000);
+
   describe("deadline", () => {
     afterEach(() => {
       (AvoEventSpecFetcher as any).fetchTimeoutMs = 10_000;

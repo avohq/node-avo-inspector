@@ -61,7 +61,7 @@ hasNonLatin1Char(value: string): boolean
 ## Non-functional requirements
 
 - `deepEquals` terminates on cyclic input and never calls methods on the compared objects.
-- Recursion is at most 10 levels deep and expands at most 10,000 pairs, so any payload compares in bounded time and stack, however deep or wide; payloads past the limits compare not equal (the same reference is still equal).
+- Recursion is at most 10 levels deep and expands at most 10,000 object/list pairs, so stack depth is bounded however deep the payload is; payloads past the limits compare not equal (the same reference is still equal). The key loops have no entry limit, so the time to compare grows with the number of keys in wide objects; it is not bounded independently of width.
 - Objects with no own enumerable keys (e.g. two different `Date`s) compare equal.
 - Pure; no side effects.
 

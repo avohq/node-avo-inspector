@@ -90,7 +90,7 @@ Sets the sticky `aborted` flag, empties the in-flight set and destroys each requ
    - any other status: logged (when logging).
    - Resolve with the HTTP status code in both cases (non-200 is not an error).
 9. A response that is aborted, errors or closes before its body is complete: reject with `"Request failed"`.
-10. On request `error`: reject with the string `"Request failed"`.
+10. On request `error`: reject with the string `"Request failed"`. If creating the request throws synchronously (for example invalid request options), reject with `"Request failed"` too; nothing was started, so no request is tracked. The only rejection reasons are `"Request failed"` and `"Request timed out"`.
 11. Wall-clock timeout of 10 s for the whole request (unref'd timer): reject with `"Request timed out"` and destroy the request.
 
 **IMPORTANT:** a batch is sent at most once; this method never retries. The promise settles exactly once; later events are ignored (and not logged), and settling clears the timer and removes the request from the in-flight set.

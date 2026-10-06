@@ -129,6 +129,9 @@ export class AvoEventSpecFetcher {
     sent.on("close", () => {
       clearTimeout(deadline);
       this.requests.delete(sent);
+      // A request destroyed before it got a socket can close with no response and no
+      // error. settle is idempotent and owner-checked, so this is a no-op otherwise.
+      settle(null);
     });
     sent.end();
   }

@@ -282,43 +282,54 @@ export class AvoNetworkCallsHandler {
         fn();
       };
 
-      const req = send(url, { method: "POST", headers }, (res) => {
-        if (AvoInspector.shouldLog) {
-          console.log("Avo Inspector: [network] Response status: " + res.statusCode + " " + res.statusMessage);
-        }
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => {
-          if (res.statusCode === 200) {
-            try {
-              const responseBody = Buffer.concat(chunks).toString();
-              const body = JSON.parse(responseBody);
-              if (body && typeof body.samplingRate === "number" && body.samplingRate >= 0 && body.samplingRate <= 1) {
-                this.samplingRate = body.samplingRate;
-              }
-            } catch (e) {
-              if (AvoInspector.shouldLog) {
-                console.warn("Avo Inspector: [network] Failed to parse response JSON: " + e);
-              }
-            }
-          } else if (AvoInspector.shouldLog) {
-            console.warn("Avo Inspector: [network] Non-200 response: " + res.statusCode);
+      let req: ClientRequest;
+      try {
+        req = send(url, { method: "POST", headers }, (res) => {
+          if (AvoInspector.shouldLog) {
+            console.log("Avo Inspector: [network] Response status: " + res.statusCode + " " + res.statusMessage);
           }
-          finish(() => resolve(res.statusCode));
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("end", () => {
+            if (res.statusCode === 200) {
+              try {
+                const responseBody = Buffer.concat(chunks).toString();
+                const body = JSON.parse(responseBody);
+                if (body && typeof body.samplingRate === "number" && body.samplingRate >= 0 && body.samplingRate <= 1) {
+                  this.samplingRate = body.samplingRate;
+                }
+              } catch (e) {
+                if (AvoInspector.shouldLog) {
+                  console.warn("Avo Inspector: [network] Failed to parse response JSON: " + e);
+                }
+              }
+            } else if (AvoInspector.shouldLog) {
+              console.warn("Avo Inspector: [network] Non-200 response: " + res.statusCode);
+            }
+            finish(() => resolve(res.statusCode));
+          });
+          // A response cut off mid-body emits neither "end" nor a request "error".
+          const truncated = () => {
+            if (!res.complete) {
+              if (AvoInspector.shouldLog && !settled) {
+                console.error("Avo Inspector: [network] Response ended before its body was complete");
+              }
+              finish(() => reject("Request failed"));
+            }
+          };
+          res.on("aborted", truncated);
+          res.on("error", truncated);
+          res.on("close", truncated);
         });
-        // A response cut off mid-body emits neither "end" nor a request "error".
-        const truncated = () => {
-          if (!res.complete) {
-            if (AvoInspector.shouldLog && !settled) {
-              console.error("Avo Inspector: [network] Response ended before its body was complete");
-            }
-            finish(() => reject("Request failed"));
-          }
-        };
-        res.on("aborted", truncated);
-        res.on("error", truncated);
-        res.on("close", truncated);
-      });
+      } catch (e) {
+        // A synchronous throw (for example invalid request options) is a failed send, with
+        // the documented reason; nothing was started, so there is nothing to clean up.
+        if (AvoInspector.shouldLog) {
+          console.error("Avo Inspector: [network] Request could not be started");
+        }
+        reject("Request failed");
+        return;
+      }
       this.inFlightRequests.add(req);
       // An in-flight send must not hold the process open: at exit the beforeExit drain
       // keeps it alive, under one deadline, while it sends what is left.

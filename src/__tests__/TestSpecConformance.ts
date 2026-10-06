@@ -230,6 +230,18 @@ describe("wire protocol", () => {
     );
   });
 
+  test("a request() that throws synchronously rejects with 'Request failed', not the raw error", async () => {
+    const http = require("http");
+    jest.spyOn(http, "request").mockImplementation(() => {
+      throw new TypeError("invalid header name");
+    });
+    const handler = new AvoNetworkCallsHandler("test-key", "dev", "", "1.0.0", VERSION);
+    const body = handler.bodyForEventSchemaCall("", "E", [], null, null);
+
+    await expect(handler.callInspectorWithBatchBody([body])).rejects.toBe("Request failed");
+    expect(captured).toHaveLength(0);
+  });
+
   test("a request that exceeds the timeout rejects with 'Request timed out'", async () => {
     (AvoNetworkCallsHandler as any).requestTimeoutMs = 50;
     responders.push(() => {}); // never answers
