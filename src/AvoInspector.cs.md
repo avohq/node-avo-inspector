@@ -51,7 +51,7 @@ Public fields: `environment`, `apiKey`, `version`, `avoNetworkCallsHandler`, `av
 
 Static `AvoInspector.shouldLog` (getter/setter) is one flag shared by every instance.
 
-Module export `INTERNAL_ERROR_MESSAGE = "Avo Inspector: something went wrong. Please report to support@avo.app."`, re-exported from `AvoLog` where it is defined, marked `@internal` (stripped from the published typings, not re-exported from the package index).
+Uses `INTERNAL_ERROR_MESSAGE` from `AvoLog` (the track rejection reason). It is **not** re-exported: `AvoLog` marks it `@internal`, so `stripInternal` removes it from `AvoLog.d.ts`, and a re-export would leave `AvoInspector.d.ts` importing a missing member and break the published typings for `skipLibCheck: false` users.
 
 Internal state: event spec fetcher/cache/validator (null in prod); an empty generated anonymous id used when no stream id is given; the batch queue; a `destroyed` flag; the set of pending promises (spec validations before enqueue, and batch sends) that `flush()` awaits; per-validation `flushRequested` markers; waiters settled by `destroy()`.
 

@@ -19,10 +19,6 @@ import {
 } from "./eventSpec/AvoEventSpecFetchTypes";
 import { VERSION } from "./AvoInspectorVersion";
 import { AvoLog, INTERNAL_ERROR_MESSAGE, MISSING_EVENT_NAME } from "./AvoLog";
-
-/** @internal Re-exported for callers that import it from here; not part of the public API. */
-export { INTERNAL_ERROR_MESSAGE };
-
 import { hasHeaderControlChar, hasNonLatin1Char, isValueEmpty, normalizeOption } from "./utils";
 
 const libVersion = VERSION;
