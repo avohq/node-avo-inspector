@@ -167,8 +167,8 @@ export class AvoInspector {
   private static waitingValidations = 0;
   // Frees this instance's places among them; destroy() runs whatever is left.
   private releaseWaiting: Set<() => void> = new Set();
-  // Events whose validation has not finished: not yet queued.
-  private validating = 0;
+  // Validations not finished yet (their events are not queued), settled when they are.
+  private validationOutcomes: Set<Promise<unknown>> = new Set();
   // When any instance last tracked an event (monotonic clock).
   private static lastTrackAt = -Infinity;
   // Deadlines of explicit flush() calls still running, by call.
@@ -191,6 +191,29 @@ export class AvoInspector {
       (deadlinePassed && AvoInspector.lastTrackAt > AvoInspector.exitDeadline)
     ) {
       AvoInspector.exitDeadline = now + DEFAULT_FLUSH_TIMEOUT_MS;
+    }
+    // Spec-fetch sockets are unref'd, so "beforeExit" also fires while a script awaits a
+    // track whose spec is being fetched. That is not the exit yet: hold the process until
+    // the validations settle (each fetch has its own deadline), without sending, so batches
+    // stay whole, then look again. A validation that settled in time, with no fetch given
+    // up, renews the deadline like any completed idle point; one that waited on a hung
+    // spec endpoint used up the exit's time, so the exit still ends within one deadline.
+    const validations = instances.reduce(
+      (all: Array<Promise<unknown>>, inspector) => all.concat(Array.from(inspector.validationOutcomes)),
+      []
+    );
+    if (validations.length > 0) {
+      const exitDeadline = AvoInspector.exitDeadline;
+      const timeoutsBefore = AvoEventSpecFetcher.timeouts;
+      const hold = setTimeout(() => {}, MAX_TIMER_MS);
+      Promise.allSettled(validations).then(() => {
+        clearTimeout(hold);
+        if (monotonicNowMs() < exitDeadline && AvoEventSpecFetcher.timeouts === timeoutsBefore) {
+          AvoInspector.exitDeadline = null;
+        }
+      });
+      AvoInspector.armExitDrain();
+      return;
     }
     // An explicit flush() still running gets its full deadline, even past the drain's own.
     let deadline = AvoInspector.exitDeadline;
@@ -223,7 +246,7 @@ export class AvoInspector {
     let unsent = 0;
     let unconfirmed = 0;
     AvoInspector.instancesWithWork.forEach((inspector) => {
-      unsent += inspector.batchQueue.length + inspector.batchQueue.waitingLength + inspector.validating;
+      unsent += inspector.batchQueue.length + inspector.batchQueue.waitingLength + inspector.validationOutcomes.size;
       unconfirmed += inspector.batchQueue.inFlightEvents;
     });
     AvoLog.enterExit();
@@ -664,7 +687,6 @@ export class AvoInspector {
     // the event then goes out once it is queued, in the drain shared by every validation
     // that settles in the same event-loop turn, and flush() waits for that send.
     const validation = { flushRequested: false };
-    this.validating++;
     const outcome = this.untilDestroyed<ValidationResult | null>(
       this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId),
       null
@@ -699,8 +721,9 @@ export class AvoInspector {
         }
       });
 
+    this.validationOutcomes.add(outcome);
     const validated = () => {
-      this.validating--;
+      this.validationOutcomes.delete(outcome);
     };
     outcome.then(validated, validated);
 

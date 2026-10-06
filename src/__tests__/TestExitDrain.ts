@@ -15,6 +15,7 @@ let distDir: string;
 let server: Server;
 let endpoint: string;
 let received: any[] = [];
+let requestSizes: number[] = [];
 const defaultEndpoint = process.env.AVO_INSPECTOR_MOCK_ENDPOINT;
 
 beforeAll(async () => {
@@ -31,7 +32,10 @@ beforeAll(async () => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
-      received.push(...JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      const raw = Buffer.concat(chunks);
+      const events = JSON.parse((req.headers["content-encoding"] === "gzip" ? gunzipSync(raw) : raw).toString("utf8"));
+      requestSizes.push(events.length);
+      received.push(...events);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ samplingRate: 1.0 }));
     });
@@ -46,6 +50,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   received = [];
+  requestSizes = [];
 });
 
 // Runs `script` in a child Node process with the compiled SDK as `AvoInspector`.
@@ -143,6 +148,21 @@ describe("exit while a spec fetch hangs", () => {
     closeSilentConnections();
     await new Promise((resolve) => silent.close(resolve));
   });
+
+  test("an awaited script mid-validation is not an exit: its batch stays whole", async () => {
+    // Spec fetches answered at once; nothing but the SDK holds the process, so beforeExit
+    // fires while each track waits for its spec. The drain must not send then.
+    received = [];
+    await runChild(`
+      const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 3 });
+      (async () => {
+        for (let i = 0; i < 4; i++) await inspector.trackSchemaFromEvent("E" + i, { i });
+      })();
+    `);
+    // One size-triggered batch of 3, then the 1-event tail at the exit: not 4 single sends.
+    expect(received.map((e: any) => e.eventName)).toEqual(["E0", "E1", "E2", "E3"]);
+    expect(requestSizes).toEqual([3, 1]);
+  }, 40_000);
 
   test("a hung spec fetch does not hold the process before the exit drain: about 10 s in all", async () => {
     // Before the fix the fetch's socket held the loop for its own 10 s, then the drain

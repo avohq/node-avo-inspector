@@ -25,6 +25,7 @@ class AvoEventSpecFetcher {
 - Socket-wait deadline: `private static socketWaitTimeoutMs = 10_000` (overridable in tests), counted from the request until it is assigned a socket.
 - Connection pool: **one module-level keep-alive `https.Agent` shared by every instance**, `maxSockets: 8`, `maxFreeSockets: 2` (and an `http.Agent` with the same settings for an `http:` mock endpoint). **IMPORTANT:** every request's socket is unref'd on each `socket` assignment (the keep-alive agent re-refs a socket it reuses), so a spec fetch never holds the process open by itself. At exit, a pending validation is awaited by the exit drain, within its deadline, like a track send.
 - Request set: each instance tracks its own open `ClientRequest`s; a request leaves the set on `close`.
+- `static timeouts` (@internal): how many fetches, process-wide, were given up at the socket-wait or fetch deadline. The exit drain reads it to tell a hung spec endpoint from a completed idle point.
 
 Wire format (input) and internal format (output):
 

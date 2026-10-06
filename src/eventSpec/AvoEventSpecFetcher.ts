@@ -37,6 +37,8 @@ export class AvoEventSpecFetcher {
   // Budget for the wait before a socket is assigned. Without it, fetches queued behind 8
   // hung ones would wait for every earlier deadline in turn.
   private static socketWaitTimeoutMs = 10_000;
+  /** @internal Fetches given up at a deadline, process-wide: the exit drain reads it. */
+  static timeouts = 0;
 
   /** `mockEndpoint`: a valid override URL (AvoNetworkCallsHandler.mockEndpoint), or null. */
   constructor(apiKey: string, mockEndpoint: string | null = null) {
@@ -117,6 +119,7 @@ export class AvoEventSpecFetcher {
         if (AvoInspector.shouldLog) {
           console.error("Avo Inspector: [network] Spec fetch got no connection within " + AvoEventSpecFetcher.socketWaitTimeoutMs + "ms");
         }
+        AvoEventSpecFetcher.timeouts++;
         sent.destroy();
         settle(null);
       }, AvoEventSpecFetcher.socketWaitTimeoutMs);
@@ -134,6 +137,7 @@ export class AvoEventSpecFetcher {
           if (AvoInspector.shouldLog) {
             console.error("Avo Inspector: [network] Spec fetch timed out after " + AvoEventSpecFetcher.fetchTimeoutMs + "ms");
           }
+          AvoEventSpecFetcher.timeouts++;
           sent.destroy();
           settle(null);
         }, AvoEventSpecFetcher.fetchTimeoutMs);
