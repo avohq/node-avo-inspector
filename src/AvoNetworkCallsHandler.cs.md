@@ -97,7 +97,7 @@ Sets the sticky `aborted` flag, empties the in-flight set and destroys each requ
 
 ### bodyForEventSchemaCall(anonymousId, eventName, eventProperties, eventId, eventHash, rawEventProperties?, trackOptions?): EventSchemaBody
 
-Base body (see below) plus `type: "event"`, `eventName`, and `eventProperties` — encrypted via `encryptProperties` when `AvoEncryption.shouldEncrypt(envName, publicEncryptionKey)` and `rawEventProperties` is given, otherwise passed through. Avo-function fields: if `eventId != null` then `avoFunction: true, eventId, eventHash`; else `avoFunction: false, eventId: null, eventHash: null`.
+Base body (see below) plus `type: "event"`, `eventName`, and `eventProperties` — encrypted via `encryptProperties` when `AvoEncryption.shouldEncrypt(envName, publicEncryptionKey)` and `rawEventProperties` is given, otherwise passed through. Avo-function fields (`applyAvoFunctionFields`, shared by both builders): if `eventId != null` then `avoFunction: true, eventId, eventHash`; else `avoFunction: false, eventId: null, eventHash: null`.
 
 ### buildEventProperties(eventProperties, rawEventProperties?): EventProperty[]
 

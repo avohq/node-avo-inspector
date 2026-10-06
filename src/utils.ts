@@ -83,6 +83,10 @@ function deepEqualsWithin(
   return true;
 }
 
+/** A schema as printed in debug logs: `{`, one `\t"name": "type"` per property (`;`-separated), `}`. */
+const formatSchema = (schema: Array<{ propertyName: string; propertyType: string }>): string =>
+  "{\n" + schema.map((p) => '\t"' + p.propertyName + '": "' + p.propertyType + '"').join(";\n") + "\n}";
+
 const hasOwn = (object: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(object, key);
 
@@ -112,4 +116,4 @@ const hasNonLatin1Char = (value: string): boolean => /[^\u0000-\u00FF]/.test(val
  */
 const monotonicNowMs = (): number => Number(process.hrtime.bigint()) / 1e6;
 
-export { monotonicNowMs, isValueEmpty, deepEquals, normalizeOption, hasHeaderControlChar, hasNonLatin1Char };
+export { monotonicNowMs, isValueEmpty, deepEquals, formatSchema, normalizeOption, hasHeaderControlChar, hasNonLatin1Char };

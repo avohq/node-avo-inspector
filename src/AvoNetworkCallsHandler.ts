@@ -3,7 +3,7 @@ import { AvoInspector } from "./AvoInspector";
 import { AvoEncryption } from "./AvoEncryption";
 import { AvoLog } from "./AvoLog";
 import { LIB_PLATFORM } from "./AvoInspectorVersion";
-import { hasHeaderControlChar, hasNonLatin1Char } from "./utils";
+import { formatSchema, hasHeaderControlChar, hasNonLatin1Char } from "./utils";
 import { request as httpsRequest } from "https";
 import { request as httpRequest, ClientRequest } from "http";
 import { gzip } from "zlib";
@@ -196,14 +196,11 @@ export class AvoNetworkCallsHandler {
 
     if (AvoInspector.shouldLog) {
       events.forEach(function (event) {
-        const eventProps = event.eventProperties
-          .map(p => '\t"' + p.propertyName + '": "' + p.propertyType + '"')
-          .join(";\n");
         const validated = event.eventSpecMetadata ? " (validated)" : "";
         console.log(
           "Avo Inspector: Sending event " +
             event.eventName + validated +
-            " with schema {\n" + eventProps + "\n}"
+            " with schema " + formatSchema(event.eventProperties)
         );
       });
     }
@@ -371,15 +368,7 @@ export class AvoNetworkCallsHandler {
       eventSchemaBody.eventProperties = eventProperties;
     }
 
-    if (eventId != null) {
-      eventSchemaBody.avoFunction = true;
-      eventSchemaBody.eventId = eventId;
-      eventSchemaBody.eventHash = eventHash;
-    } else {
-      eventSchemaBody.avoFunction = false;
-      eventSchemaBody.eventId = null;
-      eventSchemaBody.eventHash = null;
-    }
+    AvoNetworkCallsHandler.applyAvoFunctionFields(eventSchemaBody, eventId, eventHash);
 
     return eventSchemaBody;
   }
@@ -438,6 +427,13 @@ export class AvoNetworkCallsHandler {
     body.eventProperties = mergedProperties;
     body.eventSpecMetadata = eventSpecMetadata;
 
+    AvoNetworkCallsHandler.applyAvoFunctionFields(body, eventId, eventHash);
+
+    return body;
+  }
+
+  // An event with an eventId came from an Avo function (Codegen): it carries the id and hash.
+  private static applyAvoFunctionFields(body: EventSchemaBody, eventId: string | null, eventHash: string | null): void {
     if (eventId != null) {
       body.avoFunction = true;
       body.eventId = eventId;
@@ -447,8 +443,6 @@ export class AvoNetworkCallsHandler {
       body.eventId = null;
       body.eventHash = null;
     }
-
-    return body;
   }
 
   private encryptProperties(

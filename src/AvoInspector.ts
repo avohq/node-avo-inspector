@@ -19,7 +19,7 @@ import {
 } from "./eventSpec/AvoEventSpecFetchTypes";
 import { VERSION } from "./AvoInspectorVersion";
 import { AvoLog, INTERNAL_ERROR_MESSAGE, MISSING_EVENT_NAME } from "./AvoLog";
-import { hasHeaderControlChar, hasNonLatin1Char, isValueEmpty, monotonicNowMs, normalizeOption } from "./utils";
+import { formatSchema, hasHeaderControlChar, hasNonLatin1Char, isValueEmpty, monotonicNowMs, normalizeOption } from "./utils";
 
 const libVersion = VERSION;
 
@@ -703,10 +703,7 @@ export class AvoInspector {
         }
         if (AvoInspector.shouldLog) {
           batch.forEach((event) => {
-            const schemaString = event.eventProperties
-              .map((p) => '\t"' + p.propertyName + '": "' + p.propertyType + '"')
-              .join(";\n");
-            console.log("Avo Inspector: Saved event " + event.eventName + " with schema {\n" + schemaString + "\n}");
+            console.log("Avo Inspector: Saved event " + event.eventName + " with schema " + formatSchema(event.eventProperties));
           });
         }
         return "ok";
@@ -829,8 +826,7 @@ export class AvoInspector {
       const schema = AvoSchemaParser.extractSchema(eventProperties);
 
       if (AvoInspector.shouldLog) {
-        const schemaString = schema.map(p => '\t"' + p.propertyName + '": "' + p.propertyType + '"').join(";\n");
-        console.log("Avo Inspector: Parsed schema {\n" + schemaString + "\n}");
+        console.log("Avo Inspector: Parsed schema " + formatSchema(schema));
       }
 
       return schema;

@@ -1,6 +1,6 @@
 # utils
 
-Small shared helpers: blank-string check, structural deep equality used by the deduplicator, option normalization and header-value validation.
+Small shared helpers: monotonic clock, blank-string check, structural deep equality used by the deduplicator, debug schema formatting, option normalization and header-value validation.
 
 ## Tech stack
 
@@ -12,6 +12,7 @@ Small shared helpers: blank-string check, structural deep equality used by the d
 monotonicNowMs(): number
 isValueEmpty(value: string | null | undefined): boolean
 deepEquals(x: any, y: any): boolean
+formatSchema(schema: Array<{ propertyName: string; propertyType: string }>): string
 normalizeOption(value: unknown): string | undefined
 hasHeaderControlChar(value: string): boolean
 hasNonLatin1Char(value: string): boolean
@@ -40,6 +41,10 @@ hasNonLatin1Char(value: string): boolean
    - non-object `x[p]` -> false;
    - otherwise recurse one level deeper, with the same recorded pairs and expansion count; unequal -> false.
 7. Any own key of `y` missing on `x` -> false. Else true.
+
+### formatSchema
+
+- The schema as debug logs print it: `{`, a newline, one `\t"<name>": "<type>"` per property joined by `;` and a newline, a newline, `}`. Used by the "Parsed schema", "Sending event" and "Saved event" debug lines.
 
 ### normalizeOption
 
