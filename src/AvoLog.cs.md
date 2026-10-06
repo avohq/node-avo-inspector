@@ -26,11 +26,12 @@ class AvoLog {
   static errorType(error: unknown): string; // @internal: the fixed label, also used by other log lines that report a caught error
   static streamIdColon(): void;
   static missingEventName(): void;
+  static flushPending(onlyExpired?: boolean): void; // prints pending counts (see Lifecycle)
   static _resetForTesting(): void;       // @internal
 }
 ```
 
-Process-wide state: a map from key to `{ start, suppressed }`: the start of the key's current 10 s window, and the amount counted in it without being printed. Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`, `streamid-colon`, `missing-event-name`.
+Process-wide state: a map from key to `{ start, suppressed, print }`: the start of the key's current 10 s window, the amount counted in it without being printed, and how to print that count; plus whether its `beforeExit` listener is armed. Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`, `streamid-colon`, `missing-event-name`.
 
 ## Users and permissions
 
@@ -41,20 +42,29 @@ Process-wide state: a map from key to `{ start, suppressed }`: the start of the 
 ### Rate limit (every kind)
 
 1. An occurrence with amount `a` for key `k` at time `now`:
-   - no window for `k`, or `now - start >= 10 000 ms` → print a line with total `a + suppressed` (the previous window's count), and start a new window at `now` with `suppressed = 0`;
+   - no window for `k`, or `now - start >= 10 000 ms` → print a line with total `a + suppressed` (the previous window's count), and start a new window at `now` with `suppressed = 0`. The line's `<N>s` is the real whole seconds since the previous window began (at least 1) when it reports a suppressed count, else `1`;
    - otherwise → `suppressed += a`, print nothing.
-2. There is no timer: a suppressed count is reported only with the next occurrence of that key after its window. Nothing keeps the process alive.
+2. There is no timer.
+
+### Lifecycle: pending counts (`flushPending`)
+
+- `flushPending()` prints every key with `suppressed > 0` at once (total = `suppressed`, `<N>s` = whole seconds since the window began, at least 1) and deletes that key's window, so its next occurrence prints immediately.
+- `flushPending(true)` (called by `flush()`) prints only keys whose window has expired (`now - start >= 10 000 ms`); a count still inside its window stays pending, so an app that calls `flush()` after every event keeps one line per kind per 10 s.
+- `destroy()` calls `flushPending()`.
+- While any count is pending, a `beforeExit` listener is armed that calls `flushPending()`; it is removed once nothing is pending. It schedules nothing, so it never keeps the process alive, and it covers exits where no instance has work left (no exit drain).
 
 ### Lines
 
 | Call | Amount | Output |
 |---|---|---|
-| `dropped(count, reason)` | `count` | `console.warn("Avo Inspector: dropped <total> event(s) (<reason>) in the last 10s.")` |
-| `rejected(status)` | 1 | `console.warn("Avo Inspector: <total> batch(es) rejected with HTTP <status> in the last 10s.")` |
+| `dropped(count, reason)` | `count` | `console.warn("Avo Inspector: dropped <total> event(s) (<reason>) in the last <N>s.")` |
+| `rejected(status)` | 1 | `console.warn("Avo Inspector: <total> batch(es) rejected with HTTP <status> in the last <N>s.")` |
 | `failed(error)` | 1 | `console.error("Avo Inspector: schema sending failed: <reason>.")`, plus the suffix when `total > 1`. `<reason>` (also the key) is `error` itself when it is exactly `"Request failed"` or `"Request timed out"`, else `"Request failed (<errorType(error)>)"`: never an error's message |
 | `internal(error)` | 1 | `console.error(INTERNAL_ERROR_MESSAGE + suffix + " (<type>)")`, with the same suffix; `<type>` is a fixed label: the most specific built-in error class the value is an instance of (`TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `URIError`, `EvalError`, `Error`), else `typeof error`, or `unknown` if the check throws (a proxy trap). The value's own `name` or any other field is never read |
 | `streamIdColon()` | 1 | `console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported" + suffix)`, with the same suffix |
-| `missingEventName()` | 1 | `console.warn('Avo Inspector: <total> event(s) tracked without an event name in the last 10s, sent as "Missing Event Name".')` |
+| `missingEventName()` | 1 | `console.warn('Avo Inspector: <total> event(s) tracked without an event name in the last <N>s, sent as "Missing Event Name".')` |
+
+The suffix is ` (<more> more in the last <N>s)`, where `<more>` is the count reported beyond the current occurrence (all of `suppressed` for a `flushPending` line); it is omitted when `<more>` is 0.
 
 ## Non-functional requirements
 
@@ -65,7 +75,13 @@ Process-wide state: a map from key to `{ start, suppressed }`: the start of the 
 ## Examples
 
 <example>
-10 enqueues with maxQueueSize 2 (8 drops, one at a time) within 10 s → one line: `Avo Inspector: dropped 1 event(s) (queue full) in the last 10s.` One more drop 10 s later → `Avo Inspector: dropped 8 event(s) (queue full) in the last 10s.`
+10 enqueues with maxQueueSize 2 (8 drops, one at a time) within 10 s → one line: `Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.` One more drop 10 s later → `Avo Inspector: dropped 8 event(s) (queue full) in the last 10s.`
+</example>
+<example>
+5,000 queue-full drops in a burst, then `flush()` 12 s later → `dropped 1 event(s) (queue full) in the last 1s.` at once, then `dropped 4999 event(s) (queue full) in the last 12s.` from the flush. Had the flush come 3 s later, the count would have stayed pending until the next drop after the window, a later flush, `destroy()` or exit.
+</example>
+<example>
+2 drops, then nothing for an hour, then one more → the line reports `dropped 3 event(s) (queue full) in the last 3600s.`
 </example>
 <example>
 50 send failures ("Request failed") within 10 s → `Avo Inspector: schema sending failed: Request failed.` once; the next failure after the window → `Avo Inspector: schema sending failed: Request failed. (49 more in the last 10s)`.

@@ -746,6 +746,10 @@ export class AvoInspector {
       clearTimeout(timer);
     } catch (e) {
       // flush() is a completion guarantee and never rejects.
+    } finally {
+      // Counts whose window has expired are printed now; a count still inside its window
+      // stays pending, so an app that flushes after every event keeps the 10 s limit.
+      AvoLog.flushPending(true);
     }
   }
 
@@ -931,5 +935,7 @@ export class AvoInspector {
       this.eventSpecCache = null;
     }
     this.eventValidator = null;
+    // Destroy is final: report every pending count now.
+    AvoLog.flushPending();
   }
 }

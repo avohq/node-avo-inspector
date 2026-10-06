@@ -112,6 +112,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 3. Snapshots the pending promises present at call time, marks pending validations as flush-requested, and drains the queue (adding that send).
 4. Waits until all of those settle or the budget elapses (the budget timer does not hold the process open).
 5. **IMPORTANT:** never rejects.
+6. On return (every path): `AvoLog.flushPending(true)` prints the always-on counts whose 10 s window has expired; counts still inside their window stay pending.
 
 ### Exit drain
 
@@ -142,7 +143,7 @@ Test-only: sets the network handler's sampling rate.
 
 ### destroy()
 
-Terminates the instance: marks it destroyed; settles every track waiting on a spec fetch or immediate send (they resolve `[]`); discards buffered and waiting batches unsent; clears pending work and validation markers; unregisters from the exit drain; aborts in-flight requests; destroys the spec fetcher, flushes the spec cache, drops the validator. Does not flush. Later track calls resolve `[]` and send nothing.
+Terminates the instance: marks it destroyed; settles every track waiting on a spec fetch or immediate send (they resolve `[]`); discards buffered and waiting batches unsent; clears pending work and validation markers; unregisters from the exit drain; aborts in-flight requests; destroys the spec fetcher, flushes the spec cache, drops the validator, and prints every pending always-on count (`AvoLog.flushPending()`). Does not flush events. Later track calls resolve `[]` and send nothing.
 
 ## Non-functional requirements
 

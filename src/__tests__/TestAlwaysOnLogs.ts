@@ -51,13 +51,13 @@ describe("always-on data-loss lines, logging off", () => {
 
     for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent("E" + i, { email: MARKER });
     // (The constructor's batchSize > maxQueueSize warning is a separate line.)
-    expect(matching(/^Avo Inspector: dropped/)).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 10s."]);
+    expect(matching(/^Avo Inspector: dropped/)).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 1s."]);
 
     now += 10_000;
     await inspector.trackSchemaFromEvent("E10", { email: MARKER });
     // 7 counted in the first window, plus this one.
     expect(matching(/^Avo Inspector: dropped/)).toEqual([
-      "Avo Inspector: dropped 1 event(s) (queue full) in the last 10s.",
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
       "Avo Inspector: dropped 8 event(s) (queue full) in the last 10s.",
     ]);
     inspector.destroy();
@@ -71,7 +71,7 @@ describe("always-on data-loss lines, logging off", () => {
     // exceeds it drops 20.
     for (let i = 0; i < 12_000; i++) await inspector.trackSchemaFromEvent("E" + i, {});
     expect(matching(/send backlog full/)).toEqual([
-      "Avo Inspector: dropped 20 event(s) (send backlog full) in the last 10s.",
+      "Avo Inspector: dropped 20 event(s) (send backlog full) in the last 1s.",
     ]);
 
     now += 10_000;
@@ -92,8 +92,8 @@ describe("always-on data-loss lines, logging off", () => {
 
     for (let i = 0; i < 6; i++) await inspector.trackSchemaFromEvent("E" + i, {});
     expect(matching(/rejected/)).toEqual([
-      "Avo Inspector: 1 batch(es) rejected with HTTP 500 in the last 10s.",
-      "Avo Inspector: 1 batch(es) rejected with HTTP 400 in the last 10s.",
+      "Avo Inspector: 1 batch(es) rejected with HTTP 500 in the last 1s.",
+      "Avo Inspector: 1 batch(es) rejected with HTTP 400 in the last 1s.",
     ]);
 
     now += 10_000;
@@ -236,7 +236,7 @@ describe("a missing event name", () => {
       .mockImplementation((batch: Array<InspectorBody>) => { sent.push(...batch); return Promise.resolve(200); });
     return { inspector, sent };
   };
-  const line = 'Avo Inspector: 1 event(s) tracked without an event name in the last 10s, sent as "Missing Event Name".';
+  const line = 'Avo Inspector: 1 event(s) tracked without an event name in the last 1s, sent as "Missing Event Name".';
   const schema = [{ propertyName: "a", propertyType: "int" }];
 
   test.each([
@@ -302,7 +302,7 @@ describe("a batch dispatch that fails internally", () => {
     await inspector.flush();
 
     expect(matching(/something went wrong/)).toEqual([expect.stringContaining(internal)]);
-    expect(matching(/internal error/)).toEqual(["Avo Inspector: dropped 2 event(s) (internal error) in the last 10s."]);
+    expect(matching(/internal error/)).toEqual(["Avo Inspector: dropped 2 event(s) (internal error) in the last 1s."]);
     inspector.destroy();
   });
 
@@ -314,7 +314,7 @@ describe("a batch dispatch that fails internally", () => {
     await inspector.flush();
 
     expect(matching(/something went wrong/)).toEqual([expect.stringContaining(internal)]);
-    expect(matching(/internal error/)).toEqual(["Avo Inspector: dropped 3 event(s) (internal error) in the last 10s."]);
+    expect(matching(/internal error/)).toEqual(["Avo Inspector: dropped 3 event(s) (internal error) in the last 1s."]);
     inspector.destroy();
   });
 });
@@ -344,5 +344,92 @@ describe("a send failure with an arbitrary error", () => {
 
     expect(matching(/schema sending failed/)).toEqual(["Avo Inspector: schema sending failed: Request timed out."]);
     inspector.destroy();
+  });
+});
+
+describe("pending counts at lifecycle points, worded by real elapsed time", () => {
+  const dropLines = () => matching(/^Avo Inspector: dropped/);
+
+  test("a burst of 5,000 drops, then flush() after the window, prints one line at once and one with the rest", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+
+    for (let i = 0; i < 5001; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    now += 12_000;
+    await inspector.flush();
+
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 4999 event(s) (queue full) in the last 12s.",
+    ]);
+    inspector.destroy();
+  });
+
+  test("flush() inside the window leaves the count pending, so serverless flushes keep the limit", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    now += 3_000;
+    await inspector.flush();
+    expect(dropLines()).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 1s."]);
+
+    inspector.destroy();
+    expect(dropLines()[1]).toBe("Avo Inspector: dropped 3 event(s) (queue full) in the last 3s.");
+  });
+
+  test("destroy() prints a pending count", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
+    for (let i = 0; i < 4; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    now += 2_000;
+
+    inspector.destroy();
+
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 2 event(s) (queue full) in the last 2s.",
+    ]);
+  });
+
+  test("the exit drain prints a pending count, even with no instance left with work", () => {
+    AvoLog.failed("Request failed");
+    AvoLog.failed("Request failed");
+    now += 4_000;
+
+    process.emit("beforeExit", 0);
+
+    expect(matching(/schema sending failed/)).toEqual([
+      "Avo Inspector: schema sending failed: Request failed.",
+      "Avo Inspector: schema sending failed: Request failed. (1 more in the last 4s)",
+    ]);
+  });
+
+  test("a stale count reports its real span", () => {
+    AvoLog.dropped(1, "queue full");
+    AvoLog.dropped(2, "queue full");
+    now += 3_600_000;
+
+    AvoLog.dropped(1, "queue full");
+
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 3 event(s) (queue full) in the last 3600s.",
+    ]);
+  });
+
+  test("a flushed count is not printed again", async () => {
+    AvoLog.dropped(1, "queue full");
+    AvoLog.dropped(5, "queue full");
+    AvoLog.flushPending();
+    AvoLog.flushPending();
+    now += 10_000;
+
+    AvoLog.dropped(1, "queue full");
+
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 5 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+    ]);
   });
 });

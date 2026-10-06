@@ -189,13 +189,13 @@ The logging flag is shared by every instance in the process, and each constructo
 
 Some lines are printed whatever the logging flag, on stderr, because they report lost data or failed sends:
 
-- `Avo Inspector: dropped N event(s) (queue full) in the last 10s.` or `(send backlog full)`: events dropped because the buffer (`maxQueueSize`) or the 10,000-event send backlog is full; `(internal error)`: events in a batch whose send failed with an internal error (logged with the internal-error line below);
-- `Avo Inspector: N event(s) tracked without an event name in the last 10s, sent as "Missing Event Name".`: track calls whose event name is `null`, `undefined`, not a string, empty or whitespace-only. The event is still sent, under the name `"Missing Event Name"`, and the call resolves its schema as usual;
-- `Avo Inspector: N batch(es) rejected with HTTP <status> in the last 10s.`: the Inspector API answered with a status other than 200 (only the status is printed);
+- `Avo Inspector: dropped N event(s) (queue full) in the last Ns.` or `(send backlog full)`: events dropped because the buffer (`maxQueueSize`) or the 10,000-event send backlog is full; `(internal error)`: events in a batch whose send failed with an internal error (logged with the internal-error line below);
+- `Avo Inspector: N event(s) tracked without an event name in the last Ns, sent as "Missing Event Name".`: track calls whose event name is `null`, `undefined`, not a string, empty or whitespace-only. The event is still sent, under the name `"Missing Event Name"`, and the call resolves its schema as usual;
+- `Avo Inspector: N batch(es) rejected with HTTP <status> in the last Ns.`: the Inspector API answered with a status other than 200 (only the status is printed);
 - `Avo Inspector: schema sending failed: Request failed.` or `Request timed out.`: a batch could not be sent;
 - `Avo Inspector: something went wrong. Please report to support@avo.app. (<error type>)`: an internal error. Only the error's type (for example `TypeError`) is printed, never its message, which could contain a property value.
 
-Each kind prints at most one line per 10 seconds (per reason or status): the first occurrence prints at once, and later ones are counted and reported with the next line, for example `(12 more in the last 10s)`. Sends abandoned by `destroy()` and events dropped by sampling are not reported.
+Each kind prints at most one line per 10 seconds (per reason or status): the first occurrence prints at once, and later ones are counted, then reported with the next occurrence after the 10 seconds, by `flush()` once the 10 seconds have passed, or at once by `destroy()` and at process exit. So a burst is always reported, even if it never recurs. "in the last Ns" is the real time the count covers, in whole seconds (for example `(12 more in the last 37s)`); a line about a single occurrence says `1s`. Sends abandoned by `destroy()` and events dropped by sampling are not reported.
 
 # Upgrading from 1.x to 2.0
 
