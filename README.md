@@ -63,14 +63,17 @@ At most 4 requests are sent at once. Batches formed while all 4 are busy wait th
 
 A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush(timeoutMs)` every few thousand events to let them finish.
 
-`flush()` waits at most `timeoutMs` (10 seconds by default), and it resolves the same way whether every send finished or the timeout passed first: it does not report a timeout. So it does not guarantee the backlog has drained. If the Inspector API is slower than the timeout, sends are still running when your loop resumes, and tracking more can still drop the oldest waiting events (the drop is logged). In a backfill, pass a timeout that comfortably covers a slow endpoint, for example 60 seconds:
+`flush()` waits at most `timeoutMs` (10 seconds by default), and it resolves the same way whether every send finished or the timeout passed first: it does not report a timeout. So it does not guarantee the backlog has drained. If the Inspector API is slower than the timeout, sends are still running when your loop resumes, and tracking more can still drop the oldest waiting events (the drop is logged). Give the backfill's flush a timeout long enough for a whole chunk to drain even when every request hangs: each request gives up after 10 seconds and 4 run at once, so 5,000 events need at most about 7 minutes.
 
 ```javascript
+// 5,000 events = about 170 batches of 30; 4 at a time, at most 10 s each: about 7 minutes.
+const CHUNK_FLUSH_TIMEOUT_MS = 10 * 60 * 1000;
+
 for (let i = 0; i < rows.length; i++) {
   await inspector.trackSchemaFromEvent(rows[i].event, rows[i].properties);
-  if (i % 5000 === 4999) await inspector.flush(60_000);
+  if (i % 5000 === 4999) await inspector.flush(CHUNK_FLUSH_TIMEOUT_MS);
 }
-await inspector.flush(60_000);
+await inspector.flush(CHUNK_FLUSH_TIMEOUT_MS);
 ```
 
 # Flushing before exit (required)
