@@ -6,7 +6,7 @@ import {
   InspectorBody,
   ResolvedTrackOptions,
 } from "./AvoNetworkCallsHandler";
-import { AvoBatchQueue, MAX_TIMER_MS } from "./AvoBatchQueue";
+import { AvoBatchQueue, BACKPRESSURE_WAITING_EVENTS, MAX_TIMER_MS } from "./AvoBatchQueue";
 import { AvoDeduplicator } from "./AvoDeduplicator";
 import { AvoStreamId } from "./AvoStreamId";
 import { AvoEventSpecFetcher } from "./eventSpec/AvoEventSpecFetcher";
@@ -725,6 +725,18 @@ export class AvoInspector {
       return {
         result: this.untilDestroyed(
           send.then((outcome) => (outcome === "non200" || this.destroyed ? [] : eventSchema)),
+          []
+        ),
+        send,
+      };
+    }
+    if (this.batchQueue.waitingLength >= BACKPRESSURE_WAITING_EVENTS) {
+      // Backpressure: the event is queued, but the call resolves only once a send slot
+      // frees up enough room, so an awaited loop cannot outrun the sends and overflow the
+      // backlog. A call that is not awaited is unaffected. destroy() resolves it [].
+      return {
+        result: this.untilDestroyed(
+          this.batchQueue.whenBelowBackpressure().then(() => (this.destroyed ? [] : eventSchema)),
           []
         ),
         send,

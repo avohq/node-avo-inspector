@@ -84,11 +84,14 @@ describe("bounded concurrent batch sends", () => {
     expect(names(batches).flat()).toEqual(Array.from({ length: 20 }, (_, i) => "E" + i));
   });
 
+  // These loops do not await their tracks: an awaited track waits for a send slot once
+  // 1,000 events wait (backpressure, TestBackpressure), and these sends are held. prod, so
+  // each track queues its event synchronously, in call order.
   test("a tight loop of 9,000 events that never yields, then flush(), delivers all 9,000", async () => {
-    const inspector = staging();
+    const inspector = staging({ env: "prod" });
     const { batches, releaseAll } = holdSends(inspector);
 
-    for (let i = 0; i < 9000; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 9000; i++) inspector.trackSchemaFromEvent("E" + i, {});
     const flushing = inspector.flush();
     await releaseAll();
     await flushing;
@@ -97,13 +100,13 @@ describe("bounded concurrent batch sends", () => {
   }, HEAVY_TEST_TIMEOUT_MS);
 
   test("past 10,000 waiting events the oldest waiting ones are dropped, and the drop is logged", async () => {
-    const inspector = staging();
+    const inspector = staging({ env: "prod" });
     inspector.enableLogging(true);
     const { batches, releaseAll } = holdSends(inspector);
 
     let maxWaiting = 0;
     for (let i = 0; i < 20_000; i++) {
-      await inspector.trackSchemaFromEvent("E" + i, {});
+      inspector.trackSchemaFromEvent("E" + i, {});
       maxWaiting = Math.max(maxWaiting, (inspector as any).batchQueue.waitingLength);
     }
     expect(maxWaiting).toBe(10_000);

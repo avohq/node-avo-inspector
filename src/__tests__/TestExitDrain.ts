@@ -219,10 +219,8 @@ describe("events still unsent at exit are logged", () => {
     // 3,000 events in 100 batches; 4 sends at a time, 3 s each: about 12 go out by the deadline.
     const { stderr } = await runChild(`
       const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
-      const hold = setInterval(() => {}, 1000);
-      const tracks = [];
-      for (let i = 0; i < 3000; i++) tracks.push(inspector.trackSchemaFromEvent("E" + i, { i }));
-      Promise.all(tracks).then(() => clearInterval(hold));
+      // Not awaited, and nothing holds the process: the exit drain starts at once.
+      for (let i = 0; i < 3000; i++) inspector.trackSchemaFromEvent("E" + i, { i });
     `, slowEndpoint);
 
     const lines = exitLines(stderr);

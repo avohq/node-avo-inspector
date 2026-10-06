@@ -75,18 +75,19 @@ describe("always-on data-loss lines, logging off", () => {
   });
 
   test("a send backlog overflow logs one line per window with its count", async () => {
-    const inspector = staging({ batchSize: 30 });
+    // prod, not awaited: queued synchronously, and no backpressure wait on held sends.
+    const inspector = staging({ batchSize: 30, env: "prod" });
     holdSends(inspector);
 
     // 4 batches (120 events) in flight, then 10,000 events may wait; the drain that first
     // exceeds it drops 20.
-    for (let i = 0; i < 12_000; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 12_000; i++) inspector.trackSchemaFromEvent("E" + i, {});
     expect(matching(/send backlog full/)).toEqual([
       "Avo Inspector: dropped 20 event(s) (send backlog full) in the last 1s.",
     ]);
 
     now += 10_000;
-    for (let i = 0; i < 30; i++) await inspector.trackSchemaFromEvent("F" + i, {});
+    for (let i = 0; i < 30; i++) inspector.trackSchemaFromEvent("F" + i, {});
     const queue = (inspector as any).batchQueue;
     const totalDropped = 12_030 - 120 - queue.waitingLength - queue.length;
     expect(matching(/send backlog full/)[1]).toBe(

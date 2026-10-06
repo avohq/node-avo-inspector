@@ -98,6 +98,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 6. Resolution:
    - Batch size 1 (dev): the send happens within the call. Resolves `[]` when the outcome is `"non200"` or the instance was destroyed before the send settled; otherwise the schema (including after a transport failure).
    - Otherwise: resolves with the schema once queued; the HTTP outcome is not observable.
+   - **Backpressure:** if, after queueing, `batchQueue.waitingLength >= BACKPRESSURE_WAITING_EVENTS` (1,000), the call resolves only once `batchQueue.whenBelowBackpressure()` resolves (a freed send slot brings the waiting count below 1,000), with the schema, or `[]` if `destroy()` ran first. The event is already queued either way, so waiting never drops it. An awaited loop therefore runs at the speed of the sends (as in 1.x, whose track waited for its own send); a caller that does not await is unaffected, and the 10,000-event backlog cap with its drops stays the last resort. Against a hung endpoint a wait lasts about one request timeout (10 s). No timer or handle: a waiting call never holds the process; at exit the drain's sends release it.
 
 ### sendBatch(batch)
 

@@ -13,6 +13,10 @@ export const MAX_IN_FLIGHT_SENDS = 4;
 // are dropped.
 export const MAX_WAITING_EVENTS = 10_000;
 
+// Backpressure: from this many events waiting for a send slot, an awaited track waits until
+// fewer wait (see whenBelowBackpressure), so awaited loops slow to the speed of the sends.
+export const BACKPRESSURE_WAITING_EVENTS = 1_000;
+
 export interface AvoBatchOptions {
   batchSize: number;
   batchFlushSeconds: number;
@@ -38,6 +42,8 @@ export class AvoBatchQueue<T> {
   private waitingEvents = 0;
   private inFlight = 0;
   private inFlightEventCount = 0;
+  // Resolved once fewer than BACKPRESSURE_WAITING_EVENTS events wait, or by clear().
+  private capacityWaiters: Array<() => void> = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   // Settled with the outcome of the batch that takes the current buffer, whichever drain
   // swaps it out (or `dropped` if clear() discards it). Created on demand.
@@ -131,6 +137,25 @@ export class AvoBatchQueue<T> {
     return this.track(outcome);
   }
 
+  /**
+   * Resolves once fewer than BACKPRESSURE_WAITING_EVENTS events wait for a send slot (at
+   * once if they already do), or when clear() runs. No timer: a freed slot releases it.
+   */
+  whenBelowBackpressure(): Promise<void> {
+    if (this.waitingEvents < BACKPRESSURE_WAITING_EVENTS) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.capacityWaiters.push(resolve));
+  }
+
+  private releaseCapacityWaiters(): void {
+    if (this.waitingEvents < BACKPRESSURE_WAITING_EVENTS && this.capacityWaiters.length > 0) {
+      const waiters = this.capacityWaiters;
+      this.capacityWaiters = [];
+      waiters.forEach((resolve) => resolve());
+    }
+  }
+
   /** Discards every buffered or waiting event unsent and cancels the scheduled flush. */
   clear(): void {
     this.clearTimer();
@@ -143,6 +168,7 @@ export class AvoBatchQueue<T> {
     this.waiting = [];
     this.waitingEvents = 0;
     discarded.forEach((batch) => batch.settle(this.dropped));
+    this.releaseCapacityWaiters();
   }
 
   private startSends(): void {
@@ -173,6 +199,7 @@ export class AvoBatchQueue<T> {
       }
       sent.then(done, failedInternally);
     }
+    this.releaseCapacityWaiters();
   }
 
   private dropOldestWaiting(count: number): void {

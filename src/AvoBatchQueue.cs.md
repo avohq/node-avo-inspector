@@ -17,6 +17,7 @@ In-memory batching buffer for Inspector events: collects events, forms a batch o
 - Exported constants: `MAX_TIMER_MS = 2_147_483_647` (largest safe `setTimeout` delay), `MAX_IN_FLIGHT_SENDS = 4`, `MAX_WAITING_EVENTS = 10_000`.
 - `AvoBatchOptions { batchSize; batchFlushSeconds; maxQueueSize; disableBatchTimer }`.
 - `new AvoBatchQueue<T>(options, dispatch: (batch) => Promise<T> /* should not reject or throw */, dropped: T, track = identity)`.
+- Constant `BACKPRESSURE_WAITING_EVENTS = 1_000` (exported).
 - Getters: `length` (unsent buffer), `waitingLength` (events waiting for a send slot), `inFlightEvents` (events in batches being sent), `hasScheduledFlush`.
 
 State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEvents` count, `inFlight` count, optional flush timer, and an optional `bufferOutcome` (the promise handed out by `bufferedBatchOutcome()` for the current buffer).
@@ -53,6 +54,12 @@ State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEve
 - When a dispatch settles: decrement `inFlight`, settle the batch with the dispatch result, then start further sends.
 - **IMPORTANT:** if `dispatch` throws synchronously or rejects, report it with `AvoLog.internal(error)` and `AvoLog.dropped(<batch size>, "internal error")` (both always on, rate-limited), and settle the batch with `dropped` (asynchronously, also for a synchronous throw): the slot is freed, the batch settles, and the next waiting batch starts.
 - Batches are dispatched in the order they were formed.
+- After starting sends (and after `clear()`), if `waitingEvents < BACKPRESSURE_WAITING_EVENTS`, resolve every capacity waiter.
+- `inFlightEvents` counts the events of dispatched batches until they settle.
+
+### `whenBelowBackpressure(): Promise<void>`
+
+- Resolves at once if `waitingEvents < BACKPRESSURE_WAITING_EVENTS` (1,000); otherwise registers a capacity waiter, resolved once a freed send slot (or `clear()`) brings the count below it. No timer and no handle: a waiter never holds the process.
 
 ### Flush timer
 

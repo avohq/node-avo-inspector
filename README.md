@@ -61,16 +61,22 @@ While an instance has events that are buffered or still being sent, the SDK keep
 
 At most 4 requests are sent at once. Batches formed while all 4 are busy wait their turn, and up to 10,000 events can wait. Beyond that the oldest waiting events are dropped and the drop is logged, so the number of events held for sending stays bounded when the endpoint is slow or down.
 
-A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush()` every few thousand events to let them finish.
+A loop that awaits each track, such as a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`, is slowed down to the speed of the sends, as in 1.x: once 1,000 events are waiting for a send slot, the promise of the next track call resolves only when fewer than 1,000 wait (the event itself is already queued). Against an endpoint that hangs, each such call waits at most about one request timeout (10 seconds). Calls you don't await are not slowed down, so a loop that tracks without awaiting can still fill the 10,000-event backlog and drop the oldest waiting events.
 
-`flush()` waits at most `timeoutMs` (10 seconds by default). A single call does not guarantee the backlog has drained: if the Inspector API is slower than the timeout, sends are still running when your loop resumes, and tracking more can still drop the oldest waiting events (the drop is logged). `flush()` tells you which case you are in: it resolves `true` once the instance has nothing buffered, waiting or in flight, and `false` if the timeout passed first. So flush again until it reports drained before tracking the next chunk. The loop always ends: each request gives up after 10 seconds, so every send finishes, successfully or not, within a bounded time even when the endpoint hangs.
+At the end, flush until the instance reports drained. Each `flush()` waits at most `timeoutMs` (10 seconds by default) and resolves `true` once nothing is buffered, waiting or in flight, or `false` if the timeout passed first. Bound the attempts: each one shrinks the backlog, but against a hung endpoint draining can take minutes (up to about 1,000 waiting events, in batches of 30 sent 4 at a time, each giving up after 10 seconds), and tracking from elsewhere in the process can keep it from ever reporting drained.
 
 ```javascript
-for (let i = 0; i < rows.length; i++) {
-  await inspector.trackSchemaFromEvent(rows[i].event, rows[i].properties);
-  if (i % 5000 === 4999) while (!(await inspector.flush())) {}
+for (const row of rows) {
+  await inspector.trackSchemaFromEvent(row.event, row.properties);
 }
-while (!(await inspector.flush())) {}
+
+let drained = false;
+for (let attempt = 0; attempt < 6 && !drained; attempt++) {
+  drained = await inspector.flush();
+}
+if (!drained) {
+  console.error("Backfill: Avo Inspector did not drain; some events may not have been sent.");
+}
 ```
 
 # Flushing before exit (required)
@@ -214,7 +220,7 @@ Each kind prints at most one line per 10 seconds (per reason or status): the fir
   - it resolves with the HTTP status code instead of `undefined`;
   - besides network errors and timeouts, it rejects with `"Request failed"` without sending when a header value contains a control character (anything but tab) or a character above U+00FF.
 - **An API key containing a control character (anything but tab) or a character above U+00FF now throws in the constructor**, because the key is sent as a request header.
-- **At most 4 batches are sent at once**, and up to 10,000 events can wait to be sent; beyond that the oldest waiting events are dropped. A loop that tracks without yielding to I/O should flush every few thousand events until `flush()` reports drained (`while (!(await inspector.flush())) {}`); otherwise, with a slow endpoint, tracking more can drop the oldest waiting events (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)).
+- **At most 4 batches are sent at once**, and up to 10,000 events can wait to be sent; beyond that the oldest waiting events are dropped. An awaited `trackSchemaFromEvent` waits for a send slot once 1,000 events are waiting, so an awaited loop keeps pace with the sends, as in 1.x, instead of dropping events; calls that are not awaited are not slowed down (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)).
 - **A non-string `streamId` is converted, not rejected.** A number, bigint or boolean is sent as its string form; any other non-string is ignored. In 1.x the track promise rejected.
 - **A non-string `env` falls back to `dev`** with a warning. In 1.x the constructor threw a `TypeError`.
 - **`NaN`, `±Infinity` and exponent-form numbers such as `1e-7` are classified `float`.** 1.x classified them `int`.
