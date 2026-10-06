@@ -127,7 +127,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 - Returns null without fetching when validation is not set up (prod, or after `destroy()`).
 - Cache key: `AvoEventSpecCache.makeKey(apiKey, anonymousId, eventName)`.
 - Cache hit: validates against the cached response. Cache miss: fetches; a non-null response is cached and validated; a null response returns null.
-- **Waiting cap:** at most 1,000 events wait for a spec fetch at once, counted across every instance (the fetches share one 8-socket pool). A cache miss past the cap returns null at once (sent without validation; logged only when logging is on) instead of fetching. A waiting event frees its place when its fetch settles, or when its instance is destroyed.
+- **Waiting cap:** at most 1,000 events wait for a spec fetch at once, counted across every instance (the fetches share one 8-socket pool). A cache miss past the cap returns null at once (sent without validation; logged only when logging is on) instead of fetching. A waiting event frees its place when its fetch settles, when `fetch()` throws synchronously (the call then falls back to an unvalidated send), or when its instance is destroyed.
 - A response whose `eventSpec` is null returns null.
 - Validation input: each schema entry, plus `propertyValue` (the raw value's `String()` form, or its `Object.prototype.toString` tag when conversion throws) when the raw value is defined. Validation id is `eventId`, else `eventName`.
 - Result: `{ metadata, propertyResults }`.

@@ -2,6 +2,7 @@ import { request, Agent, RequestOptions } from "https";
 import { request as httpRequest, Agent as HttpAgent, ClientRequest } from "http";
 import { EventSpecResponse, EventSpec, EventSpecMetadata, PropertyConstraint } from "./AvoEventSpecFetchTypes";
 import { AvoInspector } from "../AvoInspector";
+import { AvoLog } from "../AvoLog";
 
 type FetchCallback = (result: EventSpecResponse | null) => void;
 
@@ -82,71 +83,75 @@ export class AvoEventSpecFetcher {
       this.resolveCallbacks(dedupeKey, owner, result, deferCallbacks);
     };
 
-    const queryParams = new URLSearchParams({
-      apiKey: this.apiKey,
-      eventName,
-      streamId,
-    });
-
-    const options = {
-      hostname: this.hostname,
-      port: this.port,
-      path: `${AvoEventSpecFetcher.specEndpoint}?${queryParams.toString()}`,
-      method: "GET",
-      agent: this.protocol === "http:" ? sharedHttpAgent : this.agent,
-      headers: {
-        Accept: "application/json",
-      },
-    };
-
-    if (AvoInspector.shouldLog) {
-      console.log("Avo Inspector: [network] GET " + this.protocol + "//" + options.hostname + AvoEventSpecFetcher.specEndpoint + "?eventName=" + encodeURIComponent(eventName));
-    }
-
-    let req: ClientRequest;
+    // Anything that throws from here on would leave the key registered with no request
+    // behind it, and every later fetch of the key would wait on it forever.
+    let req: ClientRequest | undefined;
     try {
-      req = this.send(options, eventName, settle);
-    } catch (e) {
+      const queryParams = new URLSearchParams({
+        apiKey: this.apiKey,
+        eventName,
+        streamId,
+      });
+
+      const options = {
+        hostname: this.hostname,
+        port: this.port,
+        path: `${AvoEventSpecFetcher.specEndpoint}?${queryParams.toString()}`,
+        method: "GET",
+        agent: this.protocol === "http:" ? sharedHttpAgent : this.agent,
+        headers: {
+          Accept: "application/json",
+        },
+      };
+
       if (AvoInspector.shouldLog) {
-        console.error("Avo Inspector: [network] Spec fetch error: " + e);
+        console.log("Avo Inspector: [network] GET " + this.protocol + "//" + options.hostname + AvoEventSpecFetcher.specEndpoint + "?eventName=" + eventName);
       }
-      settle(null, true);
-      return;
-    }
-    const sent = req;
-    this.requests.add(sent);
-    // `deadline` is first the wait for a socket, then the fetch's own budget; settling
-    // clears whichever is armed.
-    deadline = setTimeout(() => {
-      if (AvoInspector.shouldLog) {
-        console.error("Avo Inspector: [network] Spec fetch got no connection within " + AvoEventSpecFetcher.socketWaitTimeoutMs + "ms");
-      }
-      sent.destroy();
-      settle(null);
-    }, AvoEventSpecFetcher.socketWaitTimeoutMs);
-    deadline.unref();
-    sent.once("socket", () => {
-      if (settled) {
-        return;
-      }
-      clearTimeout(deadline);
+
+      const sent = this.send(options, eventName, settle);
+      req = sent;
+      this.requests.add(sent);
+      // `deadline` is first the wait for a socket, then the fetch's own budget; settling
+      // clears whichever is armed.
       deadline = setTimeout(() => {
         if (AvoInspector.shouldLog) {
-          console.error("Avo Inspector: [network] Spec fetch timed out after " + AvoEventSpecFetcher.fetchTimeoutMs + "ms");
+          console.error("Avo Inspector: [network] Spec fetch got no connection within " + AvoEventSpecFetcher.socketWaitTimeoutMs + "ms");
         }
         sent.destroy();
         settle(null);
-      }, AvoEventSpecFetcher.fetchTimeoutMs);
+      }, AvoEventSpecFetcher.socketWaitTimeoutMs);
       deadline.unref();
-    });
-    sent.on("close", () => {
-      clearTimeout(deadline);
-      this.requests.delete(sent);
-      // A request destroyed before it got a socket can close with no response and no
-      // error. settle is idempotent and owner-checked, so this is a no-op otherwise.
-      settle(null);
-    });
-    sent.end();
+      sent.once("socket", () => {
+        if (settled) {
+          return;
+        }
+        clearTimeout(deadline);
+        deadline = setTimeout(() => {
+          if (AvoInspector.shouldLog) {
+            console.error("Avo Inspector: [network] Spec fetch timed out after " + AvoEventSpecFetcher.fetchTimeoutMs + "ms");
+          }
+          sent.destroy();
+          settle(null);
+        }, AvoEventSpecFetcher.fetchTimeoutMs);
+        deadline.unref();
+      });
+      sent.on("close", () => {
+        clearTimeout(deadline);
+        this.requests.delete(sent);
+        // A request destroyed before it got a socket can close with no response and no
+        // error. settle is idempotent and owner-checked, so this is a no-op otherwise.
+        settle(null);
+      });
+      sent.end();
+    } catch (e) {
+      if (AvoInspector.shouldLog) {
+        console.error("Avo Inspector: [network] Spec fetch error (" + AvoLog.errorType(e) + ")");
+      }
+      if (req) {
+        req.destroy();
+      }
+      settle(null, true);
+    }
   }
 
   // Starts the GET; every outcome (response, parse failure, transport error) goes to settle.

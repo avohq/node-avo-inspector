@@ -947,7 +947,7 @@ export class AvoInspector {
 
     const fetcher = this.eventSpecFetcher;
     return new Promise((resolve, reject) => {
-      fetcher.fetch(eventName, anonymousId, (result) => {
+      const onSpec = (result: EventSpecResponse | null) => {
         release();
         if (result !== null) {
           cache.set(cacheKey, result);
@@ -964,7 +964,14 @@ export class AvoInspector {
           }
           resolve(null);
         }
-      });
+      };
+      try {
+        fetcher.fetch(eventName, anonymousId, onSpec);
+      } catch (err) {
+        // No callback will come: free the slot and fall back to an unvalidated send.
+        release();
+        reject(err);
+      }
     });
   }
 

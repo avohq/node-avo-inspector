@@ -45,6 +45,7 @@ internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, r
 
 1. Build the dedupe key. If a request for that key is already in flight, append the callback and return (no new request).
 2. Otherwise register `{ callbacks: [callback], owner }` with a fresh owner token, then send `GET <target>/trackingPlan/eventSpec?apiKey=&eventName=&streamId=` with `Accept: application/json` (over `http` for an `http:` mock endpoint, `https` otherwise), through the shared agent, and add the request to the instance's request set. Start the socket-wait timer (unref'd) at once. When the request is assigned a socket (and has not settled yet), replace it with the fetch's deadline timer (unref'd).
+   **IMPORTANT:** everything after the key is registered runs inside one try: any synchronous throw (building the query or the debug line, `request()` itself, wiring the listeners) destroys the request if one was created and settles the key with `null` (callbacks deferred). Otherwise the key would stay registered with no request behind it, and every later fetch of it would wait forever. The debug line prints the event name as is, never `encodeURIComponent` (which throws for a lone surrogate).
 3. On response end:
    - status != 200 -> settle with `null`.
    - status 200 -> `JSON.parse` the body and `parseWireResponse`; a parse/convert exception settles with `null`.
