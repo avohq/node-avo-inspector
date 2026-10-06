@@ -74,7 +74,7 @@ Called by application code (manual tracking) and by Avo Codegen (`_avoFunctionTr
 7. Builds the network handler (`appName` defaults to `""`) and the deduplicator.
 8. Batch options: each numeric option that is present but invalid (`batchSize`/`maxQueueSize` not a positive integer, `batchFlushSeconds` not finite and > 0) warns "Invalid <name> <value>. Using default <default>." and uses the default. `disableBatchTimer` is true only when exactly `true`. `batchSize` is 1 in dev. When `batchSize > maxQueueSize` it warns and keeps both values (a batch never fills; oldest events are dropped).
 9. Creates the batch queue: dispatch is `sendBatch`, a discarded batch's outcome is `"failed"`, and every swapped-out batch is registered as pending as soon as it is swapped out.
-10. Outside prod, creates the event spec fetcher, cache and validator.
+10. Outside prod, creates the event spec fetcher (with the network handler's `mockEndpoint`), cache and validator.
 
 ### trackSchemaFromEvent(eventName, eventProperties, streamId?, options?) / _avoFunctionTrackSchemaFromEvent(eventName, eventProperties, eventId, eventHash, streamId?, options?)
 
@@ -92,7 +92,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 
 1. Reads the current sampling rate and stamps `createdAt` at call time. If `Math.random() > rate`, the event is dropped (logged) and the call resolves with the schema.
 2. Body: validated body (`buildEventProperties` + `bodyForValidatedEventSchemaCall`) when a validation result exists, else `bodyForEventSchemaCall`; both receive the resolved track options. The body's `samplingRate` and `createdAt` are overwritten with the values captured at call time.
-3. Validation inactive (prod, after destroy, or while a valid mock-endpoint override is in effect, i.e. `AvoNetworkCallsHandler.mockEndpointFor(env)` is non-null): the body is enqueued immediately. An invalid override value is ignored, so validation stays on.
+3. Validation inactive (prod, or after destroy): the body is enqueued immediately. A mock-endpoint override does not turn validation off: the spec fetcher is created with the network handler's `mockEndpoint`, so spec fetches go to the mock server too.
 4. Validation active: `fetchAndValidate` runs first. A rejection is logged as a warning (when logging is on) that names only the error's type (`AvoLog.errorType`), never its message, and the event is sent without validation. An error thrown while validating rejects on both paths: on a cache hit directly, and on a cache miss the fetcher callback catches it and rejects (the fetcher swallows callback errors, so an uncaught throw there would leave the call pending forever). If `destroy()` ran meanwhile, resolves `[]`. A body-building error is logged with `AvoLog.internal` and rejects with the internal error message. Otherwise the body is enqueued. The work (validation, plus any send the enqueue triggered) is pending until it settles.
 5. `flush()` marks validations pending at its start; when such a validation enqueues without triggering a send, one drain is scheduled (`setImmediate`) and shared by every marked validation that settles in the same event-loop turn. **IMPORTANT:** the validation's pending work then waits for `batchQueue.bufferedBatchOutcome()`, the batch that actually carries the event, not for that scheduled drain: a size trigger or the timer can swap the buffer out first, and `flush()` must still wait for that batch's send.
 6. Resolution:

@@ -12,11 +12,21 @@ import { restoreEnv, trackingEndpoint } from "./constants";
 let server: Server;
 let port: number;
 let requests: string[] = [];
+let specRequests: string[] = [];
 const defaultEndpoint = process.env.AVO_INSPECTOR_MOCK_ENDPOINT;
+const specMetadata = { schemaId: "mock-schema", branchId: "mock-branch", latestActionId: "mock-action", sourceId: "mock-source" };
 
 beforeAll(async () => {
+  // Answers spec fetches with a spec for property "a", and records track requests.
   server = createServer((req, res) => {
-    requests.push(req.url || "");
+    const url = req.url || "";
+    if (url.startsWith("/trackingPlan/eventSpec")) {
+      specRequests.push(url);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ events: [{ b: "mock-branch", id: "e", vids: [], p: { a: { t: "string" } } }], metadata: specMetadata }));
+      return;
+    }
+    requests.push(url);
     req.resume();
     req.on("end", () => {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -34,6 +44,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   requests = [];
+  specRequests = [];
   (AvoNetworkCallsHandler as any).warnedMockEndpoint = null;
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "warn").mockImplementation(() => {});
@@ -151,10 +162,51 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     expect((create("staging") as any).isValidationActive()).toBe(true);
   });
 
-  test("a valid value turns event spec validation off", () => {
-    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = `http://127.0.0.1:${port}`;
+  test("a valid value routes event spec fetches to the mock endpoint, and validation stays on", async () => {
+    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = `http://127.0.0.1:${port}/private/path?token=abc`;
+    const inspector = create("staging");
+    const sent: any[] = [];
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockImplementation((batch) => { sent.push(...batch); return Promise.resolve(200); });
 
-    expect((create("staging") as any).isValidationActive()).toBe(false);
+    await inspector.trackSchemaFromEvent("Spec Event", { a: "x" }, "stream-1");
+    await inspector.flush();
+
+    // The mock's origin, the spec path, and the usual query; never the override's own path.
+    expect(specRequests).toHaveLength(1);
+    const url = new URL(specRequests[0], "http://mock");
+    expect(url.pathname).toBe("/trackingPlan/eventSpec");
+    expect(url.searchParams.get("apiKey")).toBe("secret-key-123");
+    expect(url.searchParams.get("eventName")).toBe("Spec Event");
+    expect(url.searchParams.get("streamId")).toBe("stream-1");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].eventSpecMetadata).toEqual(specMetadata);
+    inspector.destroy();
+  });
+
+  test("the override is read once per instance, not per event or send", async () => {
+    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = `http://127.0.0.1:${port}`;
+    const read = jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor");
+    const inspector = new AvoInspector({ apiKey: "secret-key-123", env: "dev", version: "1.0.0" });
+
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, { a: "x" });
+    await inspector.flush();
+
+    expect(requests).toHaveLength(5);
+    expect(read).toHaveBeenCalledTimes(1);
+    inspector.destroy();
+  });
+
+  test("the default test setup answers event spec fetches, so tests exercise validation", async () => {
+    restoreEnv("AVO_INSPECTOR_MOCK_ENDPOINT", defaultEndpoint);
+    const inspector = create("staging");
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+
+    await inspector.trackSchemaFromEvent("E", { a: "x" }, "s");
+
+    // An answered fetch (even with no spec) is cached; a failed one is not.
+    expect((inspector as any).eventSpecCache.get("secret-key-123\0s\0E")).toBeDefined();
+    inspector.destroy();
   });
 
   test("prod ignores the variable, without any warning", async () => {

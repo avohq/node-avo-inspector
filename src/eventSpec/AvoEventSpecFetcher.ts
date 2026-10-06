@@ -1,5 +1,5 @@
 import { request, Agent, RequestOptions } from "https";
-import { ClientRequest } from "http";
+import { request as httpRequest, Agent as HttpAgent, ClientRequest } from "http";
 import { EventSpecResponse, EventSpec, EventSpecMetadata, PropertyConstraint } from "./AvoEventSpecFetchTypes";
 import { AvoInspector } from "../AvoInspector";
 
@@ -15,9 +15,15 @@ interface PendingFetch {
 // request) cannot pile up idle TLS sockets. Idle sockets are capped and do not hold the
 // process open.
 const sharedAgent = new Agent({ keepAlive: true, maxSockets: 8, maxFreeSockets: 2 });
+// The same, for an http: mock endpoint.
+const sharedHttpAgent = new HttpAgent({ keepAlive: true, maxSockets: 8, maxFreeSockets: 2 });
 
 export class AvoEventSpecFetcher {
   private apiKey: string;
+  // Where spec requests go: api.avo.app, or the origin of the mock-endpoint override.
+  private protocol: "http:" | "https:" = "https:";
+  private hostname = "api.avo.app";
+  private port: number = 443;
   private inFlight: Map<string, PendingFetch> = new Map();
   private agent: Agent = sharedAgent;
   private requests: Set<ClientRequest> = new Set();
@@ -29,8 +35,16 @@ export class AvoEventSpecFetcher {
   // validations waiting for a spec (AvoInspector).
   private static fetchTimeoutMs = 10_000;
 
-  constructor(apiKey: string) {
+  /** `mockEndpoint`: a valid override URL (AvoNetworkCallsHandler.mockEndpoint), or null. */
+  constructor(apiKey: string, mockEndpoint: string | null = null) {
     this.apiKey = apiKey;
+    if (mockEndpoint !== null) {
+      const url = new URL(mockEndpoint);
+      this.protocol = url.protocol === "http:" ? "http:" : "https:";
+      // URL keeps the brackets of an IPv6 host; request() takes the bare address.
+      this.hostname = url.hostname.replace(/^\[(.*)\]$/, "$1");
+      this.port = url.port ? Number(url.port) : this.protocol === "http:" ? 80 : 443;
+    }
   }
 
   fetch(
@@ -73,18 +87,18 @@ export class AvoEventSpecFetcher {
     });
 
     const options = {
-      hostname: "api.avo.app",
-      port: 443,
+      hostname: this.hostname,
+      port: this.port,
       path: `${AvoEventSpecFetcher.specEndpoint}?${queryParams.toString()}`,
       method: "GET",
-      agent: this.agent,
+      agent: this.protocol === "http:" ? sharedHttpAgent : this.agent,
       headers: {
         Accept: "application/json",
       },
     };
 
     if (AvoInspector.shouldLog) {
-      console.log("Avo Inspector: [network] GET https://" + options.hostname + AvoEventSpecFetcher.specEndpoint + "?eventName=" + encodeURIComponent(eventName));
+      console.log("Avo Inspector: [network] GET " + this.protocol + "//" + options.hostname + AvoEventSpecFetcher.specEndpoint + "?eventName=" + encodeURIComponent(eventName));
     }
 
     let req: ClientRequest;
@@ -125,7 +139,8 @@ export class AvoEventSpecFetcher {
     eventName: string,
     settle: (result: EventSpecResponse | null) => void
   ): ClientRequest {
-    const req = request(options, (res) => {
+    const send = this.protocol === "http:" ? httpRequest : request;
+    const req = send(options, (res) => {
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: [network] Spec response status: " + res.statusCode + " " + res.statusMessage);
       }

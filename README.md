@@ -228,7 +228,8 @@ To test against a local mock server, set the `AVO_INSPECTOR_MOCK_ENDPOINT` envir
 
 - Track requests go to that URL exactly as they would go to Avo, including the `api-key` header, so point it only at a server you control.
 - It is ignored when `env` is `prod`, whatever its value.
-- While it is set, event spec validation is turned off, because a mock server does not serve event specs.
+- Event spec fetches (`dev` and `staging`) go to the same server: `GET <scheme>://<host>:<port>/trackingPlan/eventSpec?apiKey=…&eventName=…&streamId=…`, with the API key in the query. A mock that has no specs to serve can answer `200` with `{"events": [], "metadata": {}}` (events are then sent without validation); any other answer, such as a 404, also sends them without validation.
+- The variable is read once, when an instance is created; set it before constructing your instances.
 - The first redirected send prints a one-time warning naming the scheme, host and port (never the path, the query or the API key).
 - A value that is not an `http` or `https` URL is ignored with a one-time warning that gives the reason but never the value, and requests go to Avo as usual.
 

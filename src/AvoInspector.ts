@@ -370,7 +370,8 @@ export class AvoInspector {
 
     // Initialize event spec validation for dev/staging only
     if (this.environment !== AvoInspectorEnv.Prod) {
-      this.eventSpecFetcher = new AvoEventSpecFetcher(this.apiKey);
+      // Spec fetches follow the track endpoint to a mock server, so validation runs there too.
+      this.eventSpecFetcher = new AvoEventSpecFetcher(this.apiKey, this.avoNetworkCallsHandler.mockEndpoint);
       this.eventSpecCache = new AvoEventSpecCache();
       this.eventValidator = new EventValidator();
     }
@@ -722,12 +723,7 @@ export class AvoInspector {
   }
 
   private isValidationActive(): boolean {
-    // The conformance mock endpoint serves only the track call, so validation (which
-    // would reach the real spec endpoint) is skipped while the override is in effect.
-    return (
-      this.eventSpecFetcher !== null &&
-      AvoNetworkCallsHandler.mockEndpointFor(this.environment) === null
-    );
+    return this.eventSpecFetcher !== null;
   }
 
   /**

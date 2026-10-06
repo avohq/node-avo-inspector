@@ -9,7 +9,7 @@ import { VERSION } from "../AvoInspectorVersion";
 import { deepEquals } from "../utils";
 import * as crypto from "crypto";
 import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
-import { restoreEnv } from "./constants";
+import { answerSpecFetch, restoreEnv } from "./constants";
 
 type Captured = { headers: IncomingMessage["headers"]; body: any[] };
 type Responder = (req: IncomingMessage, res: ServerResponse) => void;
@@ -27,6 +27,9 @@ const defaultEndpoint = process.env.AVO_INSPECTOR_MOCK_ENDPOINT;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
+    if (answerSpecFetch(req, res)) {
+      return;
+    }
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
@@ -534,6 +537,9 @@ describe("batching", () => {
   // send in flight in one synchronous step (drain -> dispatch -> sendBatch -> trackPending),
   // so flush() cannot run in between. These tests pin that invariant.
   describe("a swapped-out batch is in flight before any other code runs", () => {
+    // prod: no event spec validation, so each track enqueues its event synchronously.
+    const prod = (extra: object = {}) =>
+      new AvoInspector({ apiKey: "test-key", env: "prod", version: "1.0.0", appName: "App", ...extra });
     const deferredSend = (inspector: AvoInspector) => {
       let release: (status: number) => void = () => {};
       const send = jest
@@ -543,7 +549,7 @@ describe("batching", () => {
     };
 
     test("size trigger: registered synchronously, and flush() waits for it", async () => {
-      const inspector = staging({ batchSize: 2 });
+      const inspector = prod({ batchSize: 2 });
       const { release } = deferredSend(inspector);
 
       inspector.trackSchemaFromEvent("E1", {});
@@ -562,7 +568,7 @@ describe("batching", () => {
 
     test("scheduled flush: registered synchronously when the timer fires", () => {
       jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
-      const inspector = staging({ batchSize: 30, batchFlushSeconds: 1 });
+      const inspector = prod({ batchSize: 30, batchFlushSeconds: 1 });
       deferredSend(inspector);
 
       inspector.trackSchemaFromEvent("E1", {});
@@ -570,6 +576,7 @@ describe("batching", () => {
 
       expect((inspector as any).batchQueue.length).toBe(0);
       expect((inspector as any).pending.size).toBe(1);
+      inspector.destroy();
     });
   });
 

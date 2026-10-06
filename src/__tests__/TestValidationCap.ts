@@ -1,5 +1,5 @@
 import { AvoInspector } from "../AvoInspector";
-import { AvoNetworkCallsHandler, InspectorBody } from "../AvoNetworkCallsHandler";
+import { InspectorBody } from "../AvoNetworkCallsHandler";
 import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
 
 // At most 1,000 events wait for a spec fetch at once, process-wide; past that an event is
@@ -11,7 +11,6 @@ beforeEach(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "warn").mockImplementation(() => {});
   jest.spyOn(console, "error").mockImplementation(() => {});
-  jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
 });
 
 afterEach(() => {

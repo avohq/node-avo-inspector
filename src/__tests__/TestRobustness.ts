@@ -36,6 +36,13 @@ function holdSends(inspector: AvoInspector) {
   return { send, batches, releaseAll };
 }
 
+// Polls until `done` holds (up to 5 s).
+async function waitFor(done: () => boolean) {
+  for (let waited = 0; !done() && waited < 5000; waited += 5) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 const names = (batches: Array<Array<InspectorBody>>) =>
   batches.map((batch) => batch.map((event) => event.eventName));
 
@@ -142,6 +149,9 @@ describe("bounded concurrent batch sends", () => {
     const { send, releaseAll } = holdSends(inspector);
 
     const tracks = Array.from({ length: 6 }, (_, i) => inspector.trackSchemaFromEvent("E" + i, { a: i }));
+    // Each event is sent once its spec fetch (answered by the test mock) completes.
+    await waitFor(() => send.mock.calls.length >= 4);
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(send).toHaveBeenCalledTimes(4);
 
     await releaseAll();
@@ -197,11 +207,9 @@ describe("deduplicator cleanup", () => {
 });
 
 describe("flush() during event spec validation", () => {
-  const { AvoNetworkCallsHandler } = require("../AvoNetworkCallsHandler");
   const { AvoEventSpecFetcher } = require("../eventSpec/AvoEventSpecFetcher");
 
   test("events whose validations settle together go out in one batch", async () => {
-    jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
     // Hold every spec response, then deliver them all in one synchronous loop: they settle
     // in the same event-loop turn. (One timer per fetch did not guarantee that: on a slow
     // run the timers straddled a millisecond and fired in different turns.)
@@ -226,7 +234,6 @@ describe("flush() during event spec validation", () => {
   });
 
   test("waits for a flush-marked event's batch even when another drain sent it first", async () => {
-    jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
     const specCallbacks: { [name: string]: (result: null) => void } = {};
     jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((...args: any[]) => {
       specCallbacks[args[0]] = args[2];

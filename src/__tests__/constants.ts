@@ -1,3 +1,4 @@
+import { IncomingMessage, ServerResponse } from "http";
 import { AvoInspectorEnv } from "../AvoInspectorEnv";
 
 const defaultOptions = {
@@ -61,6 +62,17 @@ const restoreEnv = (name: string, value: string | undefined): void => {
   }
 };
 
+// Answers an event spec fetch with a valid "no spec" response, so the SDK sends the event
+// without validation. Mock servers call it first and handle track requests otherwise.
+const answerSpecFetch = (req: IncomingMessage, res: ServerResponse): boolean => {
+  if (req.method !== "GET" || !(req.url || "").startsWith("/trackingPlan/eventSpec")) {
+    return false;
+  }
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ events: [], metadata: {} }));
+  return true;
+};
+
 // Records a server's open sockets so a test can close them all on any Node version
 // (server.closeAllConnections() needs Node 18.2; engines allows 14).
 const trackConnections = (server: { on(event: "connection", cb: (socket: any) => void): unknown }) => {
@@ -73,6 +85,7 @@ const trackConnections = (server: { on(event: "connection", cb: (socket: any) =>
 };
 
 export {
+  answerSpecFetch,
   restoreEnv,
   trackConnections,
   defaultOptions,

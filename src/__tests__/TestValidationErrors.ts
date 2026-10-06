@@ -1,5 +1,5 @@
 import { AvoInspector } from "../AvoInspector";
-import { AvoNetworkCallsHandler, InspectorBody } from "../AvoNetworkCallsHandler";
+import { InspectorBody } from "../AvoNetworkCallsHandler";
 import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
 
 // An error thrown while validating against a fetched spec must not leave the track call,
@@ -9,8 +9,7 @@ beforeEach(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "warn").mockImplementation(() => {});
   jest.spyOn(console, "error").mockImplementation(() => {});
-  // Validation on (no endpoint override), with the spec delivered asynchronously.
-  jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
+  // The spec delivered asynchronously.
   jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((eventName, _s, callback) => {
     setImmediate(() => callback({
       eventSpec: { eventName, properties: [{ propertyName: "a", propertyType: "string", regex: ".*" }] },

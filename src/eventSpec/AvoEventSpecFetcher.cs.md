@@ -4,7 +4,7 @@ Fetches the tracking-plan event spec for one event from the Avo API over HTTPS, 
 
 ## Tech stack
 
-- TypeScript, Node.js `https` (`request`, `Agent`) and `http.ClientRequest`.
+- TypeScript, Node.js `https` and `http` (`request`, `Agent`, `ClientRequest`).
 - Types from `./AvoEventSpecFetchTypes`; reads the static `AvoInspector.shouldLog` flag for diagnostics.
 
 ## Data
@@ -12,7 +12,7 @@ Fetches the tracking-plan event spec for one event from the Avo API over HTTPS, 
 ```ts
 type FetchCallback = (result: EventSpecResponse | null) => void;
 class AvoEventSpecFetcher {
-  constructor(apiKey: string);
+  constructor(apiKey: string, mockEndpoint?: string | null);
   fetch(eventName: string, streamId: string, callback: FetchCallback): void;
   static parseWireResponse(wire: any, eventName: string): EventSpecResponse;
   destroy(): void;
@@ -20,8 +20,9 @@ class AvoEventSpecFetcher {
 ```
 
 - In-flight map: dedupe key `"<apiKey>:<streamId>:<eventName>"` -> `{ callbacks, owner }`: the waiting callbacks and an owner token identifying the request that serves the key.
-- Per-fetch deadline: `private static fetchTimeoutMs = 10_000` (overridable in tests), a wall-clock budget from the moment the fetch is requested.
-- Connection pool: **one module-level keep-alive `https.Agent` shared by every instance**, `maxSockets: 8`, `maxFreeSockets: 2`. Idle sockets are unref'd and do not keep the process alive.
+- Target: `https://api.avo.app:443` by default. With a `mockEndpoint` (the valid `AVO_INSPECTOR_MOCK_ENDPOINT` override, as read by `AvoNetworkCallsHandler`), that URL's scheme, host and port (default 80/443); its path and query are not used.
+- Per-fetch deadline: `private static fetchTimeoutMs = 10_000` (overridable in tests), counted from the moment the request is assigned a socket.
+- Connection pool: **one module-level keep-alive `https.Agent` shared by every instance**, `maxSockets: 8`, `maxFreeSockets: 2` (and an `http.Agent` with the same settings for an `http:` mock endpoint). Idle sockets are unref'd and do not keep the process alive.
 - Request set: each instance tracks its own open `ClientRequest`s; a request leaves the set on `close`.
 
 Wire format (input) and internal format (output):
@@ -42,7 +43,7 @@ internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, r
 ### fetch
 
 1. Build the dedupe key. If a request for that key is already in flight, append the callback and return (no new request).
-2. Otherwise register `{ callbacks: [callback], owner }` with a fresh owner token, start the fetch's deadline timer (unref'd), then send `GET https://api.avo.app:443/trackingPlan/eventSpec?apiKey=&eventName=&streamId=` with `Accept: application/json`, through the shared agent, and add the request to the instance's request set. The deadline is created before the request because a response can settle synchronously.
+2. Otherwise register `{ callbacks: [callback], owner }` with a fresh owner token, then send `GET <target>/trackingPlan/eventSpec?apiKey=&eventName=&streamId=` with `Accept: application/json` (over `http` for an `http:` mock endpoint, `https` otherwise), through the shared agent, and add the request to the instance's request set. When the request is assigned a socket (and has not settled yet), start its deadline timer (unref'd).
 3. On response end:
    - status != 200 -> settle with `null`.
    - status 200 -> `JSON.parse` the body and `parseWireResponse`; a parse/convert exception settles with `null`.

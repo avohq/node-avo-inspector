@@ -7,7 +7,7 @@ import { join } from "path";
 import { gunzipSync } from "zlib";
 
 import { AvoInspector } from "../AvoInspector";
-import { restoreEnv, trackConnections } from "./constants";
+import { answerSpecFetch, restoreEnv, trackConnections } from "./constants";
 
 // These tests run a real Node process that exits on its own, so they need the compiled SDK.
 const repoRoot = join(__dirname, "..", "..");
@@ -24,6 +24,9 @@ beforeAll(async () => {
   ]);
 
   server = createServer((req, res) => {
+    if (answerSpecFetch(req, res)) {
+      return;
+    }
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
@@ -78,7 +81,10 @@ describe("exit against an endpoint that never answers", () => {
   let hungRequests: number[] = [];
 
   beforeAll(async () => {
-    hung = createServer((req) => {
+    hung = createServer((req, res) => {
+      if (answerSpecFetch(req, res)) {
+        return;
+      }
       const chunks: Buffer[] = [];
       req.on("data", (c: Buffer) => chunks.push(c));
       req.on("end", () => {
@@ -122,6 +128,9 @@ describe("exit while an explicit long flush() runs", () => {
   beforeAll(async () => {
     // Answers every request after 6 s.
     slow = createServer((req, res) => {
+      if (answerSpecFetch(req, res)) {
+        return;
+      }
       req.resume();
       req.on("end", () => {
         slowRequests++;

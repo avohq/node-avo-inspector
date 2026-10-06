@@ -2,7 +2,6 @@ import { format } from "util";
 import * as crypto from "crypto";
 
 import { AvoInspector } from "../AvoInspector";
-import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
 import { AvoEventSpecFetcher } from "../eventSpec/AvoEventSpecFetcher";
 
 // With logging on, log lines show schema types, never raw property values. The flag is
@@ -55,7 +54,6 @@ test("log lines show schema types and never property values or the API key", asy
   await encrypting.trackSchemaFromEvent("Encrypted", { cyclic, email: MARKER });
 
   // Event spec validation, with a regex the value fails.
-  jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
   jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((eventName, _s, callback) =>
     callback({
       eventSpec: { eventName, properties: [{ propertyName: "email", propertyType: "string", regex: "^nope$" }] },
@@ -105,7 +103,6 @@ describe("caught errors never print their message", () => {
   });
 
   test("an event spec validation that throws with a property value logs only the error's type", async () => {
-    jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
     jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((_e, _s, callback) =>
       callback({ eventSpec: { eventName: "E", properties: [] }, metadata: {} } as any)
     );

@@ -1,7 +1,9 @@
 // Keeps every test off real hosts (api.avo.app included).
 //
-// 1. Non-prod instances send to AVO_INSPECTOR_MOCK_ENDPOINT, which also turns off event spec
-//    fetching, so default it to a closed local port. Tests that need a server set their own.
+// 1. Non-prod instances send track requests and event spec fetches to
+//    AVO_INSPECTOR_MOCK_ENDPOINT: the local mock started by jest.globalSetup.ts, which
+//    answers spec fetches with "no spec". Falls back to a closed local port if unset.
+//    Tests that need a server set their own.
 // 2. Every TCP/TLS connection goes through net.Socket.prototype.connect. Connections to any
 //    host other than loopback are refused and recorded, and the test file fails if any
 //    were attempted (a prod instance ignores the mock endpoint, so this catches it too).

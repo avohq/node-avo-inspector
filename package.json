@@ -40,6 +40,8 @@
       "dist-native"
     ],
     "testRegex": "(/__tests__/.*|\\.(test|spec))\\.(ts|tsx|js)$",
+    "globalSetup": "<rootDir>/jest.globalSetup.ts",
+    "globalTeardown": "<rootDir>/jest.globalTeardown.ts",
     "setupFilesAfterEnv": [
       "<rootDir>/jest.setup.ts"
     ],

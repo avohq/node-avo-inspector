@@ -77,6 +77,8 @@ export class AvoNetworkCallsHandler {
   private publicEncryptionKey?: string;
   private inFlightRequests: Set<ClientRequest> = new Set();
   private aborted = false;
+  /** The valid mock-endpoint override in effect for this instance, read once, or null. */
+  readonly mockEndpoint: string | null;
 
   private static trackingEndpoint = "https://api.avo.app/inspector/v2/track";
   private static mockEndpointEnvVar = "AVO_INSPECTOR_MOCK_ENDPOINT";
@@ -97,15 +99,15 @@ export class AvoNetworkCallsHandler {
     this.appVersion = appVersion;
     this.libVersion = libVersion;
     this.publicEncryptionKey = publicEncryptionKey;
+    this.mockEndpoint = AvoNetworkCallsHandler.mockEndpointFor(envName);
   }
 
   /**
    * The test-only endpoint override. Fail-closed: a prod instance never honors it,
    * whatever the surrounding process environment says. A value that is not an http(s)
    * URL is ignored (with a one-time warning), so callers only ever see a valid URL.
-   * `redirecting` marks a real send, which prints the one-time redirect warning.
    */
-  static mockEndpointFor(envName: string, redirecting: boolean = false): string | null {
+  static mockEndpointFor(envName: string): string | null {
     if (envName === "prod") {
       return null;
     }
@@ -132,15 +134,17 @@ export class AvoNetworkCallsHandler {
       );
       return null;
     }
-    if (redirecting) {
-      // Scheme, host and port only: the path or query may carry sensitive values.
-      AvoNetworkCallsHandler.warnOnce(
-        "redirect",
-        "[Avo Inspector] AVO_INSPECTOR_MOCK_ENDPOINT is set: sending to " + url.protocol + "//" +
-          url.host + " instead of api.avo.app (ignored in prod)."
-      );
-    }
     return override;
+  }
+
+  // Printed on the first send redirected to the override.
+  private static warnRedirect(url: URL): void {
+    // Scheme, host and port only: the path or query may carry sensitive values.
+    AvoNetworkCallsHandler.warnOnce(
+      "redirect",
+      "[Avo Inspector] AVO_INSPECTOR_MOCK_ENDPOINT is set: sending to " + url.protocol + "//" +
+        url.host + " instead of api.avo.app (ignored in prod)."
+    );
   }
 
   // Warnings about the override print once per process, whatever the logging flag, on
@@ -256,10 +260,10 @@ export class AvoNetworkCallsHandler {
         }
       }
 
-      const url = new URL(
-        AvoNetworkCallsHandler.mockEndpointFor(this.envName, true) ||
-          AvoNetworkCallsHandler.trackingEndpoint
-      );
+      const url = new URL(this.mockEndpoint || AvoNetworkCallsHandler.trackingEndpoint);
+      if (this.mockEndpoint) {
+        AvoNetworkCallsHandler.warnRedirect(url);
+      }
       const send = url.protocol === "http:" ? httpRequest : httpsRequest;
 
       if (AvoInspector.shouldLog) {
