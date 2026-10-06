@@ -239,7 +239,7 @@ describe("exit deadline", () => {
   });
 
   afterEach(() => {
-    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = defaultEndpoint;
+    restoreEnv("AVO_INSPECTOR_MOCK_ENDPOINT", defaultEndpoint);
     (AvoInspector as any).exitDeadline = null;
     jest.restoreAllMocks();
   });

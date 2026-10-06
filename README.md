@@ -129,7 +129,7 @@ inspector.trackSchemaFromEvent("Event name", {
 });
 ```
 
-`trackSchemaFromEvent` returns a promise that resolves with the extracted schema once the event is queued. In `dev` the event is sent within the call, and the promise resolves `[]` if the Inspector API answers with a non-200 status. You can pass an optional stream id as the third argument to correlate events.
+`trackSchemaFromEvent` returns a promise that resolves with the extracted schema once the event has been through sampling: when the event is queued, or at once when sampling drops it (a dropped event is never queued, so `flush()` does not send it either). In `dev` a queued event is sent within the call, and the promise resolves `[]` if the Inspector API answers with a non-200 status. You can pass an optional stream id as the third argument to correlate events.
 
 ## Schema extraction limits
 
@@ -156,7 +156,7 @@ inspector.extractSchema({ order });
 
 Each event carries its own `createdAt`, stamped when `trackSchemaFromEvent` is called. Events in a batch are not guaranteed to be in call order: in `dev` and `staging`, an event whose spec must first be fetched for validation joins the queue when the fetch completes, so it can be sent after events tracked later. Use `createdAt` if you need the call order.
 
-At most 1,000 events wait for an event spec fetch at once, across every instance in the process. When that many are already waiting (for example when the Avo API is slow), further events are sent at once without validation instead of waiting. A spec fetch that gets no connection within 10 seconds, or no answer within 10 seconds of getting one, is abandoned, and its event is sent without validation.
+At most 1,000 events wait for an event spec fetch at once, across every instance in the process. When that many are already waiting (for example when the Avo API is slow), further events are sent at once without validation instead of waiting. A spec fetch that gets no connection within 10 seconds, or no answer within 10 seconds of getting one, is abandoned, and its event is sent without validation, so an event waits for its spec for about 20 seconds at most.
 
 ## Gateway options
 
@@ -203,7 +203,7 @@ Each kind prints at most one line per 10 seconds (per reason or status): the fir
 
 2.0 implements spec 3.0.1. These are the changes you may notice:
 
-- **The promise resolves when the event is queued, not when it is delivered.** Outside `dev`, events are batched (see [Batching options](#batching-options)), so `await inspector.trackSchemaFromEvent(...)` no longer means the event reached Avo. In `dev` each event is still sent within the call.
+- **The promise resolves when the event is queued (or dropped by sampling), not when it is delivered.** Outside `dev`, events are batched (see [Batching options](#batching-options)), so `await inspector.trackSchemaFromEvent(...)` no longer means the event reached Avo. In `dev` each event is still sent within the call.
 - **The SDK no longer keeps your process alive.** 1.x ran a keep-alive timer while sends were pending; it is gone. Buffered events are still sent, best-effort, when the process ends naturally (on `beforeExit`), but not on `process.exit()`, on signals, or when a serverless function is frozen. Call `await inspector.flush()` in those cases (see [Flushing before exit](#flushing-before-exit-required)).
 - **A non-200 response in `dev` resolves `[]`.** 1.x resolved the extracted schema whatever the status. Outside `dev` the promise resolves the schema, because the send happens later.
 - **`destroy()` terminates the instance.** It discards buffered events unsent and aborts in-flight requests. Afterwards `trackSchemaFromEvent` resolves `[]` and sends nothing; 1.x kept sending.

@@ -150,7 +150,7 @@ Terminates the instance: marks it destroyed; settles every track waiting on a sp
 ## Non-functional requirements
 
 - **IMPORTANT:** the SDK never keeps an idle process alive; only the exit drain holds it, for at most its 10 s deadline or the deadline of an explicit `flush()` still running, whichever is later. Other handles in the process can keep it running longer.
-- Events are batched outside dev; the track promise means "queued", not "delivered". Events whose spec must be fetched join the queue later, so batch order is not call order; `createdAt` preserves call time.
+- Events are batched outside dev; the track promise means "queued" (or "dropped by sampling", which also resolves the schema and is never sent), not "delivered". Events whose spec must be fetched join the queue later, so batch order is not call order; `createdAt` preserves call time.
 - An instance with buffered or pending work is strongly referenced by static state until its work finishes or it is destroyed.
 - Send failures never reject the track promise; only synchronous internal errors or body-building errors do. Validation failures degrade to an unvalidated send.
 - Logging state is global across instances; constructing any instance resets it.
