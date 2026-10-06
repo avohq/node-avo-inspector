@@ -726,9 +726,11 @@ export class AvoInspector {
   /**
    * Sends every buffered event, then waits until all in-flight sends (and spec fetches
    * that will enqueue) have completed or `timeoutMs` (default 10000) has elapsed.
-   * Always resolves. Call it before process exit or before a serverless handler returns.
+   * Resolves `true` if, when it resolves, this instance has nothing buffered, waiting or in
+   * flight (always after destroy()), and `false` if the timeout won. Never rejects. Call it
+   * before process exit or before a serverless handler returns.
    */
-  async flush(timeoutMs: number = DEFAULT_FLUSH_TIMEOUT_MS): Promise<void> {
+  async flush(timeoutMs: number = DEFAULT_FLUSH_TIMEOUT_MS): Promise<boolean> {
     const budget =
       typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs >= 0
         ? Math.min(timeoutMs, MAX_TIMER_MS)
@@ -741,6 +743,15 @@ export class AvoInspector {
     } finally {
       AvoInspector.explicitFlushDeadlines.delete(token);
     }
+    return this.hasDrained();
+  }
+
+  // Nothing buffered, waiting for a send slot, or in flight (spec validations included).
+  private hasDrained(): boolean {
+    return (
+      this.destroyed ||
+      (this.pending.size === 0 && this.batchQueue.length === 0 && this.batchQueue.waitingLength === 0)
+    );
   }
 
   // The body of flush(): also used by the exit drain, whose own deadline is not an explicit one.

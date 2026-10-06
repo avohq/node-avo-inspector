@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "child_process";
-import { mkdtempSync } from "fs";
+import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -15,10 +15,22 @@ test("the built declarations type-check with skipLibCheck off", () => {
   const outDir = mkdtempSync(join(tmpdir(), "avo-inspector-typings-"));
   execFileSync(...tsc(["-p", join(repoRoot, "tsconfig.json"), "--outDir", outDir]));
 
+  // A user's code, against the published signatures.
+  const consumer = join(outDir, "consumer.ts");
+  writeFileSync(consumer, [
+    `import { AvoInspector } from "./index";`,
+    `async function drain(inspector: AvoInspector): Promise<void> {`,
+    `  const drained: boolean = await inspector.flush(1000);`,
+    `  while (!(await inspector.flush())) {}`,
+    `  void drained;`,
+    `}`,
+    `void drain;`,
+  ].join("\n"));
+
   const result = spawnSync(...tsc([
     "--noEmit", "--skipLibCheck", "false", "--strict", "--target", "ES6",
     "--moduleResolution", "node", "--types", "node", "--typeRoots", join(repoRoot, "node_modules", "@types"),
-    join(outDir, "index.d.ts"),
+    join(outDir, "index.d.ts"), consumer,
   ]), { encoding: "utf8" });
 
   expect(result.stdout + result.stderr).toBe("");

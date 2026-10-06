@@ -105,14 +105,15 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 - `callInspectorWithBatchBody(batch)`: a numeric status other than 200 is `"non200"`, reported with `AvoLog.rejected(status)` unless destroyed; otherwise `"ok"` (logs "Saved event" per event when logging is on). A rejection is `"failed"`, reported with `AvoLog.failed(error)` unless destroyed; it prints the fixed transport reason or `Request failed (<type>)`, never an error's message. Both reports are always on and rate-limited; sends abandoned by `destroy()` are not reported.
 - **IMPORTANT:** at-most-once. A failed batch is dropped, never re-queued or retried.
 
-### flush(timeoutMs = 10000): Promise<void>
+### flush(timeoutMs = 10000): Promise<boolean>
 
 1. Budget: `timeoutMs` when it is a finite number >= 0 (capped at the max timer delay), else 10000.
-2. Destroyed: returns at once.
+2. Destroyed: resolves `true` at once (nothing is pending).
 3. Snapshots the pending promises present at call time, marks pending validations as flush-requested, and drains the queue (adding that send).
 4. Waits until all of those settle or the budget elapses (the budget timer does not hold the process open).
 5. **IMPORTANT:** never rejects.
 6. On return (every path): `AvoLog.flushPending(true)` prints the always-on counts whose 10 s window has expired; counts still inside their window stay pending.
+7. **Result:** resolves `true` if, at that moment, the instance is destroyed or has nothing buffered, waiting for a send slot, or pending (no spec validation and no batch send in flight); otherwise `false` (the budget elapsed first, or work tracked during the flush is still pending). `flush(0)` starts the sends and resolves `true` only if nothing is pending afterwards. The exit drain uses the same body and ignores the result.
 
 ### Exit drain
 

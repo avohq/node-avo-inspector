@@ -654,7 +654,7 @@ describe("batching", () => {
     await inspector.trackSchemaFromEvent("E1", {});
 
     const started = Date.now();
-    await expect(inspector.flush(100)).resolves.toBeUndefined();
+    await expect(inspector.flush(100)).resolves.toBe(false);
     const elapsed = Date.now() - started;
     // It really waited for the send, up to its timeout, and no longer.
     expect(elapsed).toBeGreaterThanOrEqual(90);

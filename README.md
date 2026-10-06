@@ -61,19 +61,16 @@ While an instance has events that are buffered or still being sent, the SDK keep
 
 At most 4 requests are sent at once. Batches formed while all 4 are busy wait their turn, and up to 10,000 events can wait. Beyond that the oldest waiting events are dropped and the drop is logged, so the number of events held for sending stays bounded when the endpoint is slow or down.
 
-A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush(timeoutMs)` every few thousand events to let them finish.
+A loop that tracks events without ever yielding to I/O (for example a backfill script doing `for (...) await inspector.trackSchemaFromEvent(...)`) gives those requests no chance to complete. Call `await inspector.flush()` every few thousand events to let them finish.
 
-`flush()` waits at most `timeoutMs` (10 seconds by default), and it resolves the same way whether every send finished or the timeout passed first: it does not report a timeout. So it does not guarantee the backlog has drained. If the Inspector API is slower than the timeout, sends are still running when your loop resumes, and tracking more can still drop the oldest waiting events (the drop is logged). Give the backfill's flush a timeout long enough for a whole chunk to drain even when every request hangs: each request gives up after 10 seconds and 4 run at once, so 5,000 events need at most about 7 minutes.
+`flush()` waits at most `timeoutMs` (10 seconds by default). A single call does not guarantee the backlog has drained: if the Inspector API is slower than the timeout, sends are still running when your loop resumes, and tracking more can still drop the oldest waiting events (the drop is logged). `flush()` tells you which case you are in: it resolves `true` once the instance has nothing buffered, waiting or in flight, and `false` if the timeout passed first. So flush again until it reports drained before tracking the next chunk. The loop always ends: each request gives up after 10 seconds, so every send finishes, successfully or not, within a bounded time even when the endpoint hangs.
 
 ```javascript
-// 5,000 events = about 170 batches of 30; 4 at a time, at most 10 s each: about 7 minutes.
-const CHUNK_FLUSH_TIMEOUT_MS = 10 * 60 * 1000;
-
 for (let i = 0; i < rows.length; i++) {
   await inspector.trackSchemaFromEvent(rows[i].event, rows[i].properties);
-  if (i % 5000 === 4999) await inspector.flush(CHUNK_FLUSH_TIMEOUT_MS);
+  if (i % 5000 === 4999) while (!(await inspector.flush())) {}
 }
-await inspector.flush(CHUNK_FLUSH_TIMEOUT_MS);
+while (!(await inspector.flush())) {}
 ```
 
 # Flushing before exit (required)
@@ -88,7 +85,7 @@ When a process ends because it has nothing left to do, the SDK sends what is sti
 
 So call `flush()` yourself in those cases:
 
-- Call `await inspector.flush()` before `process.exit()`, in your `SIGTERM`/`SIGINT` handlers, and before a serverless handler (AWS Lambda, Google Cloud Functions, Vercel, ...) returns. It sends everything buffered, waits for in-flight requests (up to `timeoutMs`, default 10000) and never rejects. It resolves once those send attempts finish, whether or not they succeeded: a batch that fails is dropped, not retried.
+- Call `await inspector.flush()` before `process.exit()`, in your `SIGTERM`/`SIGINT` handlers, and before a serverless handler (AWS Lambda, Google Cloud Functions, Vercel, ...) returns. It sends everything buffered, waits for in-flight requests (up to `timeoutMs`, default 10000) and never rejects. It resolves once those send attempts finish, whether or not they succeeded: a batch that fails is dropped, not retried. It resolves `true` if the instance then has nothing buffered, waiting or in flight, and `false` if the timeout passed first (`flush(0)` starts the sends and reports whether anything is still pending). After `destroy()` it resolves `true`.
 - In serverless functions, also pass `disableBatchTimer: true`.
 
 ```javascript
@@ -217,7 +214,7 @@ Each kind prints at most one line per 10 seconds (per reason or status): the fir
   - it resolves with the HTTP status code instead of `undefined`;
   - besides network errors and timeouts, it rejects with `"Request failed"` without sending when a header value contains a control character (anything but tab) or a character above U+00FF.
 - **An API key containing a control character (anything but tab) or a character above U+00FF now throws in the constructor**, because the key is sent as a request header.
-- **At most 4 batches are sent at once**, and up to 10,000 events can wait to be sent; beyond that the oldest waiting events are dropped. A loop that tracks without yielding to I/O should call `await inspector.flush(timeoutMs)` every few thousand events, with a timeout that covers a slow endpoint. `flush()` does not report a timeout, so if sends take longer, tracking more can still drop the oldest waiting events (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)).
+- **At most 4 batches are sent at once**, and up to 10,000 events can wait to be sent; beyond that the oldest waiting events are dropped. A loop that tracks without yielding to I/O should flush every few thousand events until `flush()` reports drained (`while (!(await inspector.flush())) {}`); otherwise, with a slow endpoint, tracking more can drop the oldest waiting events (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)).
 - **A non-string `streamId` is converted, not rejected.** A number, bigint or boolean is sent as its string form; any other non-string is ignored. In 1.x the track promise rejected.
 - **A non-string `env` falls back to `dev`** with a warning. In 1.x the constructor threw a `TypeError`.
 - **`NaN`, `±Infinity` and exponent-form numbers such as `1e-7` are classified `float`.** 1.x classified them `int`.
