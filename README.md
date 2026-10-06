@@ -137,7 +137,7 @@ inspector.trackSchemaFromEvent("Event name", {
 });
 ```
 
-`trackSchemaFromEvent` returns a promise that resolves with the extracted schema once the event has been through sampling: when the event is queued, or at once when sampling drops it (a dropped event is never queued, so `flush()` does not send it either). In `dev` a queued event is sent within the call, and the promise resolves `[]` if the Inspector API answers with a non-200 status. You can pass an optional stream id as the third argument to correlate events.
+`trackSchemaFromEvent` returns a promise that resolves with the extracted schema once the event has been through sampling: when the event is queued, or at once when sampling drops it (a dropped event is never queued, so `flush()` does not send it either). In `dev` a queued event is sent within the call, and the promise resolves `[]` if the Inspector API answers with a non-200 status. Only a non-200 does: if the request fails (connection refused, timeout) the promise still resolves the schema, and the failure is logged on stderr, so don't treat a resolved schema as proof of delivery. When 1,000 events are already waiting for a send slot, the promise resolves once fewer wait (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)). You can pass an optional stream id as the third argument to correlate events.
 
 ## Schema extraction limits
 
@@ -234,7 +234,8 @@ Unchanged from 1.x, but easy to trip over: the logging flag is shared by every i
 
 To test against a local mock server, set the `AVO_INSPECTOR_MOCK_ENDPOINT` environment variable to its URL, for example `http://127.0.0.1:9876`. It exists for the spec's conformance suite and for local mock servers (spec §7.1).
 
-- Track requests go to that URL exactly as they would go to Avo, including the `api-key` header, so point it only at a server you control.
+- Track requests and event spec fetches go to that URL exactly as they would go to Avo, including your real API key (in the `api-key` header and the spec query), so point it only at a server you control.
+- Don't set it in shared `staging` or `dev` environments (a CI image or base environment that many services inherit, for example): every non-prod instance there would send its API key and events to that host. Only `prod` instances ignore it.
 - It is ignored when `env` is `prod`, whatever its value.
 - Event spec fetches (`dev` and `staging`) go to the same server: `GET <scheme>://<host>:<port>/trackingPlan/eventSpec?apiKey=…&eventName=…&streamId=…`, with the API key in the query. A mock that has no specs to serve can answer `200` with `{"events": [], "metadata": {}}` (events are then sent without validation); any other answer, such as a 404, also sends them without validation.
 - The variable is read once, when an instance is created; set it before constructing your instances.
