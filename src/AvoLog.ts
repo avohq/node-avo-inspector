@@ -47,7 +47,13 @@ export class AvoLog {
   }
 
   /** A batch that could not be sent (network error, timeout, header guard). */
-  static failed(reason: string): void {
+  static failed(error: unknown): void {
+    // The two fixed transport reasons print as is; anything else (an Error thrown while
+    // sending, any other value) prints only its type, so neither the line nor the limiter
+    // key ever depends on an error's message.
+    const reason = error === "Request failed" || error === "Request timed out"
+      ? error
+      : "Request failed (" + AvoLog.errorType(error) + ")";
     const total = AvoLog.due("failed:" + reason, 1);
     if (total !== null) {
       console.error("Avo Inspector: schema sending failed: " + reason + "." + AvoLog.more(total));

@@ -318,3 +318,31 @@ describe("a batch dispatch that fails internally", () => {
     inspector.destroy();
   });
 });
+
+describe("a send failure with an arbitrary error", () => {
+  test.each([
+    ["an Error", new TypeError("MARKER-in-message-1"), "Request failed (TypeError)"],
+    ["a non-fixed string", "MARKER-in-message-2", "Request failed (string)"],
+  ])("%s prints only a fixed reason and its type, never the message", async (_label, error, reason) => {
+    const inspector = staging({ batchSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockRejectedValue(error);
+
+    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent("E2", {});
+
+    expect(lines.join("\n")).not.toContain("MARKER-in-message");
+    // One window for both: the key is the fixed reason, not the message.
+    expect(matching(/schema sending failed/)).toEqual([`Avo Inspector: schema sending failed: ${reason}.`]);
+    inspector.destroy();
+  });
+
+  test("the fixed transport reasons are printed as is", async () => {
+    const inspector = staging({ batchSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockRejectedValue("Request timed out");
+
+    await inspector.trackSchemaFromEvent("E1", {});
+
+    expect(matching(/schema sending failed/)).toEqual(["Avo Inspector: schema sending failed: Request timed out."]);
+    inspector.destroy();
+  });
+});

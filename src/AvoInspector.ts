@@ -689,7 +689,7 @@ export class AvoInspector {
       (err): SendOutcome => {
         // At-most-once: a failed batch is dropped, never re-queued or retried.
         if (!this.destroyed) {
-          AvoLog.failed(String(err));
+          AvoLog.failed(err);
         }
         return "failed";
       }

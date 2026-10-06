@@ -21,7 +21,7 @@ class AvoLog {
   static now: () => number;              // utils.monotonicNowMs by default; overridable in tests
   static dropped(count: number, reason: DropReason): void;
   static rejected(status: number): void;
-  static failed(reason: string): void;
+  static failed(error: unknown): void;
   static internal(error: unknown): void;
   static errorType(error: unknown): string; // @internal: the fixed label, also used by other log lines that report a caught error
   static streamIdColon(): void;
@@ -51,7 +51,7 @@ Process-wide state: a map from key to `{ start, suppressed }`: the start of the 
 |---|---|---|
 | `dropped(count, reason)` | `count` | `console.warn("Avo Inspector: dropped <total> event(s) (<reason>) in the last 10s.")` |
 | `rejected(status)` | 1 | `console.warn("Avo Inspector: <total> batch(es) rejected with HTTP <status> in the last 10s.")` |
-| `failed(reason)` | 1 | `console.error("Avo Inspector: schema sending failed: <reason>.")`, plus ` (<total - 1> more in the last 10s)` when `total > 1` |
+| `failed(error)` | 1 | `console.error("Avo Inspector: schema sending failed: <reason>.")`, plus the suffix when `total > 1`. `<reason>` (also the key) is `error` itself when it is exactly `"Request failed"` or `"Request timed out"`, else `"Request failed (<errorType(error)>)"`: never an error's message |
 | `internal(error)` | 1 | `console.error(INTERNAL_ERROR_MESSAGE + suffix + " (<type>)")`, with the same suffix; `<type>` is a fixed label: the most specific built-in error class the value is an instance of (`TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `URIError`, `EvalError`, `Error`), else `typeof error`, or `unknown` if the check throws (a proxy trap). The value's own `name` or any other field is never read |
 | `streamIdColon()` | 1 | `console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported" + suffix)`, with the same suffix |
 | `missingEventName()` | 1 | `console.warn('Avo Inspector: <total> event(s) tracked without an event name in the last 10s, sent as "Missing Event Name".')` |

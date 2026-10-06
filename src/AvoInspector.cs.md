@@ -102,7 +102,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 ### sendBatch(batch)
 
 - After destroy: `"failed"` without sending.
-- `callInspectorWithBatchBody(batch)`: a numeric status other than 200 is `"non200"`, reported with `AvoLog.rejected(status)` unless destroyed; otherwise `"ok"` (logs "Saved event" per event when logging is on). A rejection is `"failed"`, reported with `AvoLog.failed(reason)` ("schema sending failed: <reason>.") unless destroyed. Both reports are always on and rate-limited; sends abandoned by `destroy()` are not reported.
+- `callInspectorWithBatchBody(batch)`: a numeric status other than 200 is `"non200"`, reported with `AvoLog.rejected(status)` unless destroyed; otherwise `"ok"` (logs "Saved event" per event when logging is on). A rejection is `"failed"`, reported with `AvoLog.failed(error)` unless destroyed; it prints the fixed transport reason or `Request failed (<type>)`, never an error's message. Both reports are always on and rate-limited; sends abandoned by `destroy()` are not reported.
 - **IMPORTANT:** at-most-once. A failed batch is dropped, never re-queued or retried.
 
 ### flush(timeoutMs = 10000): Promise<void>

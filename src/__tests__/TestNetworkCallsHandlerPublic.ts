@@ -136,7 +136,8 @@ describe("AvoNetworkCallsHandler", () => {
 
     await inspector.trackSchemaFromEvent(eventName, properties);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Avo Inspector: schema sending failed: Network error.');
+    // A reason other than the two fixed transport texts prints only its type.
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Avo Inspector: schema sending failed: Request failed (string).');
     consoleErrorSpy.mockRestore();
   });
 
