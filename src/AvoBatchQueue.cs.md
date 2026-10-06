@@ -67,7 +67,8 @@ State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEve
 ## Non-functional requirements
 
 - Memory is bounded: buffer by `maxQueueSize`; waiting batches by `MAX_WAITING_EVENTS`; concurrent requests by `MAX_IN_FLIGHT_SENDS`.
-- Every outcome promise settles exactly once: with the dispatch result, or with `dropped` if the batch was discarded (overflow, `clear()`, dispatch rejection, or a synchronous dispatch throw). Outcome promises never reject, and a failing dispatch never leaks a send slot.
+- Every outcome promise settles exactly once: with the dispatch result, or with `dropped` if the whole batch was discarded (a waiting batch emptied by the send-backlog overflow, `clear()`, dispatch rejection, or a synchronous dispatch throw). Outcome promises never reject, and a failing dispatch never leaks a send slot.
+- Dropping events does not settle anything by itself. When `enqueue()` drops the oldest buffered events past `maxQueueSize`, the `bufferedBatchOutcome()` promise keeps following the remaining buffer and settles with its eventual batch outcome. A waiting batch trimmed only partly by the backlog overflow settles with its dispatch result.
 - Drops are always reported, whatever `AvoInspector.shouldLog` says, at most one line per reason per 10 s (see `AvoLog`).
 - If `maxQueueSize < batchSize`, the size trigger never fires; events leave only via the timer or an explicit `drain()`.
 
