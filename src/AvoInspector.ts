@@ -27,6 +27,9 @@ const DEFAULT_BATCH_SIZE = 30;
 const DEFAULT_BATCH_FLUSH_SECONDS = 30;
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_FLUSH_TIMEOUT_MS = 10_000;
+// Events waiting for a spec fetch at once, across every instance. The fetches share one
+// 8-socket pool, so past this an event is sent without validation rather than queued.
+const MAX_WAITING_VALIDATIONS = 1_000;
 // An exit deadline that passed more than this long ago is from an earlier exit.
 const EXIT_DEADLINE_STALE_MS = 1_000;
 
@@ -161,6 +164,10 @@ export class AvoInspector {
   // One deadline for the whole exit, however often "beforeExit" fires during it. Cleared
   // once every instance has drained, in case the process carries on.
   private static exitDeadline: number | null = null;
+  // Events waiting for a spec fetch, across every instance (at most MAX_WAITING_VALIDATIONS).
+  private static waitingValidations = 0;
+  // Frees this instance's places among them; destroy() runs whatever is left.
+  private releaseWaiting: Set<() => void> = new Set();
   // Deadlines of explicit flush() calls still running, by call.
   private static explicitFlushDeadlines: Map<object, number> = new Map();
 
@@ -917,9 +924,27 @@ export class AvoInspector {
       console.log("Avo Inspector: Event spec cache miss for event: " + eventName + ". Fetching before sending.");
     }
 
+    if (AvoInspector.waitingValidations >= MAX_WAITING_VALIDATIONS) {
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: " + MAX_WAITING_VALIDATIONS + " events are already waiting for an event spec. Sending " + eventName + " without validation.");
+      }
+      return null;
+    }
+    AvoInspector.waitingValidations++;
+    let waiting = true;
+    const release = () => {
+      if (waiting) {
+        waiting = false;
+        AvoInspector.waitingValidations--;
+        this.releaseWaiting.delete(release);
+      }
+    };
+    this.releaseWaiting.add(release);
+
     const fetcher = this.eventSpecFetcher;
     return new Promise((resolve, reject) => {
       fetcher.fetch(eventName, anonymousId, (result) => {
+        release();
         if (result !== null) {
           cache.set(cacheKey, result);
           // A throw here would be swallowed by the fetcher and leave this promise pending;
@@ -953,6 +978,7 @@ export class AvoInspector {
     this.batchQueue.clear();
     this.pending.clear();
     this.validations.clear();
+    Array.from(this.releaseWaiting).forEach((release) => release());
     this.updateExitDrain();
     this.avoNetworkCallsHandler.abortInFlight();
     if (this.eventSpecFetcher) {

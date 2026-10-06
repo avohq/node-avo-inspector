@@ -32,28 +32,63 @@ afterEach(() => {
 });
 
 describe("event spec fetch deadline", () => {
-  test("fetches queued behind the agent's 8 sockets still settle within one deadline", async () => {
-    (AvoEventSpecFetcher as any).fetchTimeoutMs = 200;
-    // Route the fetcher's https requests to the hung local server over http, through an
-    // agent with the same 8-socket limit, so requests beyond 8 wait for a socket.
+  let partial: http.Server;
+  let partialPort: number;
+  let closePartialConnections: () => void;
+
+  beforeAll(async () => {
+    // The first 8 requests never get an answer; every later one is answered at once.
+    let requests = 0;
+    partial = http.createServer((_req, res) => {
+      if (++requests <= 8) {
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ events: [], metadata: { schemaId: "s" } }));
+    });
+    closePartialConnections = trackConnections(partial);
+    await new Promise<void>((resolve) => partial.listen(0, "127.0.0.1", resolve));
+    partialPort = (partial.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    closePartialConnections();
+    await new Promise((resolve) => partial.close(resolve));
+  });
+
+  test("a fetch queued behind the agent's 8 sockets gets its full deadline once it has a socket", async () => {
+    (AvoEventSpecFetcher as any).fetchTimeoutMs = 300;
+    // Route the fetcher's https requests to the local server over http, through an agent
+    // with the same 8-socket limit, so requests beyond 8 wait for a socket.
     const agent = new http.Agent({ keepAlive: true, maxSockets: 8 });
     jest.spyOn(https, "request").mockImplementation(((options: any, callback: any) =>
-      http.request({ host: "127.0.0.1", port, path: options.path, method: "GET", agent }, callback)) as any);
+      http.request({ host: "127.0.0.1", port: partialPort, path: options.path, method: "GET", agent }, callback)) as any);
     const fetcher = new AvoEventSpecFetcher("key");
 
-    const started = Date.now();
-    const settledAfter = await Promise.all(
-      Array.from({ length: 20 }, (_, i) => new Promise<number>((resolve) => {
-        fetcher.fetch("E" + i, "s", (result) => {
-          expect(result).toBeNull();
-          resolve(Date.now() - started);
-        });
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) => new Promise<any>((resolve) => {
+        fetcher.fetch("E" + i, "s", resolve);
       }))
     );
     fetcher.destroy();
     agent.destroy();
 
-    expect(Math.max(...settledAfter)).toBeLessThan(400);
+    // The 8 hung fetches time out; the 12 queued behind them only get a socket when those
+    // sockets are freed, at the moment a deadline counted from the request would expire.
+    expect(results.slice(0, 8)).toEqual(Array(8).fill(null));
+    results.slice(8).forEach((result) => expect(result).toEqual(expect.objectContaining({ eventSpec: null })));
+  }, 15_000);
+
+  test("a fetch with a socket that never answers still settles at its deadline", async () => {
+    (AvoEventSpecFetcher as any).fetchTimeoutMs = 200;
+    jest.spyOn(https, "request").mockImplementation(((options: any, callback: any) =>
+      http.request({ host: "127.0.0.1", port, path: options.path, method: "GET" }, callback)) as any);
+    const fetcher = new AvoEventSpecFetcher("key");
+
+    const started = Date.now();
+    await expect(new Promise((resolve) => fetcher.fetch("E", "s", resolve))).resolves.toBeNull();
+    expect(Date.now() - started).toBeLessThan(1000);
+    fetcher.destroy();
   }, 15_000);
 });
 
@@ -66,6 +101,8 @@ describe("settling a fetch", () => {
       req.callback = callback;
       req.end = () => {};
       req.destroy = () => process.nextTick(() => req.emit("error", new Error("destroyed")));
+      // Assigned a socket on the next tick, like a real request with a free socket.
+      process.nextTick(() => req.emit("socket", new EventEmitter()));
       created.push(req);
       return req;
     }) as any);

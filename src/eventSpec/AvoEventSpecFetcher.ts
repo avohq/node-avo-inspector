@@ -23,9 +23,10 @@ export class AvoEventSpecFetcher {
   private requests: Set<ClientRequest> = new Set();
 
   private static specEndpoint = "/trackingPlan/eventSpec";
-  // Wall-clock budget per fetch, from the moment it is requested, and the only timeout: a
-  // socket-idle timeout would start only once the shared agent assigns a socket, so a fetch
-  // queued behind 8 hung ones would wait for theirs first.
+  // Budget per fetch, from the moment the shared agent assigns it a socket, and the only
+  // timeout. Counting from the request instead would expire fetches queued behind 8 slow
+  // ones before they were ever sent. The wait for a socket is bounded by the cap on
+  // validations waiting for a spec (AvoInspector).
   private static fetchTimeoutMs = 10_000;
 
   constructor(apiKey: string) {
@@ -55,6 +56,7 @@ export class AvoEventSpecFetcher {
     // `deferCallbacks` is for settling inside fetch() itself: the key is freed and the
     // deadline cleared at once, but callbacks still run asynchronously.
     let settled = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const settle = (result: EventSpecResponse | null, deferCallbacks = false) => {
       if (settled) {
         return;
@@ -85,20 +87,7 @@ export class AvoEventSpecFetcher {
       console.log("Avo Inspector: [network] GET https://" + options.hostname + AvoEventSpecFetcher.specEndpoint + "?eventName=" + encodeURIComponent(eventName));
     }
 
-    // Created before the request: a response can settle synchronously inside request().
-    // `req` stays undefined if request() throws, so the callback must not assume it.
-    let req: ClientRequest | undefined;
-    const deadline = setTimeout(() => {
-      if (AvoInspector.shouldLog) {
-        console.error("Avo Inspector: [network] Spec fetch timed out after " + AvoEventSpecFetcher.fetchTimeoutMs + "ms");
-      }
-      if (req) {
-        req.destroy();
-      }
-      settle(null);
-    }, AvoEventSpecFetcher.fetchTimeoutMs);
-    deadline.unref();
-
+    let req: ClientRequest;
     try {
       req = this.send(options, eventName, settle);
     } catch (e) {
@@ -110,6 +99,19 @@ export class AvoEventSpecFetcher {
     }
     const sent = req;
     this.requests.add(sent);
+    sent.once("socket", () => {
+      if (settled) {
+        return;
+      }
+      deadline = setTimeout(() => {
+        if (AvoInspector.shouldLog) {
+          console.error("Avo Inspector: [network] Spec fetch timed out after " + AvoEventSpecFetcher.fetchTimeoutMs + "ms");
+        }
+        sent.destroy();
+        settle(null);
+      }, AvoEventSpecFetcher.fetchTimeoutMs);
+      deadline.unref();
+    });
     sent.on("close", () => {
       clearTimeout(deadline);
       this.requests.delete(sent);

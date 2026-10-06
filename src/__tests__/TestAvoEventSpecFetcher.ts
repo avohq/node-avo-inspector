@@ -203,7 +203,11 @@ describe("AvoEventSpecFetcher", () => {
     test("a request that never answers is destroyed and resolves null at the deadline (fetchTimeoutMs = 0)", (done) => {
       (AvoEventSpecFetcher as any).fetchTimeoutMs = 0;
       const mockReq = new MockClientRequest();
-      (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq); // never answers
+      (mockedHttps.request as jest.Mock).mockImplementation(() => {
+        // Gets a socket, then never answers.
+        process.nextTick(() => mockReq.emit("socket", new EventEmitter()));
+        return mockReq;
+      });
 
       fetcher.fetch("click", "stream1", (result) => {
         expect(result).toBeNull();
@@ -213,7 +217,26 @@ describe("AvoEventSpecFetcher", () => {
       });
     });
 
-    test("no socket-idle timeout is set: the wall-clock deadline is the only one", () => {
+    test("the deadline starts when the request gets a socket, not when it is requested", async () => {
+      (AvoEventSpecFetcher as any).fetchTimeoutMs = 0;
+      const mockReq = new MockClientRequest();
+      (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq);
+      let result: any = "pending";
+
+      fetcher.fetch("click", "stream1", (r) => { result = r; });
+
+      // Still waiting for a socket: no deadline runs yet.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(result).toBe("pending");
+      expect(mockReq.destroy).not.toHaveBeenCalled();
+
+      mockReq.emit("socket", new EventEmitter());
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(result).toBeNull();
+      expect(mockReq.destroy).toHaveBeenCalled();
+    });
+
+    test("no socket-idle timeout is set: the deadline is the only one", () => {
       const mockReq = new MockClientRequest();
       (mockedHttps.request as jest.Mock).mockImplementation(() => mockReq);
 

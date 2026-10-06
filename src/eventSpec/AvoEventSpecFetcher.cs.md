@@ -47,7 +47,7 @@ internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, r
    - status != 200 -> settle with `null`.
    - status 200 -> `JSON.parse` the body and `parseWireResponse`; a parse/convert exception settles with `null`.
 4. Request `error` -> settle with `null`. A response that ends before its body is complete (`aborted`, `error` or `close` on the response while `res.complete` is false, with no `end`) -> settle with `null` at once, freeing the key, instead of waiting for the deadline.
-5. **Deadline:** `fetchTimeoutMs` (10 s) after the fetch was requested, queue time for a socket included -> destroy the request (if one was created) and settle with `null`. This wall-clock deadline is the only timeout; no socket-idle timeout is set.
+5. **Deadline:** `fetchTimeoutMs` (10 s) after the request is assigned a socket (its `socket` event) -> destroy the request and settle with `null`. Time spent queued in the agent for a socket does not count, so a fetch queued behind 8 slow ones still gets its full budget once sent. This is the only timeout; no socket-idle timeout is set. The wait for a socket is bounded by the caller: `AvoInspector` lets at most 1,000 events wait for a spec at once.
 6. If `request()` throws synchronously, the fetch settles with `null`: the key is freed and the deadline cleared before `fetch` returns, and the callbacks receive `null` on the next tick (never before `fetch` returns); nothing is thrown to the caller.
 7. **IMPORTANT:** a request settles at most once, and only while it still owns its key. Settling clears the deadline. If the key's in-flight entry has a different owner (a newer fetch registered after this request settled), the settlement is ignored.
 8. Settling removes the key from the in-flight map first, then invokes every queued callback in registration order; an exception thrown by one callback is swallowed and does not stop the others.
@@ -69,12 +69,12 @@ internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, r
 - **IMPORTANT:** callbacks are always invoked asynchronously and with `null` on any failure; `fetch` never throws for network, status or parse problems.
 - Logging (request URL without apiKey/streamId, status, raw body, parsed spec, errors) only when `AvoInspector.shouldLog` is true; non-200 bodies and the full response body are logged in that mode.
 - A request that times out may also emit `error` afterwards (from `destroy`); that late event never settles a newer fetch of the same key.
-- At most 8 concurrent spec requests per process to the API host (across all instances); further requests queue in the agent. Every fetch settles within about `fetchTimeoutMs` of being requested, however long it queued.
+- At most 8 concurrent spec requests per process to the API host (across all instances); further requests queue in the agent. Every fetch settles within about `fetchTimeoutMs` of getting a socket.
 
 ## Examples
 
 <example>
-20 fetches for different events against an API that never answers → requests 9–20 wait in the agent for a socket, yet every callback receives `null` about 10 s after its fetch was requested (not after about 30 s).
+20 fetches for different events; the API never answers the first 8 and answers the rest at once → fetches 1–8 settle with `null` after 10 s; fetches 9–20 get sockets as those are freed and settle with their responses, not with `null` at the moment a deadline counted from the request would have expired.
 </example>
 <example>
 A fetch for key K times out and settles with `null`; one of its callbacks fetches K again → the new request owns K. The timed-out request's later `error` is ignored, and the new fetch settles only from its own response.
