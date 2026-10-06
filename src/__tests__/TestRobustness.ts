@@ -9,12 +9,24 @@ beforeEach(() => {
   jest.spyOn(console, "error").mockImplementation(() => {});
 });
 
+// Inspectors created through staging(); afterEach destroys them even when a test fails or
+// times out, so a test's late sends and log lines cannot reach the next test.
+let created: AvoInspector[] = [];
+
 afterEach(() => {
+  created.forEach((inspector) => inspector.destroy());
+  created = [];
   jest.restoreAllMocks();
 });
 
-const staging = (extra: object = {}) =>
-  new AvoInspector({ apiKey: "test-key", env: "staging", version: "1.0.0", disableBatchTimer: true, ...extra });
+// Tests that loop over thousands of events: generous under CPU load, unlike the 5 s default.
+const HEAVY_TEST_TIMEOUT_MS = 30_000;
+
+const staging = (extra: object = {}) => {
+  const inspector = new AvoInspector({ apiKey: "test-key", env: "staging", version: "1.0.0", disableBatchTimer: true, ...extra });
+  created.push(inspector);
+  return inspector;
+};
 
 // Replaces the network with sends that stay open until released, recording each batch.
 function holdSends(inspector: AvoInspector) {
@@ -82,7 +94,7 @@ describe("bounded concurrent batch sends", () => {
     await flushing;
 
     expect(names(batches).flat()).toEqual(Array.from({ length: 9000 }, (_, i) => "E" + i));
-  });
+  }, HEAVY_TEST_TIMEOUT_MS);
 
   test("past 10,000 waiting events the oldest waiting ones are dropped, and the drop is logged", async () => {
     const inspector = staging();
@@ -110,7 +122,7 @@ describe("bounded concurrent batch sends", () => {
       ...Array.from({ length: 10_000 }, (_, i) => "E" + (10_000 + i)),
     ];
     expect(names(batches).flat()).toEqual(expected);
-  });
+  }, HEAVY_TEST_TIMEOUT_MS);
 
   test("flush() waits for batches still waiting for a send slot", async () => {
     const inspector = staging({ batchSize: 2 });
@@ -146,6 +158,7 @@ describe("bounded concurrent batch sends", () => {
 
   test("in dev, a track whose send waits for a slot still resolves once it is sent", async () => {
     const inspector = new AvoInspector({ apiKey: "test-key", env: "dev", version: "1.0.0" });
+    created.push(inspector);
     const { send, releaseAll } = holdSends(inspector);
 
     const tracks = Array.from({ length: 6 }, (_, i) => inspector.trackSchemaFromEvent("E" + i, { a: i }));
@@ -179,7 +192,7 @@ describe("deduplicator cleanup", () => {
     const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
 
     expect(elapsedMs).toBeLessThan(1000);
-  });
+  }, HEAVY_TEST_TIMEOUT_MS);
 
   test("every registration expires after 500 ms, even one sharing its millisecond with another", () => {
     const dedup = new AvoDeduplicator();
@@ -296,6 +309,7 @@ describe("the Codegen duplicate-shape scan in extractSchema", () => {
 
   test("does not run when its warning cannot print (tracking, or logging off)", async () => {
     const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1", disableBatchTimer: true });
+    created.push(inspector);
     const scan = jest.spyOn(AvoDeduplicator.prototype, "hasSeenEventParams");
 
     inspector.enableLogging(true);

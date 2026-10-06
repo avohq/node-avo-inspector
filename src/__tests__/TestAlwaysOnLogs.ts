@@ -24,15 +24,26 @@ beforeEach(() => {
   }
 });
 
+// Inspectors created through staging(); afterEach destroys them even when a test fails or
+// times out, then forgets every log window, so nothing logs into the next test.
+let created: AvoInspector[] = [];
+
 afterEach(() => {
+  created.forEach((inspector) => inspector.destroy());
+  created = [];
+  AvoLog._resetForTesting();
   jest.restoreAllMocks();
 });
+
+// Tests that loop over thousands of events: generous under CPU load, unlike the 5 s default.
+const HEAVY_TEST_TIMEOUT_MS = 30_000;
 
 const staging = (extra: object = {}) => {
   const inspector = new AvoInspector({
     apiKey: API_KEY, env: "staging", version: "1.0.0", disableBatchTimer: true, ...extra,
   });
   inspector.enableLogging(false);
+  created.push(inspector);
   return inspector;
 };
 
@@ -82,7 +93,7 @@ describe("always-on data-loss lines, logging off", () => {
       `Avo Inspector: dropped ${totalDropped - 20} event(s) (send backlog full) in the last 10s.`
     );
     inspector.destroy();
-  });
+  }, HEAVY_TEST_TIMEOUT_MS);
 
   test("repeated non-200 responses log one line per status per window", async () => {
     const inspector = staging({ batchSize: 1 });
@@ -231,6 +242,7 @@ describe("a missing event name", () => {
   // Captures every batch the dev instance sends.
   const dev = () => {
     const inspector = new AvoInspector({ apiKey: API_KEY, env: "dev", version: "1.0.0" });
+    created.push(inspector);
     const sent: InspectorBody[] = [];
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockImplementation((batch: Array<InspectorBody>) => { sent.push(...batch); return Promise.resolve(200); });
@@ -363,7 +375,7 @@ describe("pending counts at lifecycle points, worded by real elapsed time", () =
       "Avo Inspector: dropped 4999 event(s) (queue full) in the last 12s.",
     ]);
     inspector.destroy();
-  });
+  }, HEAVY_TEST_TIMEOUT_MS);
 
   test("flush() inside the window leaves the count pending, so serverless flushes keep the limit", async () => {
     const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
