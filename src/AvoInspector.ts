@@ -583,6 +583,8 @@ export class AvoInspector {
       return Promise.resolve(eventSchema);
     }
 
+    // The rate that governed this event's sampling decision, not the one at send time.
+    const stamp = { createdAt, samplingRate };
     const buildBody = (validationResult: ValidationResult | null): EventSchemaBody => {
       let body: EventSchemaBody;
       if (validationResult) {
@@ -598,7 +600,8 @@ export class AvoInspector {
           eventHash,
           validationResult.metadata,
           validationResult.propertyResults,
-          trackOptions
+          trackOptions,
+          stamp
         );
       } else {
         body = this.avoNetworkCallsHandler.bodyForEventSchemaCall(
@@ -608,12 +611,10 @@ export class AvoInspector {
           eventId,
           eventHash,
           rawEventProperties,
-          trackOptions
+          trackOptions,
+          stamp
         );
       }
-      // The rate that governed this event's sampling decision, not the one at send time.
-      body.samplingRate = samplingRate;
-      body.createdAt = createdAt;
       return body;
     };
 

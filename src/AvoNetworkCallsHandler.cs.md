@@ -120,7 +120,7 @@ For each property:
 
 ### createBaseCallBody (private)
 
-`{ apiKey, appName, appVersion, libVersion, env: envName, libPlatform: "node", messageId: new GUID, streamId: anonymousId, anonymousId, createdAt: now ISO, samplingRate: current rate }`, plus `publicEncryptionKey` when it is non-empty.
+`{ apiKey, appName, appVersion, libVersion, env: envName, libPlatform: "node", messageId: new GUID, streamId: anonymousId, anonymousId, createdAt, samplingRate }` (from the optional `stamp: { createdAt, samplingRate }` the body builders pass through; `AvoInspector` passes the call time and the rate that decided sampling, otherwise now and the current rate), plus `publicEncryptionKey` when it is non-empty.
 
 With `trackOptions`: `appVersion` is taken from `trackOptions.appVersion` (may be `null`) instead of the constructor value; `outputReference` / `originHint` are added only when defined — never sent as `null` or `""`.
 

@@ -33,6 +33,12 @@ export interface ResolvedTrackOptions {
   gatewayScoped: boolean;
 }
 
+// When an event was tracked, and the sampling rate that decided it was kept.
+export interface CallStamp {
+  createdAt: string;
+  samplingRate: number;
+}
+
 export interface EventPropertyEncrypted {
   propertyName: string;
   propertyType: string;
@@ -368,9 +374,10 @@ export class AvoNetworkCallsHandler {
     eventId: string | null,
     eventHash: string | null,
     rawEventProperties?: { [propName: string]: any },
-    trackOptions?: ResolvedTrackOptions
+    trackOptions?: ResolvedTrackOptions,
+    stamp?: CallStamp
   ): EventSchemaBody {
-    let eventSchemaBody = this.createBaseCallBody(anonymousId, trackOptions) as EventSchemaBody;
+    let eventSchemaBody = this.createBaseCallBody(anonymousId, trackOptions, stamp) as EventSchemaBody;
     eventSchemaBody.type = "event";
     eventSchemaBody.eventName = eventName;
 
@@ -409,7 +416,8 @@ export class AvoNetworkCallsHandler {
     eventHash: string | null,
     eventSpecMetadata: EventSpecMetadata,
     propertyResults: PropertyValidationResult[],
-    trackOptions?: ResolvedTrackOptions
+    trackOptions?: ResolvedTrackOptions,
+    stamp?: CallStamp
   ): EventSchemaBody {
     // Build a map of validation results by property name
     const validationMap = new Map<string, PropertyValidationResult>();
@@ -433,7 +441,7 @@ export class AvoNetworkCallsHandler {
       return prop;
     });
 
-    let body = this.createBaseCallBody(anonymousId, trackOptions) as EventSchemaBody;
+    let body = this.createBaseCallBody(anonymousId, trackOptions, stamp) as EventSchemaBody;
     body.type = "event";
     body.eventName = eventName;
     body.eventProperties = mergedProperties;
@@ -507,9 +515,11 @@ export class AvoNetworkCallsHandler {
     return result;
   }
 
+  // `stamp` defaults to now and the current sampling rate.
   private createBaseCallBody(
     anonymousId: string,
-    trackOptions?: ResolvedTrackOptions
+    trackOptions?: ResolvedTrackOptions,
+    stamp?: CallStamp
   ): BaseBody {
     const body: BaseBody = {
       apiKey: this.apiKey,
@@ -521,8 +531,8 @@ export class AvoNetworkCallsHandler {
       messageId: AvoGuid.newGuid(),
       streamId: anonymousId,
       anonymousId: anonymousId,
-      createdAt: new Date().toISOString(),
-      samplingRate: this.samplingRate,
+      createdAt: stamp ? stamp.createdAt : new Date().toISOString(),
+      samplingRate: stamp ? stamp.samplingRate : this.samplingRate,
     };
 
     // Gateway coordinates are sent only when present; never as null or "".
