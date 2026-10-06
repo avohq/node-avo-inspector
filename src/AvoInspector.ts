@@ -27,6 +27,8 @@ const DEFAULT_BATCH_SIZE = 30;
 const DEFAULT_BATCH_FLUSH_SECONDS = 30;
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_FLUSH_TIMEOUT_MS = 10_000;
+// An exit deadline that passed more than this long ago is from an earlier exit.
+const EXIT_DEADLINE_STALE_MS = 1_000;
 
 // String() for regex validation; a value with no string conversion (a null-prototype object)
 // falls back to its tag, e.g. "[object Object]", which String() gives a plain object.
@@ -159,6 +161,8 @@ export class AvoInspector {
   // One deadline for the whole exit, however often "beforeExit" fires during it. Cleared
   // once every instance has drained, in case the process carries on.
   private static exitDeadline: number | null = null;
+  // Deadlines of explicit flush() calls still running, by call.
+  private static explicitFlushDeadlines: Map<object, number> = new Map();
 
   private static drainOnExit = (): void => {
     AvoInspector.exitDrainArmed = false;
@@ -166,10 +170,19 @@ export class AvoInspector {
     if (instances.length === 0) {
       return;
     }
-    if (AvoInspector.exitDeadline === null) {
-      AvoInspector.exitDeadline = monotonicNowMs() + DEFAULT_FLUSH_TIMEOUT_MS;
+    const now = monotonicNowMs();
+    // One deadline per exit: "beforeExit" re-fires within moments of the deadline while the
+    // same exit continues, so a hung endpoint cannot stretch it. A deadline that passed
+    // longer ago belongs to an earlier exit the process carried on from; start a new one.
+    if (AvoInspector.exitDeadline === null || now - AvoInspector.exitDeadline > EXIT_DEADLINE_STALE_MS) {
+      AvoInspector.exitDeadline = now + DEFAULT_FLUSH_TIMEOUT_MS;
     }
-    const remaining = AvoInspector.exitDeadline - monotonicNowMs();
+    // An explicit flush() still running gets its full deadline, even past the drain's own.
+    let deadline = AvoInspector.exitDeadline;
+    AvoInspector.explicitFlushDeadlines.forEach((flushDeadline) => {
+      deadline = Math.max(deadline, flushDeadline);
+    });
+    const remaining = deadline - now;
     if (remaining <= 0) {
       // Out of time: let the process exit; what is still unsent is dropped.
       return;
@@ -177,8 +190,12 @@ export class AvoInspector {
     // Request sockets are unref'd, so this timer is what keeps the process alive while
     // everything left is sent at once (within the in-flight cap).
     const keepAlive = setTimeout(() => {}, remaining);
-    Promise.allSettled(instances.map((inspector) => inspector.flush(remaining))).then(() => {
+    Promise.allSettled(instances.map((inspector) => inspector.flushWithin(remaining))).then(() => {
       clearTimeout(keepAlive);
+      // Finished in time: the next "beforeExit" starts a new exit with a fresh deadline.
+      if (monotonicNowMs() < deadline) {
+        AvoInspector.exitDeadline = null;
+      }
     });
     // Re-arm so work added during the drain is sent at the next "beforeExit".
     AvoInspector.armExitDrain();
@@ -716,6 +733,18 @@ export class AvoInspector {
       typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs >= 0
         ? Math.min(timeoutMs, MAX_TIMER_MS)
         : DEFAULT_FLUSH_TIMEOUT_MS;
+    // While an explicit flush runs, the exit drain holds the process until its deadline too.
+    const token = {};
+    AvoInspector.explicitFlushDeadlines.set(token, monotonicNowMs() + budget);
+    try {
+      await this.flushWithin(budget);
+    } finally {
+      AvoInspector.explicitFlushDeadlines.delete(token);
+    }
+  }
+
+  // The body of flush(): also used by the exit drain, whose own deadline is not an explicit one.
+  private async flushWithin(budget: number): Promise<void> {
     try {
       if (this.destroyed) {
         return;

@@ -75,7 +75,7 @@ await inspector.flush();
 
 Buffered events live in memory only and are lost if the process exits first. Delivery is at-most-once: a batch that fails to send is dropped, never retried.
 
-When a process ends because it has nothing left to do, the SDK sends what is still buffered on its own: it listens for Node's `beforeExit` event and flushes, holding the process for at most 10 seconds for this drain. The deadline bounds the SDK's own drain, not the process: other work in your process can keep it running longer. This is a best-effort safety net, not a guarantee. The SDK never keeps an idle process alive, and `beforeExit` does **not** fire when:
+When a process ends because it has nothing left to do, the SDK sends what is still buffered on its own: it listens for Node's `beforeExit` event and flushes, holding the process for at most 10 seconds for this drain (or until the deadline of a `flush(timeoutMs)` you started that is still running, if later). The deadline bounds the SDK's own drain, not the process: other work in your process can keep it running longer. This is a best-effort safety net, not a guarantee. The SDK never keeps an idle process alive, and `beforeExit` does **not** fire when:
 
 - the process calls `process.exit()`;
 - the process is stopped by a signal such as `SIGTERM` or `SIGINT` (container shutdown, Ctrl-C);

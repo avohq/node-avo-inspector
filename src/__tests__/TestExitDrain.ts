@@ -45,7 +45,7 @@ beforeEach(() => {
 });
 
 // Runs `script` in a child Node process with the compiled SDK as `AvoInspector`.
-function runChild(script: string, target: string = endpoint): Promise<{ elapsedMs: number }> {
+function runChild(script: string, target: string = endpoint): Promise<{ elapsedMs: number; stdout: string }> {
   const started = Date.now();
   const source =
     `const { AvoInspector } = require(${JSON.stringify(join(distDir, "index.js"))});\n` + script;
@@ -61,7 +61,7 @@ function runChild(script: string, target: string = endpoint): Promise<{ elapsedM
         },
         timeout: 30_000,
       },
-      (err) => (err ? reject(err) : resolve({ elapsedMs: Date.now() - started }))
+      (err, stdout) => (err ? reject(err) : resolve({ elapsedMs: Date.now() - started, stdout: String(stdout) }))
     );
   });
 }
@@ -110,6 +110,50 @@ describe("exit against an endpoint that never answers", () => {
     // machines; the lower bound shows the exit really waited for the drain.
     expect(elapsedMs).toBeGreaterThan(9_000);
     expect(elapsedMs).toBeLessThan(15_000);
+  }, 40_000);
+});
+
+describe("exit while an explicit long flush() runs", () => {
+  let slow: Server;
+  let slowEndpoint: string;
+  let slowRequests = 0;
+  let closeSlowConnections: () => void;
+
+  beforeAll(async () => {
+    // Answers every request after 6 s.
+    slow = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        slowRequests++;
+        setTimeout(() => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ samplingRate: 1.0 }));
+        }, 6000);
+      });
+    });
+    closeSlowConnections = trackConnections(slow);
+    await new Promise<void>((resolve) => slow.listen(0, "127.0.0.1", resolve));
+    slowEndpoint = "http://127.0.0.1:" + (slow.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    closeSlowConnections();
+    await new Promise((resolve) => slow.close(resolve));
+  });
+
+  test("the exit drain honours a longer explicit flush deadline", async () => {
+    slowRequests = 0;
+    // 5 batches, 4 sent at a time, 6 s each: the 5th finishes at about 12 s, inside the
+    // flush's 20 s but past the exit drain's own 10 s.
+    const { stdout, elapsedMs } = await runChild(`
+      const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 1 });
+      for (let i = 0; i < 5; i++) inspector.trackSchemaFromEvent("E" + i, { i });
+      inspector.flush(20000).then(() => console.log("FLUSHED"));
+    `, slowEndpoint);
+
+    expect(slowRequests).toBe(5);
+    expect(stdout).toContain("FLUSHED");
+    expect(elapsedMs).toBeGreaterThan(11_000);
   }, 40_000);
 });
 
@@ -175,5 +219,32 @@ describe("exit hook registration", () => {
 
     inspectors.forEach((inspector) => inspector.destroy());
     expect(process.listenerCount("beforeExit")).toBe(before);
+  });
+});
+
+describe("exit deadline", () => {
+  beforeEach(() => {
+    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = endpoint;
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.env.AVO_INSPECTOR_MOCK_ENDPOINT = defaultEndpoint;
+    (AvoInspector as any).exitDeadline = null;
+    jest.restoreAllMocks();
+  });
+
+  test("a stale deadline from an earlier beforeExit does not skip the next drain", async () => {
+    const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30, disableBatchTimer: true });
+    const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+    await inspector.trackSchemaFromEvent("E", {});
+    // An earlier exit drain left its deadline behind a minute ago.
+    (AvoInspector as any).exitDeadline = require("../utils").monotonicNowMs() - 60_000;
+
+    (AvoInspector as any).drainOnExit();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    inspector.destroy();
   });
 });
