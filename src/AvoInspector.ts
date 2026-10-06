@@ -641,24 +641,23 @@ export class AvoInspector {
         if (this.destroyed) {
           return { result: Promise.resolve([]), send: null };
         }
-        let body: EventSchemaBody;
         try {
-          body = buildBody(validationResult);
+          const enqueued = this.enqueue(buildBody(validationResult), eventSchema);
+          let send = enqueued.send;
+          if (send === null && validation.flushRequested) {
+            // flush() waits for the batch that carries this event. Another drain (a size
+            // trigger or the timer) may swap it out before the scheduled one runs, so the
+            // wait follows the buffered batch, not this particular drain.
+            send = this.batchQueue.bufferedBatchOutcome();
+            this.drainThisTurn();
+          }
+          return { result: enqueued.result, send };
         } catch (err) {
-          // Same outcome as a synchronous internal error before enqueue (SPEC §4.2 step 5).
+          // Same outcome as a synchronous internal error on the unvalidated path (SPEC §4.2
+          // step 5): logged, and the call rejects with the internal error message.
           AvoLog.internal(err);
           return { result: null, send: null };
         }
-        const enqueued = this.enqueue(body, eventSchema);
-        let send = enqueued.send;
-        if (send === null && validation.flushRequested) {
-          // flush() waits for the batch that carries this event. Another drain (a size
-          // trigger or the timer) may swap it out before the scheduled one runs, so the
-          // wait follows the buffered batch, not this particular drain.
-          send = this.batchQueue.bufferedBatchOutcome();
-          this.drainThisTurn();
-        }
-        return { result: enqueued.result, send };
       });
 
     // In flight until the event is queued and, if that triggered a send, until it settles.

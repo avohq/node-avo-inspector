@@ -77,3 +77,19 @@ test("a cache hit whose validation throws behaves the same", async () => {
   await expectSentUnvalidated(inspector, sent, track);
   inspector.destroy();
 }, 10_000);
+
+describe("an error thrown while queueing", () => {
+  test.each(["staging", "prod"] as const)("in %s rejects with the internal error message and logs its type", async (env) => {
+    const inspector = new AvoInspector({ apiKey: "k", env, version: "1.0.0", disableBatchTimer: true });
+    // Fault injection: the queue throws when the event is added.
+    (inspector as any).batchQueue.enqueue = () => { throw new RangeError("injected"); };
+
+    await expect(inspector.trackSchemaFromEvent("Throws", { a: "x" }, "s1"))
+      .rejects.toBe("Avo Inspector: something went wrong. Please report to support@avo.app.");
+    expect(console.error).toHaveBeenCalledWith(
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (RangeError)"
+    );
+    expect((inspector as any).pending.size).toBe(0);
+    inspector.destroy();
+  });
+});
