@@ -378,6 +378,24 @@ describe("pending counts at lifecycle points, worded by real elapsed time", () =
     expect(dropLines()[1]).toBe("Avo Inspector: dropped 3 event(s) (queue full) in the last 3s.");
   });
 
+  test("a count left pending by an early flush() is printed by the first flush() after its window", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    now += 3_000;
+    await inspector.flush();
+    expect(dropLines()).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 1s."]);
+
+    now += 10_000;
+    await inspector.flush();
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 3 event(s) (queue full) in the last 13s.",
+    ]);
+    inspector.destroy();
+  });
+
   test("destroy() prints a pending count", async () => {
     const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
     for (let i = 0; i < 4; i++) await inspector.trackSchemaFromEvent("E" + i, {});
