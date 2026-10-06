@@ -396,7 +396,8 @@ export class AvoInspector {
         return value;
       }
       console.warn(
-        "[Avo Inspector] Invalid " + name + " " + value + ". Using default " + fallback + "."
+        // valueToString: concatenation throws for a symbol or a null-prototype object.
+        "[Avo Inspector] Invalid " + name + " " + valueToString(value) + ". Using default " + fallback + "."
       );
       return fallback;
     };

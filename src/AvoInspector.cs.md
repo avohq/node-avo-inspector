@@ -72,7 +72,7 @@ Called by application code (manual tracking) and by Avo Codegen (`_avoFunctionTr
 5. `publicEncryptionKey`, outside prod: warns when it is not hex or its length is not 66 or 130. The key is still used.
 6. Logging is turned on in dev and off otherwise; this overwrites the shared static flag for every instance.
 7. Builds the network handler (`appName` defaults to `""`) and the deduplicator.
-8. Batch options: each numeric option that is present but invalid (`batchSize`/`maxQueueSize` not a positive integer, `batchFlushSeconds` not finite and > 0) warns "Invalid <name> <value>. Using default <default>." and uses the default. `disableBatchTimer` is true only when exactly `true`. `batchSize` is 1 in dev. When `batchSize > maxQueueSize` it warns and keeps both values (a batch never fills; oldest events are dropped).
+8. Batch options: each numeric option that is present but invalid (`batchSize`/`maxQueueSize` not a positive integer, `batchFlushSeconds` not finite and > 0) warns "Invalid <name> <value>. Using default <default>." (the value formatted with `valueToString`, so a symbol or a null-prototype object cannot make the constructor throw) and uses the default. `disableBatchTimer` is true only when exactly `true`. `batchSize` is 1 in dev. When `batchSize > maxQueueSize` it warns and keeps both values (a batch never fills; oldest events are dropped).
 9. Creates the batch queue: dispatch is `sendBatch`, a discarded batch's outcome is `"failed"`, and every swapped-out batch is registered as pending as soon as it is swapped out.
 10. Outside prod, creates the event spec fetcher (with the network handler's `mockEndpoint`), cache and validator.
 

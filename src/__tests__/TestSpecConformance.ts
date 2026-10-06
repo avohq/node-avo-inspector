@@ -801,4 +801,13 @@ describe("batching", () => {
     expect(console.warn).toHaveBeenCalledWith("[Avo Inspector] Invalid batchFlushSeconds -1. Using default 30.");
     expect(console.warn).toHaveBeenCalledWith("[Avo Inspector] Invalid maxQueueSize 1.5. Using default 1000.");
   });
+
+  test("an option value with no string conversion falls back too, instead of throwing", () => {
+    const inspector = staging({ batchSize: Symbol("s"), batchFlushSeconds: Object.create(null), maxQueueSize: Symbol() } as any);
+    expect((inspector as any).batchSize).toBe(30);
+    expect(console.warn).toHaveBeenCalledWith("[Avo Inspector] Invalid batchSize Symbol(s). Using default 30.");
+    expect(console.warn).toHaveBeenCalledWith("[Avo Inspector] Invalid batchFlushSeconds [object Object]. Using default 30.");
+    expect(console.warn).toHaveBeenCalledWith("[Avo Inspector] Invalid maxQueueSize Symbol(). Using default 1000.");
+    inspector.destroy();
+  });
 });
