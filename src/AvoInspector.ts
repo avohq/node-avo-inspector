@@ -885,11 +885,17 @@ export class AvoInspector {
     }
 
     const fetcher = this.eventSpecFetcher;
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       fetcher.fetch(eventName, anonymousId, (result) => {
         if (result !== null) {
           cache.set(cacheKey, result);
-          resolve(doValidate(result));
+          // A throw here would be swallowed by the fetcher and leave this promise pending;
+          // reject instead, so a miss falls back to an unvalidated send like a hit does.
+          try {
+            resolve(doValidate(result));
+          } catch (err) {
+            reject(err);
+          }
         } else {
           if (AvoInspector.shouldLog) {
             console.log("Avo Inspector: Event spec fetch returned null for event: " + eventName + ". Cached empty response. Sending without validation.");
