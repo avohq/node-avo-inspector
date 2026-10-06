@@ -586,12 +586,15 @@ export class AvoInspector {
     // The rate that governed this event's sampling decision, not the one at send time.
     const stamp = { createdAt, samplingRate };
     const buildBody = (validationResult: ValidationResult | null): EventSchemaBody => {
+      // The body gets its own copy: the call resolves with eventSchema, which the caller
+      // may change while the event still waits in the batch.
+      const bodySchema: Array<SchemaEntry> = JSON.parse(JSON.stringify(eventSchema));
       let body: EventSchemaBody;
       if (validationResult) {
         if (AvoInspector.shouldLog) {
           console.log("Avo Inspector: Sending validated event " + eventName);
         }
-        const eventProps = this.avoNetworkCallsHandler.buildEventProperties(eventSchema, rawEventProperties);
+        const eventProps = this.avoNetworkCallsHandler.buildEventProperties(bodySchema, rawEventProperties);
         body = this.avoNetworkCallsHandler.bodyForValidatedEventSchemaCall(
           anonymousId,
           eventName,
@@ -607,7 +610,7 @@ export class AvoInspector {
         body = this.avoNetworkCallsHandler.bodyForEventSchemaCall(
           anonymousId,
           eventName,
-          eventSchema,
+          bodySchema,
           eventId,
           eventHash,
           rawEventProperties,
