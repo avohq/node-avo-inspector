@@ -30,8 +30,6 @@ const DEFAULT_FLUSH_TIMEOUT_MS = 10_000;
 // Events waiting for a spec fetch at once, across every instance. The fetches share one
 // 8-socket pool, so past this an event is sent without validation rather than queued.
 const MAX_WAITING_VALIDATIONS = 1_000;
-// An exit deadline that passed more than this long ago is from an earlier exit.
-const EXIT_DEADLINE_STALE_MS = 1_000;
 
 // String() for regex validation; a value with no string conversion (a null-prototype object)
 // falls back to its tag, e.g. "[object Object]", which String() gives a plain object.
@@ -168,6 +166,8 @@ export class AvoInspector {
   private static waitingValidations = 0;
   // Frees this instance's places among them; destroy() runs whatever is left.
   private releaseWaiting: Set<() => void> = new Set();
+  // When any instance last tracked an event (monotonic clock).
+  private static lastTrackAt = -Infinity;
   // Deadlines of explicit flush() calls still running, by call.
   private static explicitFlushDeadlines: Map<object, number> = new Map();
 
@@ -178,10 +178,15 @@ export class AvoInspector {
       return;
     }
     const now = monotonicNowMs();
-    // One deadline per exit: "beforeExit" re-fires within moments of the deadline while the
-    // same exit continues, so a hung endpoint cannot stretch it. A deadline that passed
-    // longer ago belongs to an earlier exit the process carried on from; start a new one.
-    if (AvoInspector.exitDeadline === null || now - AvoInspector.exitDeadline > EXIT_DEADLINE_STALE_MS) {
+    // One deadline per exit: "beforeExit" re-fires while the same exit continues (also when
+    // the app's own beforeExit work keeps the loop alive past the deadline), so a hung
+    // endpoint cannot stretch it. Only a track after the deadline passed shows the process
+    // carried on from that exit; the next one then gets a new deadline.
+    const deadlinePassed = AvoInspector.exitDeadline !== null && now > AvoInspector.exitDeadline;
+    if (
+      AvoInspector.exitDeadline === null ||
+      (deadlinePassed && AvoInspector.lastTrackAt > AvoInspector.exitDeadline)
+    ) {
       AvoInspector.exitDeadline = now + DEFAULT_FLUSH_TIMEOUT_MS;
     }
     // An explicit flush() still running gets its full deadline, even past the drain's own.
@@ -490,6 +495,7 @@ export class AvoInspector {
     streamId: string | undefined,
     options: TrackOptions | undefined
   ): Promise<Array<SchemaEntry>> {
+    AvoInspector.lastTrackAt = monotonicNowMs();
     try {
       if (this.destroyed) {
         return Promise.resolve([]);

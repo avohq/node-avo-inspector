@@ -55,7 +55,7 @@ Uses `INTERNAL_ERROR_MESSAGE` from `AvoLog` (the track rejection reason). It is 
 
 Internal state: event spec fetcher/cache/validator (null in prod); an empty generated anonymous id used when no stream id is given; the batch queue; a `destroyed` flag; the set of pending promises (spec validations before enqueue, and batch sends) that `flush()` awaits; per-validation `flushRequested` markers; waiters settled by `destroy()`.
 
-Static state shared by all instances: the set of instances with work, whether the `beforeExit` listener is armed, one exit-drain deadline, and the deadlines of explicit `flush()` calls still running.
+Static state shared by all instances: the set of instances with work, whether the `beforeExit` listener is armed, one exit-drain deadline, when an event was last tracked (monotonic), and the deadlines of explicit `flush()` calls still running.
 
 ## Users and permissions
 
@@ -119,7 +119,7 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 
 - An instance is registered while it is not destroyed and has buffered events or pending work; a single `process.once("beforeExit")` listener is armed while any instance is registered and removed when none are (which also resets the exit deadline).
 - Each public `flush(timeoutMs)` records its deadline (monotonic clock) while it runs. The drain's own flushes use the same body without recording one.
-- On `beforeExit`: sets one 10 s deadline for the whole exit drain, from the monotonic clock. It keeps an existing deadline while that deadline is in the future or passed less than 1 s ago (the same exit, re-firing); otherwise (none, or one left by an earlier exit the process carried on from) it starts a new one. The drain's budget runs to the later of that deadline and the latest deadline of any explicit `flush()` still running, so an app's `flush(20000)` is not cut off at 10 s. If time remains, it holds the process with a timer for the remaining time, flushes every registered instance within it, clears the timer when all settle (and clears the deadline if they settled in time), and re-arms for work added during the drain. Past the deadline it does nothing and the rest is dropped.
+- On `beforeExit`: sets one 10 s deadline for the whole exit drain, from the monotonic clock. It starts a new deadline when there is none, or when the existing one has passed and an event was tracked (by any instance) after it passed: the process carried on from that exit. Otherwise it keeps the existing one, however long ago it passed: `beforeExit` re-firing with no track since, for example while the app's own `beforeExit` work keeps the loop alive, is the same exit, so its budget never restarts. The drain's budget runs to the later of that deadline and the latest deadline of any explicit `flush()` still running, so an app's `flush(20000)` is not cut off at 10 s. If time remains, it holds the process with a timer for the remaining time, flushes every registered instance within it, clears the timer when all settle (and clears the deadline if they settled in time), and re-arms for work added during the drain. Past the deadline it does nothing and the rest is dropped.
 - Nothing else keeps the process alive; `process.exit()`, signals and serverless freezes need an explicit `flush()`.
 
 ### Event spec validation (fetchAndValidate)

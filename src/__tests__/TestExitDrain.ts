@@ -289,4 +289,26 @@ describe("exit deadline", () => {
     expect(send).toHaveBeenCalledTimes(1);
     inspector.destroy();
   });
+
+  test("a deadline that passed with no track since is the same exit: its budget does not restart", async () => {
+    const now = () => require("../utils").monotonicNowMs();
+    const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30, disableBatchTimer: true });
+    const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+    await inspector.trackSchemaFromEvent("E", {});
+    // The exit drain's deadline passed 5 s ago while the app's own beforeExit work kept the
+    // loop alive; the last track was before it.
+    (AvoInspector as any).exitDeadline = now() - 5_000;
+    (AvoInspector as any).lastTrackAt = now() - 15_000;
+
+    (AvoInspector as any).drainOnExit();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(send).not.toHaveBeenCalled();
+
+    // A track after the deadline means the process carried on: the next exit gets a new one.
+    await inspector.trackSchemaFromEvent("F", {});
+    (AvoInspector as any).drainOnExit();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(send).toHaveBeenCalledTimes(1);
+    inspector.destroy();
+  });
 });
