@@ -31,7 +31,7 @@ class AvoLog {
 }
 ```
 
-Process-wide state: a map from key to `{ start, suppressed, print }`: the start of the key's current 10 s window, the amount counted in it without being printed, and how to print that count; plus whether its `beforeExit` listener is armed. Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`, `streamid-colon`, `missing-event-name`.
+Process-wide state: a map from key to `{ start, suppressed, print }`: the start of the key's current 10 s window, the amount counted in it without being printed, and how to print that count; plus whether its exit listeners are armed, and whether the process is exiting (lines are then written synchronously). Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`, `streamid-colon`, `missing-event-name`.
 
 ## Users and permissions
 
@@ -51,7 +51,9 @@ Process-wide state: a map from key to `{ start, suppressed, print }`: the start 
 - `flushPending()` prints every key with `suppressed > 0` at once (total = `suppressed`, `<N>s` = whole seconds since the window began, at least 1) and deletes that key's window, so its next occurrence prints immediately.
 - `flushPending(true)` (called by `flush()`) prints only keys whose window has expired (`now - start >= 10 000 ms`); a count still inside its window stays pending, so an app that calls `flush()` after every event keeps one line per kind per 10 s.
 - `destroy()` calls `flushPending()`.
-- While any count is pending, a `beforeExit` listener is armed that calls `flushPending()`; it is removed once nothing is pending. It schedules nothing, so it never keeps the process alive, and it covers exits where no instance has work left (no exit drain).
+- While any count is pending, two listeners are armed, and both are removed once nothing is pending. They schedule nothing, so they never keep the process alive.
+  - `beforeExit` calls `flushPending(true)`: expired counts only, like `flush()`. **IMPORTANT:** `beforeExit` is not the exit. In a script whose only pending work is the SDK's, it fires at every idle point (for example after each awaited `flush()`) and the exit drain resumes the process, so printing everything there would print one line per idle point and break the rate limit.
+  - `exit` (a natural exit or `process.exit()`) marks the process as exiting and calls `flushPending()`, printing every pending count. From then on lines are written with a synchronous `fs.writeSync(2, …)` instead of `console`, because console writes to a pipe are asynchronous and would be lost as the process ends. This also covers exits where no instance has work left (no exit drain).
 
 ### Lines
 

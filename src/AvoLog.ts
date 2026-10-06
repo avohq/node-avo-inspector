@@ -1,3 +1,5 @@
+import { writeSync } from "fs";
+
 import { monotonicNowMs } from "./utils";
 
 // Lines about lost data and failed sends, written to stderr whatever the logging flag. Each
@@ -5,8 +7,10 @@ import { monotonicNowMs } from "./utils";
 // the first occurrence prints at once, and later ones in the window are counted. A count is
 // printed with the next occurrence after the window, by flush() once the window has expired,
 // or by destroy() and the exit drain at once. "in the last Ns" is the real whole seconds
-// since the window began (at least 1). There is no timer; a beforeExit listener, armed only
-// while a count is pending, prints it at exit without keeping the process alive.
+// since the window began (at least 1). There is no timer. While a count is pending, a
+// "beforeExit" listener prints the expired ones (beforeExit also fires at every idle point of
+// a script whose only pending work is the SDK's, so it is not treated as the exit), and an
+// "exit" listener prints the rest, synchronously, when the process really exits.
 
 const WINDOW_MS = 10_000;
 
@@ -39,18 +43,21 @@ export class AvoLog {
 
   private static windows: Map<string, Window> = new Map();
   private static exitListenerArmed = false;
+  // Set by the "exit" listener: from then on lines are written synchronously, because
+  // console writes to a pipe are asynchronous and would be lost as the process ends.
+  private static exiting = false;
 
   /** Events dropped because the unsent buffer or the send backlog is full. */
   static dropped(count: number, reason: DropReason): void {
     AvoLog.occur("dropped:" + reason, count, (total, _more, seconds) => {
-      console.warn(`Avo Inspector: dropped ${total} event(s) (${reason}) in the last ${seconds}s.`);
+      AvoLog.write("warn", `Avo Inspector: dropped ${total} event(s) (${reason}) in the last ${seconds}s.`);
     });
   }
 
   /** A batch answered with an HTTP status other than 200. Only the status is logged. */
   static rejected(status: number): void {
     AvoLog.occur("non200:" + status, 1, (total, _more, seconds) => {
-      console.warn(`Avo Inspector: ${total} batch(es) rejected with HTTP ${status} in the last ${seconds}s.`);
+      AvoLog.write("warn", `Avo Inspector: ${total} batch(es) rejected with HTTP ${status} in the last ${seconds}s.`);
     });
   }
 
@@ -63,7 +70,7 @@ export class AvoLog {
       ? error
       : "Request failed (" + AvoLog.errorType(error) + ")";
     AvoLog.occur("failed:" + reason, 1, (_total, more, seconds) => {
-      console.error("Avo Inspector: schema sending failed: " + reason + "." + AvoLog.suffix(more, seconds));
+      AvoLog.write("error", "Avo Inspector: schema sending failed: " + reason + "." + AvoLog.suffix(more, seconds));
     });
   }
 
@@ -74,7 +81,7 @@ export class AvoLog {
   static internal(error: unknown): void {
     const type = AvoLog.errorType(error);
     AvoLog.occur("internal", 1, (_total, more, seconds) => {
-      console.error(INTERNAL_ERROR_MESSAGE + AvoLog.suffix(more, seconds) + " (" + type + ")");
+      AvoLog.write("error", INTERNAL_ERROR_MESSAGE + AvoLog.suffix(more, seconds) + " (" + type + ")");
     });
   }
 
@@ -110,7 +117,8 @@ export class AvoLog {
   /** A track call without a usable event name, sent as MISSING_EVENT_NAME. */
   static missingEventName(): void {
     AvoLog.occur("missing-event-name", 1, (total, _more, seconds) => {
-      console.warn(
+      AvoLog.write(
+        "warn",
         `Avo Inspector: ${total} event(s) tracked without an event name in the last ${seconds}s, sent as "${MISSING_EVENT_NAME}".`
       );
     });
@@ -119,7 +127,7 @@ export class AvoLog {
   /** A streamId containing ':' (warned on every call before; now once per window). */
   static streamIdColon(): void {
     AvoLog.occur("streamid-colon", 1, (_total, more, seconds) => {
-      console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported" + AvoLog.suffix(more, seconds));
+      AvoLog.write("warn", "[Avo Inspector] Warning: streamId contains ':' which is not supported" + AvoLog.suffix(more, seconds));
     });
   }
 
@@ -179,14 +187,36 @@ export class AvoLog {
     });
     if (pending && !AvoLog.exitListenerArmed) {
       process.on("beforeExit", AvoLog.onBeforeExit);
+      process.on("exit", AvoLog.onExit);
       AvoLog.exitListenerArmed = true;
     } else if (!pending && AvoLog.exitListenerArmed) {
       process.removeListener("beforeExit", AvoLog.onBeforeExit);
+      process.removeListener("exit", AvoLog.onExit);
       AvoLog.exitListenerArmed = false;
     }
   }
 
+  // Not the exit: the SDK's exit drain may resume the process. Only expired counts print,
+  // as in flush(), so idle points cannot break the rate limit.
   private static onBeforeExit = (): void => {
+    AvoLog.flushPending(true);
+  };
+
+  // The real exit (natural, or process.exit()): print everything still pending.
+  private static onExit = (): void => {
+    AvoLog.exiting = true;
     AvoLog.flushPending();
   };
+
+  private static write(level: "warn" | "error", line: string): void {
+    if (!AvoLog.exiting) {
+      console[level](line);
+      return;
+    }
+    try {
+      writeSync(2, line + "\n");
+    } catch (e) {
+      // stderr is gone; nothing else to do as the process exits.
+    }
+  }
 }

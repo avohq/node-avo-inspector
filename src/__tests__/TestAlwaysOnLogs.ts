@@ -409,16 +409,21 @@ describe("pending counts at lifecycle points, worded by real elapsed time", () =
     ]);
   });
 
-  test("the exit drain prints a pending count, even with no instance left with work", () => {
+  test("beforeExit prints only expired counts: it also fires at idle points that are not the exit", () => {
     AvoLog.failed("Request failed");
     AvoLog.failed("Request failed");
     now += 4_000;
 
+    // An idle point inside the window: the count stays pending (the real exit prints it;
+    // see TestExitLogs, which runs real processes).
     process.emit("beforeExit", 0);
+    expect(matching(/schema sending failed/)).toEqual(["Avo Inspector: schema sending failed: Request failed."]);
 
+    now += 6_000;
+    process.emit("beforeExit", 0);
     expect(matching(/schema sending failed/)).toEqual([
       "Avo Inspector: schema sending failed: Request failed.",
-      "Avo Inspector: schema sending failed: Request failed. (1 more in the last 4s)",
+      "Avo Inspector: schema sending failed: Request failed. (1 more in the last 10s)",
     ]);
   });
 
