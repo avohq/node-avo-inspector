@@ -54,10 +54,18 @@ beforeEach(() => {
 });
 
 // Runs `script` in a child Node process with the compiled SDK as `AvoInspector`.
+// Measured inside the child, from the start of the script (after the SDK is loaded) to
+// its exit: process start-up under a loaded test run is not the SDK's time.
+const ELAPSED_PRELUDE = `const __started = Date.now(); process.on("exit", () => process.stderr.write("__ELAPSED " + (Date.now() - __started) + "\\n"));\n`;
+const childElapsed = (stderr: string, fallback: number) => {
+  const match = stderr.match(/__ELAPSED (\d+)/);
+  return match ? Number(match[1]) : fallback;
+};
+
 function runChild(script: string, target: string = endpoint): Promise<{ elapsedMs: number; stdout: string; stderr: string }> {
   const started = Date.now();
   const source =
-    `const { AvoInspector } = require(${JSON.stringify(join(distDir, "index.js"))});\n` + script;
+    `const { AvoInspector } = require(${JSON.stringify(join(distDir, "index.js"))});\n` + ELAPSED_PRELUDE + script;
   return new Promise((resolve, reject) => {
     execFile(
       process.execPath,
@@ -71,7 +79,9 @@ function runChild(script: string, target: string = endpoint): Promise<{ elapsedM
         timeout: 30_000,
       },
       (err, stdout, stderr) =>
-        err ? reject(err) : resolve({ elapsedMs: Date.now() - started, stdout: String(stdout), stderr: String(stderr) })
+        err
+          ? reject(err)
+          : resolve({ elapsedMs: childElapsed(String(stderr), Date.now() - started), stdout: String(stdout), stderr: String(stderr) })
     );
   });
 }

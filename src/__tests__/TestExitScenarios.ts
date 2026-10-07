@@ -65,6 +65,14 @@ beforeEach(() => {
 
 // Runs `script` in a child process. prod instances send to api.avo.app, so every https
 // request is routed to the mock over http (and nothing else can be reached).
+// Measured inside the child, from the start of the script (after the SDK is loaded) to
+// its exit: process start-up under a loaded test run is not the SDK's time.
+const ELAPSED_PRELUDE = `const __started = Date.now(); process.on("exit", () => process.stderr.write("__ELAPSED " + (Date.now() - __started) + "\\n"));\n`;
+const childElapsed = (stderr: string, fallback: number) => {
+  const match = stderr.match(/__ELAPSED (\d+)/);
+  return match ? Number(match[1]) : fallback;
+};
+
 function runChild(script: string, timeout = 60_000): Promise<{ code: number | null; elapsedMs: number; stdout: string; stderr: string }> {
   const started = Date.now();
   const prelude = `
@@ -78,9 +86,9 @@ function runChild(script: string, timeout = 60_000): Promise<{ code: number | nu
   return new Promise((resolve) => {
     const child = execFile(
       process.execPath,
-      ["-e", prelude + script],
+      ["-e", prelude + ELAPSED_PRELUDE + script],
       { env: { ...process.env, AVO_INSPECTOR_MOCK_ENDPOINT: endpoint, NODE_PATH: join(repoRoot, "node_modules") }, timeout },
-      (_err, stdout, stderr) => resolve({ code: child.exitCode, elapsedMs: Date.now() - started, stdout: String(stdout), stderr: String(stderr) })
+      (_err, stdout, stderr) => resolve({ code: child.exitCode, elapsedMs: childElapsed(String(stderr), Date.now() - started), stdout: String(stdout), stderr: String(stderr) })
     );
   });
 }
