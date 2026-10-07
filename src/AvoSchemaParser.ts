@@ -84,14 +84,6 @@ export class AvoSchemaParser {
       }
       if (isArray(object)) {
         let list = object.map((x: any) => {
-          // Binary data first, as for properties: it is typed at any depth and uses no budget.
-          const xElementType = binaryElementType(x);
-          if (xElementType !== null) {
-            return binaryChildren(x, xElementType);
-          }
-          if (isArrayBufferLike(x)) {
-            return [];
-          }
           return isLeaf(x, depth) ? "object" : mapping(x, depth + 1);
         });
         return this.removeDuplicates(list);

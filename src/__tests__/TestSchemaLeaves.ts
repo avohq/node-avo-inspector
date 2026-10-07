@@ -42,27 +42,6 @@ describe("binary values", () => {
     ]);
   });
 
-  test("binary list elements past the depth cap are still typed; an object beside them is not", () => {
-    // The list is mapped at depth 10, so its complex elements are at the cap.
-    let props: any = { files: [Buffer.alloc(4), new ArrayBuffer(4), { a: 1 }] };
-    for (let i = 0; i < 9; i++) props = { a: props };
-    let schema: any = extract(props);
-    for (let i = 0; i < 9; i++) schema = schema[0].children;
-    expect(schema).toEqual([
-      { propertyName: "files", propertyType: "list(object)", children: [["int"], [], "object"] },
-    ]);
-  });
-
-  test("binary list elements use none of the expansion budget", () => {
-    const files = Array.from({ length: 10_000 }, () => new Uint8Array(1));
-    const schema = extract({ files, meta: { a: 1 } });
-    expect(schema[1]).toEqual({
-      propertyName: "meta",
-      propertyType: "object",
-      children: [{ propertyName: "a", propertyType: "int" }],
-    });
-  });
-
   test("deepEquals compares binary values by content, without enumerating them", () => {
     const started = Date.now();
     expect(deepEquals({ f: Buffer.alloc(16 * MiB, 1) }, { f: Buffer.alloc(16 * MiB, 1) })).toBe(true);
