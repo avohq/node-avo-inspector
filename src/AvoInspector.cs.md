@@ -88,6 +88,11 @@ Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `ev
 5. Extracts the schema (`extractSchema(props, false)`); when logging, prints `Supplied event <eventName> with schema <JSON of the schema>` (names, types and children, never values). Then samples and enqueues (below).
 6. A synchronous exception is logged with `AvoLog.internal` (always on, rate-limited) and the call rejects with `"Avo Inspector: something went wrong. Please report to support@avo.app."`.
 
+### Awaited track calls
+
+- `trackSchemaFromEvent` and `_avoFunctionTrackSchemaFromEvent` return the track's promise wrapped in an `AwaitedTrackPromise` (a `Promise` subclass; `Symbol.species` is `Promise`, so derived promises are plain). Its first `then` call (made by `await`, `then`, `catch`, `finally` or `Promise.all`) starts, if the call has not settled yet, a ref'd timer of `AWAITED_TRACK_HOLD_MS` (30 s: a spec fetch's socket wait and fetch, 10 s each, then a dev send's 10 s), cleared when the call settles.
+- **IMPORTANT:** the SDK's sockets and timers are unref'd, so without this a script awaiting a track that waits on a spec fetch or its dev send looks idle: `beforeExit` fires mid-loop and the exit drain could end the process (exit code 0) before the loop resumes, or send events unvalidated / in partial batches while the script is still running. A call nobody awaits holds nothing, so the exit bounds for fire-and-forget tracks are unchanged.
+
 ### Sampling and enqueue
 
 1. Reads the current sampling rate and stamps `createdAt` at call time. If `Math.random() > rate`, the event is dropped (logged) and the call resolves with the schema.

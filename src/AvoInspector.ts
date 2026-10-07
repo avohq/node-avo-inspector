@@ -27,6 +27,68 @@ const DEFAULT_BATCH_SIZE = 30;
 const DEFAULT_BATCH_FLUSH_SECONDS = 30;
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_FLUSH_TIMEOUT_MS = 10_000;
+// The longest a track call can stay pending on its own work: a spec fetch (a socket wait
+// and the fetch, 10 s each), then, in dev, its send (10 s). A backpressure wait has its own
+// ref'd timer.
+const AWAITED_TRACK_HOLD_MS = 30_000;
+
+// A track call's promise that notices when someone awaits it. The SDK's sockets and
+// timers do not hold the process, so a script awaiting a track that waits on a spec fetch
+// or (in dev) on its send would otherwise look idle: "beforeExit" would fire mid-loop and
+// the exit drain could end the process before the loop resumes. Once the promise is
+// awaited (await, then, catch, Promise.all all call then), a ref'd timer holds the
+// process until it settles, at most AWAITED_TRACK_HOLD_MS. A call nobody awaits holds
+// nothing, so an exit with fire-and-forget tracks keeps its bounds.
+class AwaitedTrackPromise<T> extends Promise<T> {
+  static get [Symbol.species]() {
+    return Promise;
+  }
+
+  onFirstAwait: (() => void) | null = null;
+
+  then<R1 = T, R2 = never>(
+    onFulfilled?: ((value: T) => R1 | PromiseLike<R1>) | null,
+    onRejected?: ((reason: any) => R2 | PromiseLike<R2>) | null
+  ): Promise<R1 | R2> {
+    const onFirstAwait = this.onFirstAwait;
+    if (onFirstAwait !== null) {
+      this.onFirstAwait = null;
+      onFirstAwait();
+    }
+    return super.then(onFulfilled, onRejected);
+  }
+}
+
+const holdWhileAwaited = <T>(work: Promise<T>): Promise<T> => {
+  let settled = false;
+  let hold: ReturnType<typeof setTimeout> | null = null;
+  const done = () => {
+    settled = true;
+    if (hold !== null) {
+      clearTimeout(hold);
+      hold = null;
+    }
+  };
+  const tracked = new AwaitedTrackPromise<T>((resolve, reject) => {
+    work.then(
+      (value) => {
+        done();
+        resolve(value);
+      },
+      (reason) => {
+        done();
+        reject(reason);
+      }
+    );
+  });
+  tracked.onFirstAwait = () => {
+    if (!settled) {
+      hold = setTimeout(() => {}, AWAITED_TRACK_HOLD_MS);
+    }
+  };
+  return tracked;
+};
+
 // At an idle point with validations pending, how long the exit drain waits for them before
 // sending anything (once per exit deadline).
 const VALIDATION_GRACE_MS = 1_000;
@@ -566,7 +628,7 @@ export class AvoInspector {
     streamId?: string,
     options?: TrackOptions
   ): Promise<Array<SchemaEntry>> {
-    return this.track(eventName, eventProperties, false, null, null, streamId, options);
+    return holdWhileAwaited(this.track(eventName, eventProperties, false, null, null, streamId, options));
   }
 
   /**
@@ -581,7 +643,7 @@ export class AvoInspector {
     streamId?: string,
     options?: TrackOptions
   ): Promise<Array<SchemaEntry>> {
-    return this.track(eventName, eventProperties, true, eventId, eventHash, streamId, options);
+    return holdWhileAwaited(this.track(eventName, eventProperties, true, eventId, eventHash, streamId, options));
   }
 
   // Shared by the manual and Codegen entry points.

@@ -15,12 +15,16 @@ const repoRoot = join(__dirname, "..", "..");
 let distDir: string;
 
 // The mock: a spec fetch for an event whose name starts with "Hang" never gets an answer;
-// others get "no spec" at once. Each track request is answered after `trackDelayMs`.
+// others get a spec for property "a" after `specDelayMs`. Each track request is answered
+// after `trackDelayMs` (never, if it is null).
 let server: Server;
 let endpoint: string;
 let closeConnections: () => void;
-let trackDelayMs = 0;
+let trackDelayMs: number | null = 0;
+let specDelayMs = 0;
 let received: string[] = [];
+let validated = 0;
+let trackRequests = 0;
 
 beforeAll(async () => {
   distDir = mkdtempSync(join(tmpdir(), "avo-inspector-scenarios-"));
@@ -32,8 +36,13 @@ beforeAll(async () => {
       if ((url.searchParams.get("eventName") || "").startsWith("Hang")) {
         return;
       }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ events: [], metadata: {} }));
+      setTimeout(() => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          events: [{ b: "b", id: "ev1", vids: [], p: { a: { t: "int", r: true } } }],
+          metadata: { schemaId: "s", branchId: "b", latestActionId: "l", sourceId: "src" },
+        }));
+      }, specDelayMs);
       return;
     }
     const chunks: Buffer[] = [];
@@ -42,6 +51,11 @@ beforeAll(async () => {
       const raw = Buffer.concat(chunks);
       const body = JSON.parse((req.headers["content-encoding"] === "gzip" ? gunzipSync(raw) : raw).toString("utf8"));
       received.push(...body.map((e: any) => e.eventName));
+      validated += body.filter((e: any) => e.eventSpecMetadata).length;
+      trackRequests++;
+      if (trackDelayMs === null) {
+        return;
+      }
       setTimeout(() => {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ samplingRate: 1 }));
@@ -60,7 +74,10 @@ afterAll(async () => {
 
 beforeEach(() => {
   trackDelayMs = 0;
+  specDelayMs = 0;
   received = [];
+  validated = 0;
+  trackRequests = 0;
 });
 
 // Runs `script` in a child process. prod instances send to api.avo.app, so every https
@@ -97,6 +114,75 @@ function runChild(script: string, timeout = 60_000): Promise<{ code: number | nu
 const reported = (stderr: string, reason: string) =>
   stderr.split("\n").filter((l) => l.includes(`(${reason})`))
     .reduce((sum, l) => sum + Number(l.match(/dropped (\d+) event/)![1]), 0);
+
+describe("an awaited loop whose tracks wait on spec fetches", () => {
+  // Every row is a spec-cache miss (its own stream id), so each track waits on a fetch.
+  const loop = (env: string, rows: number, after = "") => `
+    const inspector = new AvoInspector({ apiKey: "k", env: "${env}", version: "1.0.0", batchSize: 30 });
+    inspector.enableLogging(false);
+    (async () => {
+      let n = 0;
+      for (; n < ${rows}; n++) await inspector.trackSchemaFromEvent("Row Event", { a: n }, "user-" + n);
+      console.log("LOOP DONE " + n);
+      ${after}
+    })();
+  `;
+
+  test("staging, slow spec and hung track: the loop finishes and the code after it runs", async () => {
+    specDelayMs = 2000;
+    trackDelayMs = null;
+    const { code, stdout } = await runChild(loop("staging", 12, `
+      console.log("FLUSH " + (await inspector.flush(1000)));
+      console.log("AFTER LOOP");
+    `), 90_000);
+
+    expect(code).toBe(0);
+    expect(stdout).toContain("LOOP DONE 12");
+    expect(stdout).toContain("AFTER LOOP");
+  }, 100_000);
+
+  test("dev, slow spec and hung track: the loop finishes and the code after it runs", async () => {
+    // Each track waits for its spec and then for its own send, which times out after 10 s.
+    specDelayMs = 2000;
+    trackDelayMs = null;
+    const { code, stdout } = await runChild(loop("dev", 3, `console.log("AFTER LOOP");`), 90_000);
+
+    expect(code).toBe(0);
+    expect(stdout).toContain("LOOP DONE 3");
+    expect(stdout).toContain("AFTER LOOP");
+    expect(received).toHaveLength(3);
+  }, 100_000);
+
+  test("dev, slow spec and slow track: the loop finishes and every event is sent validated", async () => {
+    specDelayMs = 2000;
+    trackDelayMs = 500;
+    const { code, stdout } = await runChild(loop("dev", 12, `console.log("AFTER LOOP");`), 90_000);
+
+    expect(code).toBe(0);
+    expect(stdout).toContain("AFTER LOOP");
+    expect(received).toHaveLength(12);
+    expect(validated).toBe(12);
+  }, 100_000);
+
+  test("staging, spec slower than track: no event is given up and sent unvalidated mid-loop", async () => {
+    specDelayMs = 3000;
+    trackDelayMs = 5000;
+    const { stdout } = await runChild(loop("staging", 6, `await inspector.flush(); console.log("AFTER LOOP");`), 90_000);
+
+    expect(stdout).toContain("AFTER LOOP");
+    expect(received).toHaveLength(6);
+    expect(validated).toBe(6);
+  }, 100_000);
+
+  test("staging, spec slower than the exit grace: the events still go out as one batch", async () => {
+    specDelayMs = 1200;
+    const { stdout } = await runChild(loop("staging", 10, `await inspector.flush(); console.log("AFTER LOOP");`), 90_000);
+
+    expect(stdout).toContain("AFTER LOOP");
+    expect(received).toHaveLength(10);
+    expect(trackRequests).toBe(1);
+  }, 100_000);
+});
 
 describe("backpressure in an awaited loop", () => {
   test("a stalled awaited loop is not taken for the exit: the loop finishes and every event is accounted for", async () => {
