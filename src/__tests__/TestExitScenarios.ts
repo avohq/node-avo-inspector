@@ -28,7 +28,10 @@ let trackRequests = 0;
 
 beforeAll(async () => {
   distDir = mkdtempSync(join(tmpdir(), "avo-inspector-scenarios-"));
-  execFileSync(join(repoRoot, "node_modules", ".bin", "tsc"), ["-p", join(repoRoot, "tsconfig.json"), "--outDir", distDir]);
+  // tsc's JS entry point run with this Node (the .bin shim is a .cmd file on Windows).
+  execFileSync(process.execPath, [
+    require.resolve("typescript/bin/tsc"), "-p", join(repoRoot, "tsconfig.json"), "--outDir", distDir,
+  ]);
 
   server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || "/", "http://mock");
