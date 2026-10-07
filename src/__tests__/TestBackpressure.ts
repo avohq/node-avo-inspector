@@ -86,6 +86,20 @@ test("tracks that are not awaited are unaffected: the backlog cap still applies"
   inspector.destroy();
 }, 30_000);
 
+test("50,000 calls that are not awaited, against hung sends, retain no waiters", async () => {
+  respond = () => {};
+  const inspector = prod();
+
+  for (let i = 0; i < 50_000; i++) inspector.trackSchemaFromEvent("E", { i });
+
+  // Reaching the 10,000-event cap means the callers are not awaiting: every waiter is
+  // released, and none is created while the backlog stays at the cap.
+  expect((inspector as any).batchQueue.capacityWaiterCount).toBe(0);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect((inspector as any).destroyWaiters.size).toBe(0);
+  inspector.destroy();
+}, 60_000);
+
 test("against a hung endpoint, each awaited track waits about one request timeout at most", async () => {
   respond = () => {};
   (AvoNetworkCallsHandler as any).requestTimeoutMs = 300;

@@ -17,6 +17,9 @@ export const MAX_WAITING_EVENTS = 10_000;
 // fewer wait (see whenBelowBackpressure), so awaited loops slow to the speed of the sends.
 export const BACKPRESSURE_WAITING_EVENTS = 1_000;
 
+// The longest a track waits on backpressure: one request timeout.
+export const BACKPRESSURE_MAX_WAIT_MS = 10_000;
+
 export interface AvoBatchOptions {
   batchSize: number;
   batchFlushSeconds: number;
@@ -42,8 +45,16 @@ export class AvoBatchQueue<T> {
   private waitingEvents = 0;
   private inFlight = 0;
   private inFlightEventCount = 0;
-  // Resolved once fewer than BACKPRESSURE_WAITING_EVENTS events wait, or by clear().
+  // Resolved once fewer than BACKPRESSURE_WAITING_EVENTS events wait, when the backlog
+  // overflows, when the wait timer fires, or by clear().
   private capacityWaiters: Array<() => void> = [];
+  // Ref'd while there are waiters: a stalled awaited loop is pending work, so "beforeExit"
+  // does not fire in the middle of it. Fires after BACKPRESSURE_MAX_WAIT_MS at the latest.
+  private capacityTimer: ReturnType<typeof setTimeout> | null = null;
+  // Set when the backlog overflowed: an awaited loop stalls near BACKPRESSURE_WAITING_EVENTS,
+  // so reaching the cap means the callers are not awaiting. No waiter is created until
+  // the backlog is back under the threshold.
+  private overflowed = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   // Settled with the outcome of the batch that takes the current buffer, whichever drain
   // swaps it out (or `dropped` if clear() discards it). Created on demand.
@@ -133,27 +144,51 @@ export class AvoBatchQueue<T> {
     if (excess > 0) {
       this.dropOldestWaiting(excess);
       AvoLog.dropped(excess, "send backlog full");
+      this.overflowed = true;
+      this.releaseCapacityWaiters(true);
     }
     return this.track(outcome);
   }
 
   /**
    * Resolves once fewer than BACKPRESSURE_WAITING_EVENTS events wait for a send slot (at
-   * once if they already do), or when clear() runs. No timer: a freed slot releases it.
+   * once if they already do, or if the backlog has overflowed), and at the latest after
+   * BACKPRESSURE_MAX_WAIT_MS. clear() resolves it too.
    */
   whenBelowBackpressure(): Promise<void> {
-    if (this.waitingEvents < BACKPRESSURE_WAITING_EVENTS) {
+    if (this.waitingEvents < BACKPRESSURE_WAITING_EVENTS || this.overflowed) {
       return Promise.resolve();
     }
-    return new Promise((resolve) => this.capacityWaiters.push(resolve));
+    return new Promise((resolve) => {
+      this.capacityWaiters.push(resolve);
+      if (this.capacityTimer === null) {
+        this.capacityTimer = setTimeout(() => {
+          this.capacityTimer = null;
+          this.releaseCapacityWaiters(true);
+        }, BACKPRESSURE_MAX_WAIT_MS);
+      }
+    });
   }
 
-  private releaseCapacityWaiters(): void {
-    if (this.waitingEvents < BACKPRESSURE_WAITING_EVENTS && this.capacityWaiters.length > 0) {
-      const waiters = this.capacityWaiters;
-      this.capacityWaiters = [];
-      waiters.forEach((resolve) => resolve());
+  /** Tracks waiting on backpressure. */
+  get capacityWaiterCount(): number {
+    return this.capacityWaiters.length;
+  }
+
+  private releaseCapacityWaiters(all: boolean = false): void {
+    if (this.waitingEvents < BACKPRESSURE_WAITING_EVENTS) {
+      this.overflowed = false;
     }
+    if (!all && this.waitingEvents >= BACKPRESSURE_WAITING_EVENTS) {
+      return;
+    }
+    if (this.capacityTimer !== null) {
+      clearTimeout(this.capacityTimer);
+      this.capacityTimer = null;
+    }
+    const waiters = this.capacityWaiters;
+    this.capacityWaiters = [];
+    waiters.forEach((resolve) => resolve());
   }
 
   /** Discards every buffered or waiting event unsent and cancels the scheduled flush. */
@@ -168,7 +203,7 @@ export class AvoBatchQueue<T> {
     this.waiting = [];
     this.waitingEvents = 0;
     discarded.forEach((batch) => batch.settle(this.dropped));
-    this.releaseCapacityWaiters();
+    this.releaseCapacityWaiters(true);
   }
 
   private startSends(): void {

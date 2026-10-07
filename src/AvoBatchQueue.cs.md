@@ -17,7 +17,7 @@ In-memory batching buffer for Inspector events: collects events, forms a batch o
 - Exported constants: `MAX_TIMER_MS = 2_147_483_647` (largest safe `setTimeout` delay), `MAX_IN_FLIGHT_SENDS = 4`, `MAX_WAITING_EVENTS = 10_000`.
 - `AvoBatchOptions { batchSize; batchFlushSeconds; maxQueueSize; disableBatchTimer }`.
 - `new AvoBatchQueue<T>(options, dispatch: (batch) => Promise<T> /* should not reject or throw */, dropped: T, track = identity)`.
-- Constant `BACKPRESSURE_WAITING_EVENTS = 1_000` (exported).
+- Constants `BACKPRESSURE_WAITING_EVENTS = 1_000` and `BACKPRESSURE_MAX_WAIT_MS = 10_000` (one request timeout), exported.
 - Getters: `length` (unsent buffer), `waitingLength` (events waiting for a send slot), `inFlightEvents` (events in batches being sent), `hasScheduledFlush`.
 
 State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEvents` count, `inFlight` count, optional flush timer, and an optional `bufferOutcome` (the promise handed out by `bufferedBatchOutcome()` for the current buffer).
@@ -54,12 +54,15 @@ State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEve
 - When a dispatch settles: decrement `inFlight`, settle the batch with the dispatch result, then start further sends.
 - **IMPORTANT:** if `dispatch` throws synchronously or rejects, report it with `AvoLog.internal(error)` and `AvoLog.dropped(<batch size>, "internal error")` (both always on, rate-limited), and settle the batch with `dropped` (asynchronously, also for a synchronous throw): the slot is freed, the batch settles, and the next waiting batch starts.
 - Batches are dispatched in the order they were formed.
-- After starting sends (and after `clear()`), if `waitingEvents < BACKPRESSURE_WAITING_EVENTS`, resolve every capacity waiter.
+- After starting sends, if `waitingEvents < BACKPRESSURE_WAITING_EVENTS`, resolve every capacity waiter and reset the overflow flag. `clear()` resolves every waiter.
+- When the backlog overflows (`AvoLog.dropped(..., "send backlog full")`), set the overflow flag and resolve every waiter: an awaited loop stalls near 1,000 waiting events, so reaching the 10,000 cap means the callers are not awaiting.
 - `inFlightEvents` counts the events of dispatched batches until they settle.
 
 ### `whenBelowBackpressure(): Promise<void>`
 
-- Resolves at once if `waitingEvents < BACKPRESSURE_WAITING_EVENTS` (1,000); otherwise registers a capacity waiter, resolved once a freed send slot (or `clear()`) brings the count below it. No timer and no handle: a waiter never holds the process.
+- Resolves at once if `waitingEvents < BACKPRESSURE_WAITING_EVENTS` (1,000) or the overflow flag is set (so calls that are not awaited never accumulate waiters while the backlog sits at the cap). Otherwise registers a capacity waiter, resolved by a freed send slot that brings the count below the threshold, an overflow, `clear()`, or at the latest one shared timer of `BACKPRESSURE_MAX_WAIT_MS`.
+- **IMPORTANT:** that timer is ref'd while any waiter exists (cleared when the last one is released): a stalled awaited loop is pending work, so `beforeExit` does not fire in the middle of it and the exit drain cannot take it for the exit. Every waiter is released within 10 s. Cost: at a real exit, un-awaited calls still waiting can delay the drain's start by up to 10 s.
+- `capacityWaiterCount` getter: waiters currently registered.
 
 ### Flush timer
 
