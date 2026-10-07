@@ -405,6 +405,30 @@ describe("exit deadline", () => {
     inspector.destroy();
   });
 
+  test("a drain cut off by its budget does not renew the deadline, even if the clock reads just short of it", async () => {
+    // Under load, libuv timers run on the loop's cached clock and can fire a little before
+    // the monotonic clock reaches the deadline. A frozen clock reproduces that exactly: the
+    // drain's budget timer fires while monotonicNowMs() still reads less than the deadline.
+    jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate", "queueMicrotask"] });
+    const utils = require("../utils");
+    jest.spyOn(utils, "monotonicNowMs").mockReturnValue(utils.monotonicNowMs());
+    const inspector = new AvoInspector({ apiKey: "k", env: "prod", version: "1.0.0", batchSize: 30, disableBatchTimer: true });
+    inspector.enableLogging(false);
+    // A send that never completes.
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockImplementation(() => new Promise(() => {}));
+    await inspector.trackSchemaFromEvent("E", {});
+
+    (AvoInspector as any).drainOnExit();
+    const deadline = (AvoInspector as any).exitDeadline;
+    await jest.advanceTimersByTimeAsync(10_000);
+
+    // The send is still in flight: the drain timed out, so the next beforeExit is the same
+    // exit and must not get a fresh 10 s.
+    expect((AvoInspector as any).exitDeadline).toBe(deadline);
+    inspector.destroy();
+    jest.useRealTimers();
+  });
+
   test("a deadline that passed with no track since is the same exit: its budget does not restart", async () => {
     const now = () => require("../utils").monotonicNowMs();
     const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30, disableBatchTimer: true });

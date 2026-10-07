@@ -336,11 +336,14 @@ export class AvoInspector {
       instances.forEach((inspector) => inspector.giveUpValidations());
     }, remaining / 2);
     giveUp.unref();
-    Promise.allSettled(instances.map((inspector) => inspector.flushWithin(remaining))).then(() => {
+    Promise.all(instances.map((inspector) => inspector.flushWithin(remaining))).then((completed) => {
       clearTimeout(keepAlive);
       clearTimeout(giveUp);
-      // Finished in time: the next "beforeExit" starts a new exit with a fresh deadline.
-      if (monotonicNowMs() < deadline) {
+      // Finished before the budget ran out: the next "beforeExit" starts a new exit with a
+      // fresh deadline. Decided by which won the race, not by reading the clock: under load
+      // a timer can fire while the monotonic clock still reads just short of the deadline,
+      // and a timed-out drain would then be renewed for another 10 s.
+      if (completed.every((done) => done)) {
         AvoInspector.exitDeadline = null;
       }
     });
@@ -944,10 +947,12 @@ export class AvoInspector {
   }
 
   // The body of flush(): also used by the exit drain, whose own deadline is not an explicit one.
-  private async flushWithin(budget: number): Promise<void> {
+  // Resolves whether everything it waited for settled within the budget (false if the
+  // budget ran out first).
+  private async flushWithin(budget: number): Promise<boolean> {
     try {
       if (this.destroyed) {
-        return;
+        return true;
       }
       // Only work started before this call, plus the batch it drains, is awaited.
       const waitFor: Array<Promise<unknown>> = Array.from(this.pending);
@@ -962,19 +967,21 @@ export class AvoInspector {
         waitFor.push(drained);
       }
       if (waitFor.length === 0) {
-        return;
+        return true;
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        Promise.allSettled(waitFor),
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, budget);
+      const completed = await Promise.race([
+        Promise.allSettled(waitFor).then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), budget);
           timer.unref();
         }),
       ]);
       clearTimeout(timer);
+      return completed;
     } catch (e) {
       // flush() is a completion guarantee and never rejects.
+      return false;
     } finally {
       // Counts whose window has expired are printed now; a count still inside its window
       // stays pending, so an app that flushes after every event keeps the 10 s limit.
