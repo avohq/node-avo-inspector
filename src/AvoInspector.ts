@@ -27,6 +27,9 @@ const DEFAULT_BATCH_SIZE = 30;
 const DEFAULT_BATCH_FLUSH_SECONDS = 30;
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_FLUSH_TIMEOUT_MS = 10_000;
+// At an idle point with validations pending, how long the exit drain waits for them before
+// sending anything (once per exit deadline).
+const VALIDATION_GRACE_MS = 1_000;
 // Events waiting for a spec fetch at once, across every instance. The fetches share one
 // 8-socket pool, so past this an event is sent without validation rather than queued.
 const MAX_WAITING_VALIDATIONS = 1_000;
@@ -136,6 +139,34 @@ export class AvoInspector {
     });
   }
 
+  // Mirrors a validation, but resolves null (send unvalidated) if giveUpValidations() runs first.
+  private untilGivenUp<T>(validation: Promise<T | null>): Promise<T | null> {
+    return new Promise<T | null>((resolve, reject) => {
+      const giveUp = () => resolve(null);
+      this.giveUpWaiters.add(giveUp);
+      validation.then(
+        (value) => {
+          this.giveUpWaiters.delete(giveUp);
+          resolve(value);
+        },
+        (reason) => {
+          this.giveUpWaiters.delete(giveUp);
+          reject(reason);
+        }
+      );
+    });
+  }
+
+  /** The exit drain ran out of time for validations: their events are sent unvalidated. */
+  private giveUpValidations(): void {
+    const waiters = Array.from(this.giveUpWaiters);
+    this.giveUpWaiters.clear();
+    if (waiters.length > 0 && AvoInspector.shouldLog) {
+      console.log("Avo Inspector: exiting; sending " + waiters.length + " event(s) without waiting for their event spec.");
+    }
+    waiters.forEach((giveUp) => giveUp());
+  }
+
   private get pendingCount(): number {
     return this.pending.size;
   }
@@ -169,8 +200,12 @@ export class AvoInspector {
   private releaseWaiting: Set<() => void> = new Set();
   // Validations not finished yet (their events are not queued), settled when they are.
   private validationOutcomes: Set<Promise<unknown>> = new Set();
+  // Gives up each validation still pending (giveUpValidations).
+  private giveUpWaiters: Set<() => void> = new Set();
   // When any instance last tracked an event (monotonic clock).
   private static lastTrackAt = -Infinity;
+  // The exit deadline whose validation grace has been used.
+  private static validationGraceUsedFor: number | null = null;
   // Deadlines of explicit flush() calls still running, by call.
   private static explicitFlushDeadlines: Map<object, number> = new Map();
 
@@ -192,29 +227,6 @@ export class AvoInspector {
     ) {
       AvoInspector.exitDeadline = now + DEFAULT_FLUSH_TIMEOUT_MS;
     }
-    // Spec-fetch sockets are unref'd, so "beforeExit" also fires while a script awaits a
-    // track whose spec is being fetched. That is not the exit yet: hold the process until
-    // the validations settle (each fetch has its own deadline), without sending, so batches
-    // stay whole, then look again. A validation that settled in time, with no fetch given
-    // up, renews the deadline like any completed idle point; one that waited on a hung
-    // spec endpoint used up the exit's time, so the exit still ends within one deadline.
-    const validations = instances.reduce(
-      (all: Array<Promise<unknown>>, inspector) => all.concat(Array.from(inspector.validationOutcomes)),
-      []
-    );
-    if (validations.length > 0) {
-      const exitDeadline = AvoInspector.exitDeadline;
-      const timeoutsBefore = AvoEventSpecFetcher.timeouts;
-      const hold = setTimeout(() => {}, MAX_TIMER_MS);
-      Promise.allSettled(validations).then(() => {
-        clearTimeout(hold);
-        if (monotonicNowMs() < exitDeadline && AvoEventSpecFetcher.timeouts === timeoutsBefore) {
-          AvoInspector.exitDeadline = null;
-        }
-      });
-      AvoInspector.armExitDrain();
-      return;
-    }
     // An explicit flush() still running gets its full deadline, even past the drain's own.
     let deadline = AvoInspector.exitDeadline;
     AvoInspector.explicitFlushDeadlines.forEach((flushDeadline) => {
@@ -222,14 +234,49 @@ export class AvoInspector {
     });
     const remaining = deadline - now;
     if (remaining <= 0) {
-      // Out of time: let the process exit; what is still unsent is dropped.
+      // Out of time: let the process exit; what is still unsent is reported at the exit.
+      return;
+    }
+    // Spec-fetch sockets are unref'd, so "beforeExit" also fires while a script awaits a
+    // track whose spec is being fetched. Once per deadline, give pending validations a short
+    // grace, sending nothing: with a working spec endpoint they settle well within it, the
+    // script carries on and its batches stay whole. Settled in time with no fetch given up
+    // counts as a completed idle point (the deadline is renewed); otherwise the grace is
+    // spent and the next "beforeExit" drains.
+    const validations = instances.reduce(
+      (all: Array<Promise<unknown>>, inspector) => all.concat(Array.from(inspector.validationOutcomes)),
+      []
+    );
+    if (validations.length > 0 && AvoInspector.validationGraceUsedFor !== AvoInspector.exitDeadline) {
+      AvoInspector.validationGraceUsedFor = AvoInspector.exitDeadline;
+      const exitDeadline = AvoInspector.exitDeadline;
+      const timeoutsBefore = AvoEventSpecFetcher.timeouts;
+      let grace: ReturnType<typeof setTimeout> | undefined;
+      const graceOver = new Promise<boolean>((resolve) => {
+        grace = setTimeout(() => resolve(false), Math.min(VALIDATION_GRACE_MS, remaining));
+      });
+      Promise.race([Promise.allSettled(validations).then(() => true), graceOver]).then((settled) => {
+        clearTimeout(grace);
+        if (settled && monotonicNowMs() < exitDeadline && AvoEventSpecFetcher.timeouts === timeoutsBefore) {
+          AvoInspector.exitDeadline = null;
+        }
+      });
+      AvoInspector.armExitDrain();
       return;
     }
     // Request sockets are unref'd, so this timer is what keeps the process alive while
-    // everything left is sent at once (within the in-flight cap).
+    // everything left is sent at once (within the in-flight cap). Every instance drains
+    // what is ready now; events still being validated follow as they are validated, and
+    // halfway through the budget the validations still pending are given up, so those
+    // events go out unvalidated within the rest of it.
     const keepAlive = setTimeout(() => {}, remaining);
+    const giveUp = setTimeout(() => {
+      instances.forEach((inspector) => inspector.giveUpValidations());
+    }, remaining / 2);
+    giveUp.unref();
     Promise.allSettled(instances.map((inspector) => inspector.flushWithin(remaining))).then(() => {
       clearTimeout(keepAlive);
+      clearTimeout(giveUp);
       // Finished in time: the next "beforeExit" starts a new exit with a fresh deadline.
       if (monotonicNowMs() < deadline) {
         AvoInspector.exitDeadline = null;
@@ -688,7 +735,7 @@ export class AvoInspector {
     // that settles in the same event-loop turn, and flush() waits for that send.
     const validation = { flushRequested: false };
     const outcome = this.untilDestroyed<ValidationResult | null>(
-      this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId),
+      this.untilGivenUp(this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId)),
       null
     )
       .catch((err): ValidationResult | null => {

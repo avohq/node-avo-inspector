@@ -111,3 +111,42 @@ describe("backpressure in an awaited loop", () => {
     expect(elapsedMs).toBeLessThan(110_000);
   }, 130_000);
 });
+describe("exit while a spec fetch hangs", () => {
+  test("events already validated are sent; only the one still being validated is held back", async () => {
+    const { stderr } = await runChild(`
+      const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
+      (async () => {
+        for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, { i });
+        inspector.trackSchemaFromEvent("Hang", { i: 5 });
+      })();
+    `);
+
+    expect(received.filter((name) => name.startsWith("E")).sort()).toEqual(["E0", "E1", "E2", "E3", "E4"]);
+    // The held-back event is sent unvalidated once its validation is given up, or reported.
+    expect(received.filter((n) => n === "Hang").length + reported(stderr, "unsent at exit")).toBe(1);
+  }, 60_000);
+
+  test("another instance's events are sent while one instance waits on a hung spec", async () => {
+    await runChild(`
+      const prod = new AvoInspector({ apiKey: "k", env: "prod", version: "1.0.0", batchSize: 30 });
+      const staging = new AvoInspector({ apiKey: "k2", env: "staging", version: "1.0.0", batchSize: 30 });
+      for (let i = 0; i < 5; i++) prod.trackSchemaFromEvent("P" + i, { i });
+      staging.trackSchemaFromEvent("Hang", { i: 0 });
+    `);
+
+    expect(received.filter((name) => name.startsWith("P")).sort()).toEqual(["P0", "P1", "P2", "P3", "P4"]);
+  }, 60_000);
+
+  test("9 hung spec fetches (8 at once, 1 a second later): the exit ends within one deadline, and every event is sent or reported", async () => {
+    const { stderr, elapsedMs } = await runChild(`
+      const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
+      for (let i = 0; i < 8; i++) inspector.trackSchemaFromEvent("Hang" + i, { i });
+      setTimeout(() => inspector.trackSchemaFromEvent("Hang8", { i: 8 }), 1000);
+    `);
+
+    expect(elapsedMs).toBeLessThan(14_000);
+    expect(received.length + reported(stderr, "unsent at exit")).toBe(9);
+    // Given up at the deadline, they go out unvalidated rather than being lost.
+    expect(received.length).toBe(9);
+  }, 60_000);
+});
