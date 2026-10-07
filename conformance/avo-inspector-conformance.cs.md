@@ -41,7 +41,7 @@ Output envelope: `{ fixture_id, passed, actual, outcome: "resolve" | "reject", e
    - `sequence`: steps run in order and each appends `{ action, outcome, value }` to `actual`:
      - `track`: settled like `trackSchemaFromEvent`.
      - `trackN`: starts `count` calls `trackSchemaFromEvent("<prefix><i>", {}, streamId ?? "")` concurrently, awaits all; `value: count`.
-     - `flush`: awaits `flush()` or `flush(timeoutMs)`; `value: null`.
+     - `flush`: awaits `flush()` or `flush(timeoutMs)`; `value` = the boolean it resolves to (`true` drained, `false` the timeout won).
      - `destroy`: calls `destroy()`; `value: null`.
 7. Trailing optional arguments not supplied by the fixture are omitted from the `trackSchemaFromEvent` call (`streamId`, `options`); `options` is passed verbatim.
 8. Success envelopes have `passed: true`, `error: null`, exit 0.

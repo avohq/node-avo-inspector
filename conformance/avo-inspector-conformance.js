@@ -177,8 +177,8 @@ async function runSequence(inspector, steps) {
       await Promise.all(tasks);
       actual.push({ action, outcome: "resolve", value: count });
     } else if (action === "flush") {
-      await (step.timeoutMs === undefined ? inspector.flush() : inspector.flush(step.timeoutMs));
-      actual.push({ action, outcome: "resolve", value: null });
+      const drained = await (step.timeoutMs === undefined ? inspector.flush() : inspector.flush(step.timeoutMs));
+      actual.push({ action, outcome: "resolve", value: drained });
     } else {
       inspector.destroy();
       actual.push({ action, outcome: "resolve", value: null });
