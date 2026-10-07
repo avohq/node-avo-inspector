@@ -14,8 +14,9 @@ const countProperties = (schema: any[]): number =>
 
 describe("binary values", () => {
   test("a 16 MiB Buffer is a list of ints, typed without visiting its bytes", () => {
+    const file = Buffer.alloc(16 * MiB, 7);
     const started = Date.now();
-    expect(extract({ file: Buffer.alloc(16 * MiB, 7) })).toEqual([
+    expect(extract({ file })).toEqual([
       { propertyName: "file", propertyType: "list(int)", children: ["int"] },
     ]);
     expect(Date.now() - started).toBeLessThan(100);
@@ -92,8 +93,9 @@ describe("tracking a large binary value", () => {
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockImplementation((batch) => { sent.push(...batch); return Promise.resolve(200); });
 
+    const file = Buffer.alloc(mib * MiB, 7);
     const started = Date.now();
-    inspector.trackSchemaFromEvent("Upload", { file: Buffer.alloc(mib * MiB, 7), name: "x" });
+    inspector.trackSchemaFromEvent("Upload", { file, name: "x" });
     expect(Date.now() - started).toBeLessThan(200);
     await expect(inspector.flush()).resolves.toBe(true);
 
