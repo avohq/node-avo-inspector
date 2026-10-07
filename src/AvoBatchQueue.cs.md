@@ -54,13 +54,13 @@ State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEve
 - When a dispatch settles: decrement `inFlight`, settle the batch with the dispatch result, then start further sends.
 - **IMPORTANT:** if `dispatch` throws synchronously or rejects, report it with `AvoLog.internal(error)` and `AvoLog.dropped(<batch size>, "internal error")` (both always on, rate-limited), and settle the batch with `dropped` (asynchronously, also for a synchronous throw): the slot is freed, the batch settles, and the next waiting batch starts.
 - Batches are dispatched in the order they were formed.
-- After starting sends, if `waitingEvents < BACKPRESSURE_WAITING_EVENTS`, resolve every capacity waiter and reset the overflow flag. `clear()` resolves every waiter.
-- When the backlog overflows (`AvoLog.dropped(..., "send backlog full")`), set the overflow flag and resolve every waiter: an awaited loop stalls near 1,000 waiting events, so reaching the 10,000 cap means the callers are not awaiting.
+- After starting sends, if `waitingEvents < BACKPRESSURE_WAITING_EVENTS`, resolve every capacity waiter. `clear()` resolves every waiter.
+- When the backlog overflows (`AvoLog.dropped(..., "send backlog full")`), resolve every waiter: an awaited loop stalls near 1,000 waiting events, so reaching the 10,000 cap means the callers are not awaiting. Calls that are not awaited therefore hold at most the waiters registered since the last overflow (fewer than one batch), and an awaited loop that later runs against a full backlog is still throttled between overflows (there is no lasting "overflowed" state).
 - `inFlightEvents` counts the events of dispatched batches until they settle.
 
 ### `whenBelowBackpressure(): Promise<void>`
 
-- Resolves at once if `waitingEvents < BACKPRESSURE_WAITING_EVENTS` (1,000) or the overflow flag is set (so calls that are not awaited never accumulate waiters while the backlog sits at the cap). Otherwise registers a capacity waiter, resolved by a freed send slot that brings the count below the threshold, an overflow, `clear()`, or at the latest one shared timer of `BACKPRESSURE_MAX_WAIT_MS`.
+- Resolves at once if `waitingEvents < BACKPRESSURE_WAITING_EVENTS` (1,000). Otherwise registers a capacity waiter, resolved by a freed send slot that brings the count below the threshold, an overflow, `clear()`, or at the latest one shared timer of `BACKPRESSURE_MAX_WAIT_MS`.
 - **IMPORTANT:** that timer is ref'd while any waiter exists (cleared when the last one is released): a stalled awaited loop is pending work, so `beforeExit` does not fire in the middle of it and the exit drain cannot take it for the exit. Every waiter is released within 10 s. Cost: at a real exit, un-awaited calls still waiting can delay the drain's start by up to 10 s.
 - `capacityWaiterCount` getter: waiters currently registered.
 

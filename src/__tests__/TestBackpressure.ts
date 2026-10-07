@@ -86,7 +86,7 @@ test("tracks that are not awaited are unaffected: the backlog cap still applies"
   inspector.destroy();
 }, 30_000);
 
-test("50,000 calls that are not awaited, against hung sends, retain no waiters", async () => {
+test("50,000 calls that are not awaited, against hung sends, retain under one batch of waiters", async () => {
   respond = () => {};
   const inspector = prod();
 
@@ -94,11 +94,29 @@ test("50,000 calls that are not awaited, against hung sends, retain no waiters",
 
   // Reaching the 10,000-event cap means the callers are not awaiting: every waiter is
   // released, and none is created while the backlog stays at the cap.
-  expect((inspector as any).batchQueue.capacityWaiterCount).toBe(0);
+  // At most the calls since the last overflow (under one batch) still wait.
+  expect((inspector as any).batchQueue.capacityWaiterCount).toBeLessThan(30);
   await new Promise((resolve) => setImmediate(resolve));
-  expect((inspector as any).destroyWaiters.size).toBe(0);
+  expect((inspector as any).destroyWaiters.size).toBeLessThan(30);
   inspector.destroy();
 }, 60_000);
+
+test.each([0, 12_000])("an awaited loop is throttled against a hung endpoint, also after an un-awaited burst of %i", async (burst) => {
+  respond = () => {};
+  const inspector = prod();
+  for (let i = 0; i < burst; i++) inspector.trackSchemaFromEvent("Burst", { i });
+
+  let reached = 0;
+  const loop = (async () => {
+    for (; reached < 3000; reached++) await inspector.trackSchemaFromEvent("Loop", { i: reached });
+  })();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  // Stalled on backpressure, far from the end (unthrottled, the loop ends in a few ms).
+  expect(reached).toBeLessThan(1_500);
+  inspector.destroy();
+  await loop;
+}, 30_000);
 
 test("against a hung endpoint, each awaited track waits about one request timeout at most", async () => {
   respond = () => {};

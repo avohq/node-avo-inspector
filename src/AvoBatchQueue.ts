@@ -51,10 +51,6 @@ export class AvoBatchQueue<T> {
   // Ref'd while there are waiters: a stalled awaited loop is pending work, so "beforeExit"
   // does not fire in the middle of it. Fires after BACKPRESSURE_MAX_WAIT_MS at the latest.
   private capacityTimer: ReturnType<typeof setTimeout> | null = null;
-  // Set when the backlog overflowed: an awaited loop stalls near BACKPRESSURE_WAITING_EVENTS,
-  // so reaching the cap means the callers are not awaiting. No waiter is created until
-  // the backlog is back under the threshold.
-  private overflowed = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   // Settled with the outcome of the batch that takes the current buffer, whichever drain
   // swaps it out (or `dropped` if clear() discards it). Created on demand.
@@ -144,7 +140,10 @@ export class AvoBatchQueue<T> {
     if (excess > 0) {
       this.dropOldestWaiting(excess);
       AvoLog.dropped(excess, "send backlog full");
-      this.overflowed = true;
+      // An awaited loop stalls near BACKPRESSURE_WAITING_EVENTS, so an overflow means the
+      // callers are not awaiting: release them all. Calls that are not awaited therefore
+      // hold at most the waiters registered since the last overflow (under one batch),
+      // while an awaited loop that reaches the cap is still throttled between overflows.
       this.releaseCapacityWaiters(true);
     }
     return this.track(outcome);
@@ -152,11 +151,11 @@ export class AvoBatchQueue<T> {
 
   /**
    * Resolves once fewer than BACKPRESSURE_WAITING_EVENTS events wait for a send slot (at
-   * once if they already do, or if the backlog has overflowed), and at the latest after
+   * once if they already do), when the backlog overflows, and at the latest after
    * BACKPRESSURE_MAX_WAIT_MS. clear() resolves it too.
    */
   whenBelowBackpressure(): Promise<void> {
-    if (this.waitingEvents < BACKPRESSURE_WAITING_EVENTS || this.overflowed) {
+    if (this.waitingEvents < BACKPRESSURE_WAITING_EVENTS) {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
@@ -176,9 +175,6 @@ export class AvoBatchQueue<T> {
   }
 
   private releaseCapacityWaiters(all: boolean = false): void {
-    if (this.waitingEvents < BACKPRESSURE_WAITING_EVENTS) {
-      this.overflowed = false;
-    }
     if (!all && this.waitingEvents >= BACKPRESSURE_WAITING_EVENTS) {
       return;
     }
