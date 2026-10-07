@@ -65,6 +65,12 @@ export class AvoEventSpecCache {
   }
 
   set(key: string, value: EventSpecResponse): void {
+    // Every track sharing one fetch stores its response: only the first store counts, or a
+    // burst of such tracks would rotate unrelated entries out of the cache.
+    const existing = this.cache.get(key);
+    if (existing !== undefined && existing.value === value) {
+      return;
+    }
     this.globalEventCount++;
 
     // Global rotation: evict LRU entry every MAX_EVENT_COUNT operations
