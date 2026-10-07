@@ -88,7 +88,7 @@ State: unsent `buffer`, FIFO `waiting` list of `{ events, settle }`, `waitingEve
 batchSize 3, 3 enqueues → the 3rd returns a promise and a batch of 3 is dispatched; the first two return `null`.
 </example>
 <example>
-maxQueueSize 2, batchSize 5, enqueue a, b, c → buffer is [b, c]; `Avo Inspector: dropped 1 event(s) (queue full) in the last 10s.` is logged (if no queue-full line was printed in the last 10 s).
+maxQueueSize 2, batchSize 5, enqueue a, b, c → buffer is [b, c]; `Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.` is logged (if no queue-full line was printed in the last 10 s; a first occurrence always reports `1s`).
 </example>
 <example>
 clear() with 2 batches waiting → both promises resolve with `dropped`; nothing further is dispatched.

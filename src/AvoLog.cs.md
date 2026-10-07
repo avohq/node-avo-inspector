@@ -87,8 +87,8 @@ The suffix is ` (<more> more in the last <N>s)`, where `<more>` is the count rep
 2 drops, then nothing for an hour, then one more → the line reports `dropped 3 event(s) (queue full) in the last 3600s.`
 </example>
 <example>
-50 send failures ("Request failed") within 10 s → `Avo Inspector: schema sending failed: Request failed.` once; the next failure after the window → `Avo Inspector: schema sending failed: Request failed. (49 more in the last 10s)`.
+50 send failures ("Request failed") within 10 s → `Avo Inspector: schema sending failed: Request failed.` once; the next failure, 10 s after the first → `Avo Inspector: schema sending failed: Request failed. (49 more in the last 10s)`.
 </example>
 <example>
-Responses 500, 500, 400, 500, 400, 500 within 10 s → `1 batch(es) rejected with HTTP 500 ...` and `1 batch(es) rejected with HTTP 400 ...`; the next 500 after the window → `4 batch(es) rejected with HTTP 500 in the last 10s.`
+Responses 500, 500, 400, 500, 400, 500 within 10 s → `1 batch(es) rejected with HTTP 500 ...` and `1 batch(es) rejected with HTTP 400 ...`; the next 500, 10 s after the first → `4 batch(es) rejected with HTTP 500 in the last 10s.`
 </example>
