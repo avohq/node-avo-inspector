@@ -151,7 +151,7 @@ A property cut off this way is reported as `"object"` with empty `children`; a l
 
 At most 10,000 properties are reported per call, counting nested ones; past that the remaining properties are left out, in the order the object lists them.
 
-Binary data is never walked byte by byte: a `Buffer`, typed array or `DataView` is reported as `list(int)` with children `["int"]` (`list(float)` and `["float"]` for float arrays), and an `ArrayBuffer` as `"object"` with empty `children`, whatever their size.
+Binary data is never walked byte by byte: a `Buffer`, typed array or `DataView` is reported as `list(int)` with children `["int"]`, and an `ArrayBuffer` as `"object"` with empty `children`, whatever their size.
 
 For example, an object that refers to itself:
 

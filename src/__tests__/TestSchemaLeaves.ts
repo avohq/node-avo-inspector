@@ -3,8 +3,8 @@ import { AvoInspector } from "../AvoInspector";
 import { InspectorBody } from "../AvoNetworkCallsHandler";
 import { deepEquals } from "../utils";
 
-// Binary values are leaves: an ArrayBuffer view is typed from its element type without
-// visiting its elements, an ArrayBuffer is an empty object. And at most 10,000 properties
+// Binary values are leaves: an ArrayBuffer view is list(int) with children ["int"] (as Java
+// and Go type byte arrays), never visited; an ArrayBuffer is an empty object. And at most 10,000 properties
 // are emitted per extraction, at every depth.
 
 const MiB = 1024 * 1024;
@@ -25,10 +25,10 @@ describe("binary values", () => {
     ["Uint8Array", new Uint8Array(4), "list(int)", ["int"]],
     ["Int32Array", new Int32Array(4), "list(int)", ["int"]],
     ["BigInt64Array", new BigInt64Array(4), "list(int)", ["int"]],
-    ["Float64Array", new Float64Array(4), "list(float)", ["float"]],
-    ["Float32Array", new Float32Array(4), "list(float)", ["float"]],
+    ["Float64Array", new Float64Array(4), "list(int)", ["int"]],
+    ["Float32Array", new Float32Array(4), "list(int)", ["int"]],
     ["DataView", new DataView(new ArrayBuffer(4)), "list(int)", ["int"]],
-    ["an empty Uint8Array", new Uint8Array(0), "list(int)", []],
+    ["an empty Uint8Array", new Uint8Array(0), "list(int)", ["int"]],
     ["ArrayBuffer", new ArrayBuffer(4 * MiB), "object", []],
     ["SharedArrayBuffer", new SharedArrayBuffer(16), "object", []],
   ])("%s", (_name, value, propertyType, children) => {

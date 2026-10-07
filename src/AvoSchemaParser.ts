@@ -7,24 +7,15 @@ let isComplex = (value: any): boolean => {
 };
 
 // Binary data is a leaf, never enumerated (a Buffer has one indexed key per byte): an
-// ArrayBuffer view (Buffer, typed array, DataView) is a list typed from its element type, an
-// ArrayBuffer or SharedArrayBuffer an object with no properties.
-const binaryElementType = (value: any): string | null => {
-  if (!ArrayBuffer.isView(value)) {
-    return null;
-  }
-  const tag = Object.prototype.toString.call(value);
-  return tag === "[object Float32Array]" || tag === "[object Float64Array]" || tag === "[object Float16Array]"
-    ? "float"
-    : "int";
-};
+// ArrayBuffer view (Buffer, typed array, DataView) is list(int) with children ["int"], as Java
+// and Go type byte arrays; an ArrayBuffer or SharedArrayBuffer an object with no properties.
+const binaryElementType = (value: any): string | null => (ArrayBuffer.isView(value) ? "int" : null);
 const isArrayBufferLike = (value: any): boolean => {
   const tag = Object.prototype.toString.call(value);
   return tag === "[object ArrayBuffer]" || tag === "[object SharedArrayBuffer]";
 };
-// A view's children: its element type, or none when it is empty.
-const binaryChildren = (value: ArrayBufferView, elementType: string): string[] =>
-  value.byteLength > 0 ? [elementType] : [];
+// A view's children, whatever its length: its elements are never visited.
+const binaryChildren = (_value: ArrayBufferView, elementType: string): string[] => [elementType];
 
 // Deeper complex values are reported as "object" instead of being descended into.
 const MAX_DEPTH = 10;
