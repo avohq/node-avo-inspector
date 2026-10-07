@@ -145,13 +145,13 @@ Schema extraction runs on your thread, inside `trackSchemaFromEvent`. Without li
 
 - more than 10 levels deep, where each step into an object or into a list element counts as one level;
 - that contains itself (a cycle);
-- once 10,000 objects and lists have been expanded in one call (the event properties object and every list count).
+- once 10,000 objects and lists have been expanded in one call (the event properties object, every list and every piece of binary data count).
 
 A property cut off this way is reported as `"object"` with empty `children`; a list element cut off this way is reported as the type string `"object"`. Strings, numbers and booleans never count toward the limits, whatever their size.
 
 At most 10,000 properties are reported per call, counting nested ones; past that the remaining properties are left out, in the order the object lists them.
 
-Binary data is never walked byte by byte: a `Buffer`, typed array or `DataView` is reported as `list(int)` with children `["int"]`, and an `ArrayBuffer` as `"object"` with empty `children`, whatever their size.
+Binary data is never walked byte by byte: a `Buffer`, typed array or `DataView` is reported as `list(int)` with children `["int"]`, and an `ArrayBuffer` as `"object"` with empty `children`, whatever their size. Each one still counts as one value toward the limits above, like an object or a list: past them it is cut off and reported as `"object"`, as the Java and Go SDKs do.
 
 For example, an object that refers to itself:
 

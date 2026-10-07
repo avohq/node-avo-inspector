@@ -53,3 +53,26 @@ test("listDag(6,12), below the budget, is unchanged: 8,570 entries", () => {
   for (let i = 0; i < 12; i++) level = { l: Array.from({ length: 6 }, () => level) };
   expect(entries(AvoSchemaParser.extractSchema(level))).toBe(8_570);
 });
+
+// Binary data (a Buffer here, byte[] in Java, []byte in Go) is one complex value: the depth cap
+// and the expansion budget apply to it first, and otherwise it is list(int) with ["int"], using
+// one expansion, its bytes never walked. B is the bytes [1, 2, 3].
+const B = () => Buffer.from([1, 2, 3]);
+const binaryLevel = (inner?: any) => ({ o: { k: 1 }, bin: B(), list: [B()], ...(inner ? { a: inner } : {}) });
+
+test.each([
+  ["12 levels of { o: { k: 1 }, bin: B, list: [B], a }: below and at the depth cap", () => {
+    let level: any = binaryLevel();
+    for (let i = 0; i < 11; i++) level = binaryLevel(level);
+    return level;
+  }, 943, "6df178dc9f783988959d054123ab6abedb56292f034c2e35f5b46ddd8da3de04"],
+  ["{ fill: [9,997 {}, B, B, {}], bin: B, list: [B] }: B takes the last expansion", () => ({
+    fill: [...Array.from({ length: 9_997 }, () => ({})), B(), B(), {}],
+    bin: B(),
+    list: [B()],
+  }), 30_064, "730800e36cee008cc29c5d8a8f75474453ff2c6a561becdb968db7d14cdac3c6"],
+])("binary data, %s: digest matches Java and Go", (_name, build, length, digest) => {
+  const canonical = canon(AvoSchemaParser.extractSchema(build()));
+  expect(canonical.length).toBe(length);
+  expect(sha256(canonical)).toBe(digest);
+});

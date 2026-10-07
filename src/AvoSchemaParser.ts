@@ -6,9 +6,10 @@ let isComplex = (value: any): boolean => {
   return typeof value === "object" && value != null;
 };
 
-// Binary data is a leaf, never enumerated (a Buffer has one indexed key per byte): an
-// ArrayBuffer view (Buffer, typed array, DataView) is list(int) with children ["int"], as Java
-// and Go type byte arrays; an ArrayBuffer or SharedArrayBuffer an object with no properties.
+// Binary data is never enumerated (a Buffer has one indexed key per byte): an ArrayBuffer view
+// (Buffer, typed array, DataView) is list(int) with children ["int"], as Java and Go type byte
+// arrays; an ArrayBuffer or SharedArrayBuffer an object with no properties. It is still one
+// complex value: the leaf rules apply to it first, and mapping it costs one expansion.
 const binaryElementType = (value: any): string | null => (ArrayBuffer.isView(value) ? "int" : null);
 const isArrayBufferLike = (value: any): boolean => {
   const tag = Object.prototype.toString.call(value);
@@ -109,12 +110,9 @@ export class AvoSchemaParser {
             propertyType: this.getPropValueType(val),
           };
 
-          const valElementType = binaryElementType(val);
-          if (valElementType !== null) {
-            mappedEntry["children"] = binaryChildren(val, valElementType);
-          } else if (isArrayBufferLike(val)) {
-            mappedEntry["children"] = [];
-          } else if (isComplex(val)) {
+          // Binary data takes this path too, as in Java and Go: past the limits it is "object",
+          // otherwise mapping types it with one expansion, without walking its bytes.
+          if (isComplex(val)) {
             if (isLeaf(val, depth)) {
               mappedEntry.propertyType = "object";
               mappedEntry["children"] = [];

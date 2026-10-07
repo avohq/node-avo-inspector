@@ -35,7 +35,7 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 2. Mapping a value:
    - Array: map every element recursively, then de-duplicate.
    - Object: for each own enumerable string key (`Object.keys`), in insertion order, emit `{ propertyName, propertyType }`; if the value is a non-null object or array, add `children` = mapping of the value. Each entry counts toward `MAX_PROPERTIES` when it is emitted, before its value is mapped (pre-order), at every depth, including properties of objects inside lists; list elements are not entries. Once the budget is spent every later entry is omitted silently, in iteration order. This is the cross-SDK extraction bound: Node, Java and Go produce the same schema, digest for digest (pinned in TestExtractionDigests).
-   - **Binary data is a leaf, never enumerated** (a Buffer has one indexed key per byte): an ArrayBuffer view (`ArrayBuffer.isView`: Buffer, any typed array, DataView) is `list(int)` with children `["int"]`, whatever its element type or length (as Java and Go type byte arrays). As a list element it maps to `["int"]`. An ArrayBuffer or SharedArrayBuffer is `object` with children `[]` (an empty list element `[]`).
+   - **Binary data is never enumerated** (a Buffer has one indexed key per byte): an ArrayBuffer view (`ArrayBuffer.isView`: Buffer, any typed array, DataView) is `list(int)` with children `["int"]`, whatever its element type or length (as Java and Go type byte arrays). As a list element it maps to `["int"]`. An ArrayBuffer or SharedArrayBuffer is `object` with children `[]` (an empty list element `[]`). Binary data is a complex value like any other for the leaf rules below, as a property or a list element: past the depth cap or the expansion budget it is a leaf (`"object"`), and otherwise mapping it costs one expansion. This matches Java and Go (pinned in TestExtractionDigests).
    - Primitive, `null` or `undefined` (including a list element): its type string. **IMPORTANT:** a `null` list element maps to `"null"` (spec §9.2), not to `[]` as the JS reference did (the §9.3.4 quirk, not a conformance gate).
 3. Recursion is bounded. A complex value is a **leaf** when any of:
    - its depth has reached `MAX_DEPTH`;
@@ -54,7 +54,7 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 
 ## Non-functional requirements
 
-- **IMPORTANT:** Cyclic input, null-prototype objects and objects with an own `hasOwnProperty` key are mapped without throwing. Expansion is bounded by `MAX_DEPTH`, `MAX_EXPANSIONS` and `MAX_PROPERTIES`, and binary data costs nothing regardless of its size; truncation is silent.
+- **IMPORTANT:** Cyclic input, null-prototype objects and objects with an own `hasOwnProperty` key are mapped without throwing. Expansion is bounded by `MAX_DEPTH`, `MAX_EXPANSIONS` and `MAX_PROPERTIES`, and binary data costs one expansion and is never walked; truncation is silent.
 - A throwing getter still propagates to the caller; ancestor tracking is cleaned up on the way out.
 - Pure; no side effects.
 
