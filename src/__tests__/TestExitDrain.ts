@@ -388,6 +388,7 @@ describe("exit deadline", () => {
   afterEach(() => {
     restoreEnv("AVO_INSPECTOR_MOCK_ENDPOINT", defaultEndpoint);
     (AvoInspector as any).exitDeadline = null;
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
