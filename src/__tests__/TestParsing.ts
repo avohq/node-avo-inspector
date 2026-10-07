@@ -311,30 +311,46 @@ describe("Schema Parsing", () => {
       ]);
     });
 
-    test("shared references expand at most 10000 objects per call; the rest map to object", () => {
-      // Every level holds the next under 3 keys: a DAG, not a cycle, so the ancestor check
-      // does not apply. Unbounded, it expands 3^10 (~59k) objects.
-      let level: any = { v: 1 };
-      for (let i = 0; i < 12; i += 1) level = { a: level, b: level, c: level };
+    test("shared references expand at most 10000 objects and lists per call; the rest map to object", () => {
+      // Every list holds the next under 4 elements: a DAG, not a cycle, so the ancestor
+      // check does not apply. Lists, so the 10,000-property budget is not what stops it.
+      // Unbounded, it expands 4^0 + ... + 4^7 (~22k) lists within the depth cap.
+      let level: any = [1];
+      for (let i = 0; i < 7; i += 1) level = [level, level, level, level];
 
       let expanded = 0;
       let truncated = 0;
-      const walk = (entries: any[]) =>
-        entries.forEach((entry) => {
-          if (!entry.children) return;
-          if (entry.children.length === 0) {
-            truncated += 1;
-            expect(entry.propertyType).toBe("object");
-          } else {
+      const walk = (elements: any[]) =>
+        elements.forEach((element) => {
+          if (Array.isArray(element)) {
             expanded += 1;
-            walk(entry.children);
+            walk(element);
+          } else if (element === "object") {
+            truncated += 1;
           }
+        });
+      const schema = inspector.extractSchema({ l: level });
+      expanded += 1; // the list under "l"
+      walk(schema[0].children);
+
+      // The root object counts toward the 10,000 but is not a list.
+      expect(expanded).toBe(9999);
+      expect(truncated).toBeGreaterThan(0);
+    });
+
+    test("a DAG of objects is cut off by the 10,000-property budget", () => {
+      let level: any = { v: 1 };
+      for (let i = 0; i < 12; i += 1) level = { a: level, b: level, c: level };
+
+      let entries = 0;
+      const walk = (list: any[]) =>
+        list.forEach((entry) => {
+          entries += 1;
+          if (entry.children) walk(entry.children);
         });
       walk(inspector.extractSchema(level));
 
-      // The root counts toward the 10,000 but is not an entry.
-      expect(expanded).toBe(9999);
-      expect(truncated).toBeGreaterThan(0);
+      expect(entries).toBe(10_000);
     });
 
     test("an array element past the expansion budget maps to the type string object", () => {

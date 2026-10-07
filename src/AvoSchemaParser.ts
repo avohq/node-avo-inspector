@@ -6,11 +6,35 @@ let isComplex = (value: any): boolean => {
   return typeof value === "object" && value != null;
 };
 
+// Binary data is a leaf, never enumerated (a Buffer has one indexed key per byte): an
+// ArrayBuffer view (Buffer, typed array, DataView) is a list typed from its element type, an
+// ArrayBuffer or SharedArrayBuffer an object with no properties.
+const binaryElementType = (value: any): string | null => {
+  if (!ArrayBuffer.isView(value)) {
+    return null;
+  }
+  const tag = Object.prototype.toString.call(value);
+  return tag === "[object Float32Array]" || tag === "[object Float64Array]" || tag === "[object Float16Array]"
+    ? "float"
+    : "int";
+};
+const isArrayBufferLike = (value: any): boolean => {
+  const tag = Object.prototype.toString.call(value);
+  return tag === "[object ArrayBuffer]" || tag === "[object SharedArrayBuffer]";
+};
+// A view's children: its element type, or none when it is empty.
+const binaryChildren = (value: ArrayBufferView, elementType: string): string[] =>
+  value.byteLength > 0 ? [elementType] : [];
+
 // Deeper complex values are reported as "object" instead of being descended into.
 const MAX_DEPTH = 10;
 // Complex values expanded per extractSchema call. Shared references that are not cycles
 // can otherwise expand exponentially; the rest are reported as "object" like the depth cap.
 const MAX_EXPANSIONS = 10000;
+// Properties emitted per extractSchema call, at every depth; past it the rest are omitted
+// (in iteration order). Independent of MAX_EXPANSIONS: one object with a million keys is a
+// single expansion.
+const MAX_PROPERTIES = 10000;
 
 export class AvoSchemaParser {
   /**
@@ -36,6 +60,7 @@ export class AvoSchemaParser {
     // holding itself under several keys cannot expand exponentially.
     const ancestors = new Set<any>();
     let expansions = 0;
+    let properties = 0;
     const isLeaf = (value: any, depth: number): boolean =>
       isComplex(value) &&
       (depth >= MAX_DEPTH || ancestors.has(value) || expansions >= MAX_EXPANSIONS);
@@ -53,6 +78,13 @@ export class AvoSchemaParser {
     };
 
     let mapValue = (object: any, depth: number): any => {
+      const elementType = binaryElementType(object);
+      if (elementType !== null) {
+        return binaryChildren(object, elementType);
+      }
+      if (isArrayBufferLike(object)) {
+        return [];
+      }
       if (isArray(object)) {
         let list = object.map((x: any) => {
           return isLeaf(x, depth) ? "object" : mapping(x, depth + 1);
@@ -65,6 +97,10 @@ export class AvoSchemaParser {
         // Object.keys, not object.hasOwnProperty: a null-prototype object has no such method,
         // and a property named "hasOwnProperty" would shadow it.
         for (const key of Object.keys(object)) {
+          if (properties >= MAX_PROPERTIES) {
+            break;
+          }
+          properties += 1;
           let val = object[key];
 
           let mappedEntry: {
@@ -76,7 +112,12 @@ export class AvoSchemaParser {
             propertyType: this.getPropValueType(val),
           };
 
-          if (isComplex(val)) {
+          const valElementType = binaryElementType(val);
+          if (valElementType !== null) {
+            mappedEntry["children"] = binaryChildren(val, valElementType);
+          } else if (isArrayBufferLike(val)) {
+            mappedEntry["children"] = [];
+          } else if (isComplex(val)) {
             if (isLeaf(val, depth)) {
               mappedEntry.propertyType = "object";
               mappedEntry["children"] = [];
@@ -140,6 +181,10 @@ export class AvoSchemaParser {
 }
 
   private static getPropValueType(propValue: any): string {
+    const elementType = binaryElementType(propValue);
+    if (elementType !== null) {
+      return `list(${elementType})`;
+    }
     if (isArray(propValue)){
 
       //we now know that propValue is an array. get first element in propValue array

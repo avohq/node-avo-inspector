@@ -149,6 +149,10 @@ Schema extraction runs on your thread, inside `trackSchemaFromEvent`. Without li
 
 A property cut off this way is reported as `"object"` with empty `children`; a list element cut off this way is reported as the type string `"object"`. Strings, numbers and booleans never count toward the limits, whatever their size.
 
+At most 10,000 properties are reported per call, counting nested ones; past that the remaining properties are left out, in the order the object lists them.
+
+Binary data is never walked byte by byte: a `Buffer`, typed array or `DataView` is reported as `list(int)` with children `["int"]` (`list(float)` and `["float"]` for float arrays), and an `ArrayBuffer` as `"object"` with empty `children`, whatever their size.
+
 For example, an object that refers to itself:
 
 ```javascript

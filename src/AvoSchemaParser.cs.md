@@ -23,6 +23,7 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 - Limits (per `extractSchema` call):
   - `MAX_DEPTH = 10` — complex values nested more than 10 levels below the root are not descended into.
   - `MAX_EXPANSIONS = 10000` — budget of complex values expanded (the root counts as one).
+  - `MAX_PROPERTIES = 10000` — budget of property entries emitted, at every depth (top-level and nested). Independent of `MAX_EXPANSIONS`: one object with a million keys is one expansion but is cut off here.
 
 ## Users and permissions
 
@@ -33,7 +34,8 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 1. A root that is not a non-array object returns `[]`: `null` / `undefined`, a primitive (string, number, boolean, symbol), a function, or an array.
 2. Mapping a value:
    - Array: map every element recursively, then de-duplicate.
-   - Object: for each own enumerable string key (`Object.keys`), emit `{ propertyName, propertyType }`; if the value is a non-null object or array, add `children` = mapping of the value.
+   - Object: for each own enumerable string key (`Object.keys`), in insertion order, emit `{ propertyName, propertyType }`; if the value is a non-null object or array, add `children` = mapping of the value. Each entry counts toward `MAX_PROPERTIES` when it is emitted (before its children); once the budget is spent the remaining keys, at any depth, are omitted silently.
+   - **Binary data is a leaf, never enumerated** (a Buffer has one indexed key per byte): an ArrayBuffer view (`ArrayBuffer.isView`: Buffer, typed arrays, DataView) is `list(float)` with children `["float"]` for Float16/32/64Array, else `list(int)` with children `["int"]`; an empty view has children `[]`. As a list element it maps to that children array. An ArrayBuffer or SharedArrayBuffer is `object` with children `[]` (an empty list element `[]`).
    - Primitive, `null` or `undefined` (including a list element): its type string. **IMPORTANT:** a `null` list element maps to `"null"` (spec §9.2), not to `[]` as the JS reference did (the §9.3.4 quirk, not a conformance gate).
 3. Recursion is bounded. A complex value is a **leaf** when any of:
    - its depth has reached `MAX_DEPTH`;
@@ -52,7 +54,7 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 
 ## Non-functional requirements
 
-- **IMPORTANT:** Cyclic input, null-prototype objects and objects with an own `hasOwnProperty` key are mapped without throwing. Expansion is bounded by `MAX_DEPTH` and `MAX_EXPANSIONS`; truncation is silent.
+- **IMPORTANT:** Cyclic input, null-prototype objects and objects with an own `hasOwnProperty` key are mapped without throwing. Expansion is bounded by `MAX_DEPTH`, `MAX_EXPANSIONS` and `MAX_PROPERTIES`, and binary data costs nothing regardless of its size; truncation is silent.
 - A throwing getter still propagates to the caller; ancestor tracking is cleaned up on the way out.
 - Pure; no side effects.
 

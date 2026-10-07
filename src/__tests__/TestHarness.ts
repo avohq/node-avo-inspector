@@ -176,9 +176,11 @@ describe("conformance harness", () => {
   });
 
   test("a large output envelope reaches the pipe in full before the harness exits", () => {
+    // 10,000 properties (the extraction budget), named long enough for a ~700 KB envelope,
+    // far past a pipe buffer.
     const input: { [key: string]: string } = {};
-    for (let i = 0; i < 20000; i += 1) {
-      input["property_with_a_long_name_" + i] = "value";
+    for (let i = 0; i < 10000; i += 1) {
+      input["property_with_a_long_name_padded_to_fill_the_pipe_buffer_" + i] = "value";
     }
     const { status, output } = runHarness({
       suite: "schema-extraction",
@@ -188,7 +190,7 @@ describe("conformance harness", () => {
     });
 
     expect(status).toBe(0);
-    expect(output.actual).toHaveLength(20000);
+    expect(output.actual).toHaveLength(10000);
   });
 
   test("a constructor that throws is a harness failure (exit 1)", () => {

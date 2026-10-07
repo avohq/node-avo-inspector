@@ -6,14 +6,29 @@ const isValueEmpty = (value: string | null | undefined): boolean => {
 // The schema extraction limits: deepEquals expands no deeper and no more than this.
 const DEEP_EQUALS_MAX_DEPTH = 10;
 const DEEP_EQUALS_MAX_EXPANSIONS = 10_000;
+const DEEP_EQUALS_MAX_PROPERTIES = 10_000;
+
+// Binary data (an ArrayBuffer view, ArrayBuffer or SharedArrayBuffer) as bytes, or null.
+const binaryBytes = (value: any): Uint8Array | null => {
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  const tag = Object.prototype.toString.call(value);
+  return tag === "[object ArrayBuffer]" || tag === "[object SharedArrayBuffer]" ? new Uint8Array(value) : null;
+};
+
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
+  a.byteLength === b.byteLength && Buffer.compare(a, b) === 0;
 
 /**
  * Structural equality, within the schema extraction limits: objects and lists nested more
- * than 10 levels deep, or past the 10,000th compared in one call, are treated as not equal
- * (unless they are the same reference), so a huge payload cannot overflow the stack.
+ * than 10 levels deep, past the 10,000th compared in one call, or past 10,000 compared
+ * properties, are treated as not equal (unless they are the same reference), so a huge
+ * payload cannot overflow the stack or block. Binary data is compared by its bytes, never
+ * enumerated.
  */
 function deepEquals(x: any, y: any): boolean {
-  return deepEqualsWithin(x, y, 0, new Map(), { expansions: 0 });
+  return deepEqualsWithin(x, y, 0, new Map(), { expansions: 0, properties: 0 });
 }
 
 // `comparing` holds the object pairs already compared, so cyclic structures terminate: a
@@ -24,7 +39,7 @@ function deepEqualsWithin(
   y: any,
   depth: number,
   comparing: Map<object, Set<object>>,
-  budget: { expansions: number }
+  budget: { expansions: number; properties: number }
 ): boolean {
 
   if (x === y) {
@@ -38,6 +53,12 @@ function deepEqualsWithin(
 
   if (Object.getPrototypeOf(x) !== Object.getPrototypeOf(y)) {
     return false;
+  }
+
+  const xBytes = binaryBytes(x);
+  if (xBytes !== null) {
+    const yBytes = binaryBytes(y);
+    return yBytes !== null && sameBytes(xBytes, yBytes);
   }
 
   let partners = comparing.get(x);
@@ -58,6 +79,9 @@ function deepEqualsWithin(
 
   // hasOwn, not x.hasOwnProperty: user objects may lack the method or shadow it.
   for (const p of Object.keys(x)) {
+    if (++budget.properties > DEEP_EQUALS_MAX_PROPERTIES) {
+      return false;
+    }
     if (!hasOwn(y, p)) {
       return false;
     }

@@ -34,13 +34,14 @@ hasNonLatin1Char(value: string): boolean
 2. Either side `null` or `typeof !== "object"` -> false (null-prototype objects are compared structurally).
 3. Different prototype (`Object.getPrototypeOf`) -> false.
 4. If the pair `(x, y)` was already compared in this call -> true (cycle cut).
-5. **Limits** (the schema extraction limits): if the pair is at depth 10 or more (the top-level pair is depth 0, each step into a property one more), or 10,000 pairs have already been expanded in this call -> false. Otherwise count this pair as expanded and record it.
-6. For each own enumerable key of `x` (`Object.keys`):
+5. **Binary data** (an ArrayBuffer view, ArrayBuffer or SharedArrayBuffer; same prototype already checked): equal iff the bytes are equal (`byteLength` and a native `Buffer.compare`), never enumerated.
+6. **Limits** (the schema extraction limits): if the pair is at depth 10 or more (the top-level pair is depth 0, each step into a property one more), or 10,000 pairs have already been expanded in this call -> false. Otherwise count this pair as expanded and record it.
+7. For each own enumerable key of `x` (`Object.keys`): count it toward a 10,000-property budget for the call; past it -> false.
    - missing on `y` (`Object.prototype.hasOwnProperty.call`) -> false;
    - strictly equal values -> continue;
    - non-object `x[p]` -> false;
    - otherwise recurse one level deeper, with the same recorded pairs and expansion count; unequal -> false.
-7. Any own key of `y` missing on `x` -> false. Else true.
+8. Any own key of `y` missing on `x` -> false. Else true.
 
 ### formatSchema
 
