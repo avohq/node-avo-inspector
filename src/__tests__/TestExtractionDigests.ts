@@ -35,9 +35,12 @@ test.each([
     return level;
   }, 147_496, "5012bc5b9543195e969f2b10956402ef0306e92a009f409194dffd8bd46083ed"],
 ])("%s: 10,000 entries, digest matches Java and Go", (_name, build, length, digest) => {
+  const props = build();
   const started = Date.now();
-  const schema = AvoSchemaParser.extractSchema(build());
-  expect(Date.now() - started).toBeLessThan(2_000);
+  const schema = AvoSchemaParser.extractSchema(props);
+  // Listing a million keys is linear (about 150 ms unloaded); the bound only rules out the
+  // old per-key expansion. Generous for a loaded machine.
+  expect(Date.now() - started).toBeLessThan(10_000);
 
   const canonical = canon(schema);
   expect(entries(schema)).toBe(10_000);
