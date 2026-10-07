@@ -36,9 +36,9 @@ const AWAITED_TRACK_HOLD_MS = 30_000;
 // timers do not hold the process, so a script awaiting a track that waits on a spec fetch
 // or (in dev) on its send would otherwise look idle: "beforeExit" would fire mid-loop and
 // the exit drain could end the process before the loop resumes. Once the promise is
-// awaited (await, then, catch, Promise.all all call then), a ref'd timer holds the
-// process until it settles, at most AWAITED_TRACK_HOLD_MS. A call nobody awaits holds
-// nothing, so an exit with fire-and-forget tracks keeps its bounds.
+// awaited (await, then, catch, finally, Promise.all all call then), a ref'd timer holds the
+// process until it settles, at most AWAITED_TRACK_HOLD_MS; a fire-and-forget call with
+// .catch() counts. A call whose promise nothing touches holds nothing.
 class AwaitedTrackPromise<T> extends Promise<T> {
   static get [Symbol.species]() {
     return Promise;
