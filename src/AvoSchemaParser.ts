@@ -40,9 +40,15 @@ export class AvoSchemaParser {
     propertyType: string;
     children?: any;
   }> {
-    // Only a plain object has named properties. JavaScript callers can pass anything, and
-    // mapping a primitive or an array root would return a bare type or an element list.
-    if (!isComplex(eventProperties) || isArray(eventProperties)) {
+    // Only an object has named properties. JavaScript callers can pass anything, and
+    // mapping a primitive, an array or binary data as the root would return a bare type or
+    // an element list instead of properties (the wire's eventProperties is a list of them).
+    if (
+      !isComplex(eventProperties) ||
+      isArray(eventProperties) ||
+      binaryElementType(eventProperties) !== null ||
+      isArrayBufferLike(eventProperties)
+    ) {
       return [];
     }
 

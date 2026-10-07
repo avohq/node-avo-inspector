@@ -31,7 +31,7 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
 
 ## Functional requirements
 
-1. A root that is not a non-array object returns `[]`: `null` / `undefined`, a primitive (string, number, boolean, symbol), a function, or an array.
+1. A root that is not a non-array object returns `[]`: `null` / `undefined`, a primitive (string, number, boolean, symbol), a function, an array, or binary data (an ArrayBuffer view such as a Buffer, typed array or DataView, or an ArrayBuffer / SharedArrayBuffer). So a track call with such properties sends `eventProperties: []` and resolves `[]`, never a bare type string.
 2. Mapping a value:
    - Array: map every element recursively, then de-duplicate.
    - Object: for each own enumerable string key (`Object.keys`), in insertion order, emit `{ propertyName, propertyType }`; if the value is a non-null object or array, add `children` = mapping of the value. Each entry counts toward `MAX_PROPERTIES` when it is emitted, before its value is mapped (pre-order), at every depth, including properties of objects inside lists; list elements are not entries. Once the budget is spent every later entry is omitted silently, in iteration order. This is the cross-SDK extraction bound: Node, Java and Go produce the same schema, digest for digest (pinned in TestExtractionDigests).

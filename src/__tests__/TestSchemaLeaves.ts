@@ -104,3 +104,35 @@ describe("tracking a large binary value", () => {
     inspector.destroy();
   });
 });
+
+describe("binary data or an array as the whole properties argument", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const roots: Array<[string, any]> = [
+    ["Buffer", Buffer.from("abc")],
+    ["Uint8Array", new Uint8Array(3)],
+    ["DataView", new DataView(new ArrayBuffer(8))],
+    ["ArrayBuffer", new ArrayBuffer(8)],
+    ["array", [1, 2]],
+  ];
+
+  test.each(roots)("%s has no properties: extractSchema returns []", (_name, root) => {
+    expect(AvoSchemaParser.extractSchema(root)).toEqual([]);
+  });
+
+  test.each(roots)("%s is tracked with no properties: the call resolves [] and the body's eventProperties is []", async (_name, root) => {
+    const inspector = new AvoInspector({ apiKey: "k", env: "prod", version: "1.0.0", disableBatchTimer: true });
+    inspector.enableLogging(false);
+    const sent: InspectorBody[] = [];
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockImplementation((batch) => { sent.push(...batch); return Promise.resolve(200); });
+
+    await expect(inspector.trackSchemaFromEvent("Root", root)).resolves.toEqual([]);
+    await inspector.flush();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].eventProperties).toEqual([]);
+    inspector.destroy();
+  });
+});
