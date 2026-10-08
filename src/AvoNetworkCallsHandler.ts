@@ -24,8 +24,8 @@ export interface BaseBody {
   publicEncryptionKey?: string;
 }
 
-// Per-event gateway fields, already normalized (see AvoInspector.resolveTrackOptions).
-export interface ResolvedTrackOptions {
+// Per-event gateway fields, already normalized (see AvoInspector.resolveGatewayOptions).
+export interface ResolvedGatewayOptions {
   appVersion: string | null;
   outputReference?: string;
   originHint?: string;
@@ -376,10 +376,10 @@ export class AvoNetworkCallsHandler {
     eventId: string | null,
     eventHash: string | null,
     rawEventProperties?: { [propName: string]: any },
-    trackOptions?: ResolvedTrackOptions,
+    gatewayOptions?: ResolvedGatewayOptions,
     stamp?: CallStamp
   ): EventSchemaBody {
-    let eventSchemaBody = this.createBaseCallBody(anonymousId, trackOptions, stamp) as EventSchemaBody;
+    let eventSchemaBody = this.createBaseCallBody(anonymousId, gatewayOptions, stamp) as EventSchemaBody;
     eventSchemaBody.type = "event";
     eventSchemaBody.eventName = eventName;
 
@@ -418,7 +418,7 @@ export class AvoNetworkCallsHandler {
     eventHash: string | null,
     eventSpecMetadata: EventSpecMetadata,
     propertyResults: PropertyValidationResult[],
-    trackOptions?: ResolvedTrackOptions,
+    gatewayOptions?: ResolvedGatewayOptions,
     stamp?: CallStamp
   ): EventSchemaBody {
     // Build a map of validation results by property name
@@ -443,7 +443,7 @@ export class AvoNetworkCallsHandler {
       return prop;
     });
 
-    let body = this.createBaseCallBody(anonymousId, trackOptions, stamp) as EventSchemaBody;
+    let body = this.createBaseCallBody(anonymousId, gatewayOptions, stamp) as EventSchemaBody;
     body.type = "event";
     body.eventName = eventName;
     body.eventProperties = mergedProperties;
@@ -520,13 +520,13 @@ export class AvoNetworkCallsHandler {
   // `stamp` defaults to now and the current sampling rate.
   private createBaseCallBody(
     anonymousId: string,
-    trackOptions?: ResolvedTrackOptions,
+    gatewayOptions?: ResolvedGatewayOptions,
     stamp?: CallStamp
   ): BaseBody {
     const body: BaseBody = {
       apiKey: this.apiKey,
       appName: this.appName,
-      appVersion: trackOptions ? trackOptions.appVersion : this.appVersion,
+      appVersion: gatewayOptions ? gatewayOptions.appVersion : this.appVersion,
       libVersion: this.libVersion,
       env: this.envName,
       libPlatform: LIB_PLATFORM,
@@ -538,11 +538,11 @@ export class AvoNetworkCallsHandler {
     };
 
     // Gateway coordinates are sent only when present; never as null or "".
-    if (trackOptions && trackOptions.outputReference !== undefined) {
-      (body as EventSchemaBody).outputReference = trackOptions.outputReference;
+    if (gatewayOptions && gatewayOptions.outputReference !== undefined) {
+      (body as EventSchemaBody).outputReference = gatewayOptions.outputReference;
     }
-    if (trackOptions && trackOptions.originHint !== undefined) {
-      (body as EventSchemaBody).originHint = trackOptions.originHint;
+    if (gatewayOptions && gatewayOptions.originHint !== undefined) {
+      (body as EventSchemaBody).originHint = gatewayOptions.originHint;
     }
 
     if (this.publicEncryptionKey && this.publicEncryptionKey.length > 0) {

@@ -190,7 +190,7 @@ At most 1,000 events wait for an event spec fetch at once, across every instance
 
 ## Gateway options
 
-When you use a gateway-scoped Inspector API key, pass the gateway coordinates in an optional options object as the fourth argument (JavaScript has no named arguments, so the three are grouped in one object):
+When you use a gateway-scoped Inspector API key, pass the gateway coordinates in an optional options object as the fourth argument (JavaScript has no named arguments, so the three are grouped in one object; its TypeScript type is `GatewayOptions`):
 
 ```javascript
 inspector.trackSchemaFromEvent(

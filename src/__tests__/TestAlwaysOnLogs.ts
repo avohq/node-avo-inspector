@@ -184,7 +184,7 @@ describe("the streamId ':' warning", () => {
   });
 });
 
-describe("unknown track option keys", () => {
+describe("unknown gateway option keys", () => {
   const KNOWN = "the known options are outputReference, originHint, originAppVersion";
   const captureSends = (inspector: AvoInspector) => {
     const sent: InspectorBody[] = [];
@@ -205,8 +205,8 @@ describe("unknown track option keys", () => {
     ).resolves.toEqual([{ propertyName: "a", propertyType: "int" }]);
     await inspector.flush();
 
-    expect(matching(/unknown track option/)).toEqual([
-      `[Avo Inspector] Warning: unknown track option(s) "outputRef" ignored; ${KNOWN}`,
+    expect(matching(/unknown gateway option/)).toEqual([
+      `[Avo Inspector] Warning: unknown gateway option(s) "outputRef" ignored; ${KNOWN}`,
     ]);
     expect(lines.join("\n")).not.toContain(MARKER);
     expect(sent).toHaveLength(1);
@@ -222,7 +222,7 @@ describe("unknown track option keys", () => {
     await inspector.trackSchemaFromEvent("E2", {}, undefined, {});
     await inspector.trackSchemaFromEvent("E3", {});
 
-    expect(matching(/unknown track option/)).toEqual([]);
+    expect(matching(/unknown gateway option/)).toEqual([]);
   });
 
   test("prints at most once per 10 s, then reports how many it suppressed", async () => {
@@ -234,9 +234,9 @@ describe("unknown track option keys", () => {
     // @ts-ignore The Codegen entry goes through the same path.
     await inspector._avoFunctionTrackSchemaFromEvent("E20", {}, "id", "hash", undefined, { originAppVersoin: "1" });
 
-    expect(matching(/unknown track option/)).toEqual([
-      `[Avo Inspector] Warning: unknown track option(s) "origin_hint" ignored; ${KNOWN}`,
-      `[Avo Inspector] Warning: unknown track option(s) "originAppVersoin" ignored; ${KNOWN} (19 more in the last 10s)`,
+    expect(matching(/unknown gateway option/)).toEqual([
+      `[Avo Inspector] Warning: unknown gateway option(s) "origin_hint" ignored; ${KNOWN}`,
+      `[Avo Inspector] Warning: unknown gateway option(s) "originAppVersoin" ignored; ${KNOWN} (19 more in the last 10s)`,
     ]);
   });
 
@@ -247,8 +247,8 @@ describe("unknown track option keys", () => {
 
     await inspector.trackSchemaFromEvent("E", {}, undefined, options);
 
-    expect(matching(/unknown track option/)).toEqual([
-      `[Avo Inspector] Warning: unknown track option(s) "${"x".repeat(64)}…", "a\\nb", "k3", "k4", "k5", … ignored; ${KNOWN}`,
+    expect(matching(/unknown gateway option/)).toEqual([
+      `[Avo Inspector] Warning: unknown gateway option(s) "${"x".repeat(64)}…", "a\\nb", "k3", "k4", "k5", … ignored; ${KNOWN}`,
     ]);
   });
 
@@ -260,7 +260,7 @@ describe("unknown track option keys", () => {
     await expect(inspector.trackSchemaFromEvent("E", { a: 1 }, undefined, options)).resolves.toEqual([
       { propertyName: "a", propertyType: "int" },
     ]);
-    expect(matching(/unknown track option|something went wrong/)).toEqual([]);
+    expect(matching(/unknown gateway option|something went wrong/)).toEqual([]);
     expect(lines.join("\n")).not.toContain(MARKER);
   });
 });

@@ -4,7 +4,7 @@ import {
   AvoNetworkCallsHandler,
   EventSchemaBody,
   InspectorBody,
-  ResolvedTrackOptions,
+  ResolvedGatewayOptions,
 } from "./AvoNetworkCallsHandler";
 import { AvoBatchQueue, BACKPRESSURE_WAITING_EVENTS, MAX_TIMER_MS } from "./AvoBatchQueue";
 import { AvoDeduplicator } from "./AvoDeduplicator";
@@ -122,7 +122,7 @@ const NO_API_KEY_MESSAGE =
  * Gateway coordinates for a gateway-scoped Inspector API key. All optional; blank
  * values are treated as absent.
  */
-export interface TrackOptions {
+export interface GatewayOptions {
   /** Reference of the gateway output this observation was bound for. Absent = gateway checkpoint. */
   outputReference?: string;
   /** Low-cardinality label of the source the event came from (e.g. "web"). Never a user id. */
@@ -131,8 +131,8 @@ export interface TrackOptions {
   originAppVersion?: string;
 }
 
-// The keys of TrackOptions; any other key in a track call's options is warned about.
-const KNOWN_TRACK_OPTIONS = ["outputReference", "originHint", "originAppVersion"];
+// The keys of GatewayOptions; any other key in a track call's options is warned about.
+const KNOWN_GATEWAY_OPTIONS = ["outputReference", "originHint", "originAppVersion"];
 
 type SchemaEntry = {
   propertyName: string;
@@ -605,14 +605,14 @@ export class AvoInspector {
    * omitted when blank; appVersion is the per-event override, null for a
    * source-scoped event without one, else the instance version.
    */
-  private resolveTrackOptions(options?: TrackOptions): ResolvedTrackOptions {
+  private resolveGatewayOptions(options?: GatewayOptions): ResolvedGatewayOptions {
     const opts: any = options !== null && typeof options === "object" ? options : {};
     AvoInspector.warnUnknownOptions(opts);
     const outputReference = normalizeOption(opts.outputReference);
     const originHint = normalizeOption(opts.originHint);
     const originAppVersion = normalizeOption(opts.originAppVersion);
 
-    const resolved: ResolvedTrackOptions = {
+    const resolved: ResolvedGatewayOptions = {
       gatewayScoped:
         outputReference !== undefined ||
         originHint !== undefined ||
@@ -639,12 +639,12 @@ export class AvoInspector {
   private static warnUnknownOptions(opts: object): void {
     let unknown: string[];
     try {
-      unknown = Object.keys(opts).filter((key) => KNOWN_TRACK_OPTIONS.indexOf(key) < 0);
+      unknown = Object.keys(opts).filter((key) => KNOWN_GATEWAY_OPTIONS.indexOf(key) < 0);
     } catch (e) {
       return;
     }
     if (unknown.length > 0) {
-      AvoLog.unknownTrackOptions(unknown, KNOWN_TRACK_OPTIONS);
+      AvoLog.unknownGatewayOptions(unknown, KNOWN_GATEWAY_OPTIONS);
     }
   }
 
@@ -660,7 +660,7 @@ export class AvoInspector {
     eventName: string,
     eventProperties: { [propName: string]: any },
     streamId?: string,
-    options?: TrackOptions
+    options?: GatewayOptions
   ): Promise<Array<SchemaEntry>> {
     const call: TrackCall = { schema: [] };
     return holdWhileAwaited(
@@ -679,7 +679,7 @@ export class AvoInspector {
     eventId: string,
     eventHash: string,
     streamId?: string,
-    options?: TrackOptions
+    options?: GatewayOptions
   ): Promise<Array<SchemaEntry>> {
     const call: TrackCall = { schema: [] };
     return holdWhileAwaited(
@@ -696,7 +696,7 @@ export class AvoInspector {
     eventId: string | null,
     eventHash: string | null,
     streamId: string | undefined,
-    options: TrackOptions | undefined,
+    options: GatewayOptions | undefined,
     call: TrackCall
   ): Promise<Array<SchemaEntry>> {
     AvoInspector.lastTrackAt = monotonicNowMs();
@@ -712,10 +712,10 @@ export class AvoInspector {
       }
       const avoStreamId = new AvoStreamId(streamId);
       const anonymousId = avoStreamId.streamId || this.generatedAnonymousId;
-      const trackOptions = this.resolveTrackOptions(options);
+      const gatewayOptions = this.resolveGatewayOptions(options);
 
       if (
-        this.shouldRegisterEvent(eventName, eventProperties, fromAvoFunction, anonymousId, trackOptions)
+        this.shouldRegisterEvent(eventName, eventProperties, fromAvoFunction, anonymousId, gatewayOptions)
       ) {
         let eventSchema = this.extractSchema(eventProperties, false);
         call.schema = eventSchema;
@@ -734,7 +734,7 @@ export class AvoInspector {
           eventHash,
           anonymousId,
           eventProperties,
-          trackOptions
+          gatewayOptions
         );
       } else {
         if (AvoInspector.shouldLog) {
@@ -757,9 +757,9 @@ export class AvoInspector {
     eventProperties: { [propName: string]: any },
     fromAvoFunction: boolean,
     anonymousId: string,
-    trackOptions: ResolvedTrackOptions
+    gatewayOptions: ResolvedGatewayOptions
   ): boolean {
-    if (trackOptions.gatewayScoped) {
+    if (gatewayOptions.gatewayScoped) {
       return true;
     }
     return this.avoDeduplicator.shouldRegisterEvent(
@@ -782,7 +782,7 @@ export class AvoInspector {
     eventHash: string | null,
     anonymousId: string,
     rawEventProperties: { [propName: string]: any } | undefined,
-    trackOptions: ResolvedTrackOptions
+    gatewayOptions: ResolvedGatewayOptions
   ): Promise<Array<SchemaEntry>> {
     const samplingRate = this.avoNetworkCallsHandler.getSamplingRate();
     // Stamped at the call: with validation active the event may join the queue later.
@@ -814,7 +814,7 @@ export class AvoInspector {
           eventHash,
           validationResult.metadata,
           validationResult.propertyResults,
-          trackOptions,
+          gatewayOptions,
           stamp
         );
       } else {
@@ -825,7 +825,7 @@ export class AvoInspector {
           eventId,
           eventHash,
           rawEventProperties,
-          trackOptions,
+          gatewayOptions,
           stamp
         );
       }

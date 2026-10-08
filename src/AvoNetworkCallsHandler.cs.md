@@ -24,7 +24,7 @@ interface BaseBody {
   publicEncryptionKey?: string;
 }
 // Per-event gateway fields, already normalized by the caller.
-interface ResolvedTrackOptions {
+interface ResolvedGatewayOptions {
   appVersion: string | null;
   outputReference?: string;
   originHint?: string;
@@ -95,7 +95,7 @@ Sets the sticky `aborted` flag, empties the in-flight set and destroys each requ
 
 **IMPORTANT:** a batch is sent at most once; this method never retries. The promise settles exactly once; later events are ignored (and not logged), and settling clears the timer and removes the request from the in-flight set.
 
-### bodyForEventSchemaCall(anonymousId, eventName, eventProperties, eventId, eventHash, rawEventProperties?, trackOptions?, stamp?): EventSchemaBody
+### bodyForEventSchemaCall(anonymousId, eventName, eventProperties, eventId, eventHash, rawEventProperties?, gatewayOptions?, stamp?): EventSchemaBody
 
 Base body (see below) plus `type: "event"`, `eventName`, and `eventProperties` — encrypted via `encryptProperties` when `AvoEncryption.shouldEncrypt(envName, publicEncryptionKey)` and `rawEventProperties` is given, otherwise passed through. Avo-function fields (`applyAvoFunctionFields`, shared by both builders): if `eventId != null` then `avoFunction: true, eventId, eventHash`; else `avoFunction: false, eventId: null, eventHash: null`.
 
@@ -103,7 +103,7 @@ Base body (see below) plus `type: "event"`, `eventName`, and `eventProperties` �
 
 Same encryption decision as above, returning just the property list.
 
-### bodyForValidatedEventSchemaCall(anonymousId, eventName, eventProperties, eventId, eventHash, eventSpecMetadata, propertyResults, trackOptions?, stamp?): EventSchemaBody
+### bodyForValidatedEventSchemaCall(anonymousId, eventName, eventProperties, eventId, eventHash, eventSpecMetadata, propertyResults, gatewayOptions?, stamp?): EventSchemaBody
 
 1. Index `propertyResults` by `propertyName` (last one wins).
 2. For each property with a result, copy it and attach `failedEventIds` / `passedEventIds` only when the respective array is non-empty; properties without a result pass through unchanged.
@@ -122,7 +122,7 @@ For each property:
 
 `{ apiKey, appName, appVersion, libVersion, env: envName, libPlatform: "node", messageId: new GUID, streamId: anonymousId, anonymousId, createdAt, samplingRate }` (from the optional `stamp: { createdAt, samplingRate }` the body builders pass through; `AvoInspector` passes the call time and the rate that decided sampling, otherwise now and the current rate), plus `publicEncryptionKey` when it is non-empty.
 
-With `trackOptions`: `appVersion` is taken from `trackOptions.appVersion` (may be `null`) instead of the constructor value; `outputReference` / `originHint` are added only when defined — never sent as `null` or `""`.
+With `gatewayOptions`: `appVersion` is taken from `gatewayOptions.appVersion` (may be `null`) instead of the constructor value; `outputReference` / `originHint` are added only when defined — never sent as `null` or `""`.
 
 ## Non-functional requirements
 

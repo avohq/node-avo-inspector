@@ -11,12 +11,12 @@ Public entry point of the package.
 
 ```ts
 export { AvoInspector } from "./AvoInspector";
-export type { TrackOptions } from "./AvoInspector";
+export type { GatewayOptions } from "./AvoInspector";
 export { AvoInspectorEnv } from "./AvoInspectorEnv";
 export { VERSION, SPEC_VERSION } from "./AvoInspectorVersion";
 ```
 
 ## Functional requirements
 
-- Consumers import the inspector class, the environment enum, the `TrackOptions` type (per-call gateway options) and the `VERSION` / `SPEC_VERSION` constants from the package root; nothing else is public.
+- Consumers import the inspector class, the environment enum, the `GatewayOptions` type (per-call gateway options) and the `VERSION` / `SPEC_VERSION` constants from the package root; nothing else is public.
 - `LIB_PLATFORM` is internal and not re-exported.

@@ -13,7 +13,7 @@ import { monotonicNowMs } from "./utils";
 // "exit" listener prints the rest, synchronously, when the process really exits.
 
 const WINDOW_MS = 10_000;
-// How much of an unknown track option's name is printed (unknownTrackOptions).
+// How much of an unknown gateway option's name is printed (unknownGatewayOptions).
 const MAX_LOGGED_OPTION_KEYS = 5;
 const MAX_LOGGED_OPTION_KEY_LENGTH = 64;
 
@@ -146,15 +146,15 @@ export class AvoLog {
    * MAX_LOGGED_OPTION_KEYS of them, each cut to MAX_LOGGED_OPTION_KEY_LENGTH characters;
    * never a value.
    */
-  static unknownTrackOptions(keys: string[], known: string[]): void {
+  static unknownGatewayOptions(keys: string[], known: string[]): void {
     const names = keys
       .slice(0, MAX_LOGGED_OPTION_KEYS)
       .map((key) => JSON.stringify(key.length > MAX_LOGGED_OPTION_KEY_LENGTH ? key.slice(0, MAX_LOGGED_OPTION_KEY_LENGTH) + "…" : key))
       .join(", ") + (keys.length > MAX_LOGGED_OPTION_KEYS ? ", …" : "");
-    AvoLog.occur("unknown-track-options", 1, (_total, more, seconds) => {
+    AvoLog.occur("unknown-gateway-options", 1, (_total, more, seconds) => {
       AvoLog.write(
         "warn",
-        "[Avo Inspector] Warning: unknown track option(s) " + names + " ignored; the known options are " +
+        "[Avo Inspector] Warning: unknown gateway option(s) " + names + " ignored; the known options are " +
           known.join(", ") + AvoLog.suffix(more, seconds)
       );
     });
