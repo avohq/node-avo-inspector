@@ -33,6 +33,22 @@ let inspector = new Inspector.AvoInspector({
 });
 ```
 
+Then report each event where you track it:
+
+```javascript
+inspector.trackSchemaFromEvent("Purchase", { amount: 42 });
+```
+
+With a gateway-scoped Inspector API key, pass all three gateway values in the options object, the fourth argument (see [Gateway options](#gateway-options)):
+
+```javascript
+inspector.trackSchemaFromEvent("Purchase", { amount: 42 }, undefined, {
+  outputReference: "meta-x7k2q",
+  originHint: "android",
+  originAppVersion: "4.2.0",
+});
+```
+
 ## Batching options
 
 Events are buffered in memory and sent in batches. All options are optional:
@@ -191,6 +207,7 @@ inspector.trackSchemaFromEvent(
 
 - `originHint` must be a low-cardinality label such as `"web"`, `"ios"` or `"android"`, never a user id or any other high-cardinality value.
 - Values are trimmed; blank or non-string values are ignored.
+- Any other key in the options object (a typo such as `outputRef`) is ignored and prints a warning on stderr naming the key, whatever the logging flag, at most once per 10 seconds. Only key names are printed, never values. The event is still sent, with the options that were recognised.
 - `originAppVersion` replaces the constructor `version` for that event. If you pass `originHint` without `originAppVersion`, the event is sent without an app version (`null`), because the constructor version belongs to a different source.
 
 # Enabling logs
