@@ -254,12 +254,25 @@ describe("wire protocol", () => {
     }
   });
 
-  test("a 200 response cut off after its headers is delivered, promptly, with the sampling rate unchanged", async () => {
-    responders.push((_req, res) => {
-      res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "100" });
-      res.write('{"samplingRate":1');
-      setTimeout(() => res.socket!.destroy(), 20);
-    });
+  // What arrived of the body is never read: not even a part that parses as JSON (the first
+  // case would otherwise set the rate to 0).
+  const cutOff = (partial: string): Responder => (_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "100" });
+    // Headers alone are buffered until a write; flushed, the status arrives with no body.
+    res.flushHeaders();
+    if (partial) {
+      res.write(partial);
+    }
+    setTimeout(() => res.socket!.destroy(), 20);
+  };
+  const partialBodies: Array<[string, string]> = [
+    ["parses as JSON", '{"samplingRate":0}'],
+    ["does not parse", '{"samplingRate":0'],
+    ["is empty", ""],
+  ];
+
+  test.each(partialBodies)("a 200 response cut off after its headers, whose arrived part %s, is delivered promptly with the sampling rate unchanged", async (_name, partial) => {
+    responders.push(cutOff(partial));
     const handler = new AvoNetworkCallsHandler("test-key", "dev", "", "1.0.0", VERSION);
     // Not the default of 1, so a truncated body that changed or reset it would show.
     handler._setSamplingRateForTesting(0.5);
@@ -271,12 +284,8 @@ describe("wire protocol", () => {
     expect(handler.getSamplingRate()).toBe(0.5);
   }, 15_000);
 
-  test("a track whose 200 response is cut off resolves its schema and logs no failed send", async () => {
-    responders.push((_req, res) => {
-      res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "100" });
-      res.write('{"samplingRate":0');
-      setTimeout(() => res.socket!.destroy(), 20);
-    });
+  test.each(partialBodies)("a track whose 200 response is cut off (arrived part %s) resolves its schema and logs no failed send", async (_name, partial) => {
+    responders.push(cutOff(partial));
     const inspector = dev();
 
     await expect(inspector.trackSchemaFromEvent("E", { a: 1 })).resolves.toEqual([
