@@ -184,6 +184,87 @@ describe("the streamId ':' warning", () => {
   });
 });
 
+describe("unknown track option keys", () => {
+  const KNOWN = "the known options are outputReference, originHint, originAppVersion";
+  const captureSends = (inspector: AvoInspector) => {
+    const sent: InspectorBody[] = [];
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockImplementation((batch: Array<InspectorBody>) => {
+        sent.push(...batch);
+        return Promise.resolve(200);
+      });
+    return sent;
+  };
+
+  test("a typo is warned by key name only, and the event is still sent with the known options", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await expect(
+      inspector.trackSchemaFromEvent("E", { a: 1 }, undefined, { outputRef: MARKER, originHint: "web" } as any)
+    ).resolves.toEqual([{ propertyName: "a", propertyType: "int" }]);
+    await inspector.flush();
+
+    expect(matching(/unknown track option/)).toEqual([
+      `[Avo Inspector] Warning: unknown track option(s) "outputRef" ignored; ${KNOWN}`,
+    ]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].originHint).toBe("web");
+    expect(sent[0]).not.toHaveProperty("outputReference");
+  });
+
+  test("the known options alone, or none, print nothing", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+
+    await inspector.trackSchemaFromEvent("E1", {}, undefined, { outputReference: "o", originHint: "web", originAppVersion: "1" });
+    await inspector.trackSchemaFromEvent("E2", {}, undefined, {});
+    await inspector.trackSchemaFromEvent("E3", {});
+
+    expect(matching(/unknown track option/)).toEqual([]);
+  });
+
+  test("prints at most once per 10 s, then reports how many it suppressed", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent("E" + i, {}, undefined, { origin_hint: "web" } as any);
+    now += 10_000;
+    // @ts-ignore The Codegen entry goes through the same path.
+    await inspector._avoFunctionTrackSchemaFromEvent("E20", {}, "id", "hash", undefined, { originAppVersoin: "1" });
+
+    expect(matching(/unknown track option/)).toEqual([
+      `[Avo Inspector] Warning: unknown track option(s) "origin_hint" ignored; ${KNOWN}`,
+      `[Avo Inspector] Warning: unknown track option(s) "originAppVersoin" ignored; ${KNOWN} (19 more in the last 10s)`,
+    ]);
+  });
+
+  test("many or long key names are capped, and names are quoted", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+    const options: any = { ["x".repeat(100)]: 1, "a\nb": 2, k3: 3, k4: 4, k5: 5, k6: 6 };
+
+    await inspector.trackSchemaFromEvent("E", {}, undefined, options);
+
+    expect(matching(/unknown track option/)).toEqual([
+      `[Avo Inspector] Warning: unknown track option(s) "${"x".repeat(64)}…", "a\\nb", "k3", "k4", "k5", … ignored; ${KNOWN}`,
+    ]);
+  });
+
+  test.each(["dev", "staging", "prod"])("never throws (%s): a proxy whose key listing throws is tracked without a warning", async (env) => {
+    const inspector = staging({ batchSize: 30, env });
+    captureSends(inspector);
+    const options = new Proxy({}, { ownKeys: () => { throw new Error(MARKER); } });
+
+    await expect(inspector.trackSchemaFromEvent("E", { a: 1 }, undefined, options)).resolves.toEqual([
+      { propertyName: "a", propertyType: "int" },
+    ]);
+    expect(matching(/unknown track option|something went wrong/)).toEqual([]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+  });
+});
+
 describe("internal errors never print the caught error's text", () => {
   test("a property getter that throws with a value in its message: the value is not logged", async () => {
     const inspector = staging();

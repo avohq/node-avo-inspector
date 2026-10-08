@@ -13,6 +13,9 @@ import { monotonicNowMs } from "./utils";
 // "exit" listener prints the rest, synchronously, when the process really exits.
 
 const WINDOW_MS = 10_000;
+// How much of an unknown track option's name is printed (unknownTrackOptions).
+const MAX_LOGGED_OPTION_KEYS = 5;
+const MAX_LOGGED_OPTION_KEY_LENGTH = 64;
 
 // Imports only utils, which imports nothing: the jest setup loads this module before test
 // files install their mocks, so it must not pull in the rest of the SDK.
@@ -134,6 +137,26 @@ export class AvoLog {
   static streamIdColon(): void {
     AvoLog.occur("streamid-colon", 1, (_total, more, seconds) => {
       AvoLog.write("warn", "[Avo Inspector] Warning: streamId contains ':' which is not supported" + AvoLog.suffix(more, seconds));
+    });
+  }
+
+  /**
+   * A track call's options object with keys the SDK does not know (a typo such as
+   * `outputRef`). Only the key names are printed, JSON-quoted, at most
+   * MAX_LOGGED_OPTION_KEYS of them, each cut to MAX_LOGGED_OPTION_KEY_LENGTH characters;
+   * never a value.
+   */
+  static unknownTrackOptions(keys: string[], known: string[]): void {
+    const names = keys
+      .slice(0, MAX_LOGGED_OPTION_KEYS)
+      .map((key) => JSON.stringify(key.length > MAX_LOGGED_OPTION_KEY_LENGTH ? key.slice(0, MAX_LOGGED_OPTION_KEY_LENGTH) + "…" : key))
+      .join(", ") + (keys.length > MAX_LOGGED_OPTION_KEYS ? ", …" : "");
+    AvoLog.occur("unknown-track-options", 1, (_total, more, seconds) => {
+      AvoLog.write(
+        "warn",
+        "[Avo Inspector] Warning: unknown track option(s) " + names + " ignored; the known options are " +
+          known.join(", ") + AvoLog.suffix(more, seconds)
+      );
     });
   }
 

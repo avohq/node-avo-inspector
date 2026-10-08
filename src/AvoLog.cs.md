@@ -25,6 +25,7 @@ class AvoLog {
   static internal(error: unknown): void;
   static errorType(error: unknown): string; // @internal: the fixed label, also used by other log lines that report a caught error
   static streamIdColon(): void;
+  static unknownTrackOptions(keys: string[], known: string[]): void;
   static missingEventName(): void;
   static flushPending(onlyExpired?: boolean): void; // prints pending counts (see Lifecycle)
   static enterExit(): void;              // @internal: from now on lines are written synchronously (the exit listeners call it)
@@ -32,7 +33,7 @@ class AvoLog {
 }
 ```
 
-Process-wide state: a map from key to `{ start, suppressed, print }`: the start of the key's current 10 s window, the amount counted in it without being printed, and how to print that count; plus whether its exit listeners are armed, and whether the process is exiting (lines are then written synchronously). Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`, `streamid-colon`, `missing-event-name`.
+Process-wide state: a map from key to `{ start, suppressed, print }`: the start of the key's current 10 s window, the amount counted in it without being printed, and how to print that count; plus whether its exit listeners are armed, and whether the process is exiting (lines are then written synchronously). Keys: `dropped:<reason>`, `non200:<status>`, `failed:<reason>`, `internal`, `streamid-colon`, `unknown-track-options`, `missing-event-name`.
 
 ## Users and permissions
 
@@ -65,6 +66,7 @@ Process-wide state: a map from key to `{ start, suppressed, print }`: the start 
 | `failed(error)` | 1 | `console.error("Avo Inspector: schema sending failed: <reason>.")`, plus the suffix when `total > 1`. `<reason>` (also the key) is `error` itself when it is exactly `"Request failed"` or `"Request timed out"`, else `"Request failed (<errorType(error)>)"`: never an error's message |
 | `internal(error)` | 1 | `console.error(INTERNAL_ERROR_MESSAGE + suffix + " (<type>)")`, with the same suffix; `<type>` is a fixed label: the most specific built-in error class the value is an instance of (`TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `URIError`, `EvalError`, `Error`), else `typeof error`, or `unknown` if the check throws (a proxy trap). The value's own `name` or any other field is never read |
 | `streamIdColon()` | 1 | `console.warn("[Avo Inspector] Warning: streamId contains ':' which is not supported" + suffix)`, with the same suffix |
+| `unknownTrackOptions(keys, known)` | 1 | `console.warn('[Avo Inspector] Warning: unknown track option(s) <names> ignored; the known options are <known joined by ", ">' + suffix)`, with the same suffix. `<names>`: the first 5 keys, each cut to 64 characters (then `…`) and JSON-quoted, joined by `, `, then `, …` if there were more. Never a value. A held count prints with the names of the window's first occurrence |
 | `missingEventName()` | 1 | `console.warn('Avo Inspector: <total> event(s) tracked without an event name in the last <N>s, sent as "Missing Event Name".')` |
 
 The suffix is ` (<more> more in the last <N>s)`, where `<more>` is the count reported beyond the current occurrence (all of `suppressed` for a `flushPending` line); it is omitted when `<more>` is 0.

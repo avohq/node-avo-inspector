@@ -131,6 +131,9 @@ export interface TrackOptions {
   originAppVersion?: string;
 }
 
+// The keys of TrackOptions; any other key in a track call's options is warned about.
+const KNOWN_TRACK_OPTIONS = ["outputReference", "originHint", "originAppVersion"];
+
 type SchemaEntry = {
   propertyName: string;
   propertyType: string;
@@ -604,6 +607,7 @@ export class AvoInspector {
    */
   private resolveTrackOptions(options?: TrackOptions): ResolvedTrackOptions {
     const opts: any = options !== null && typeof options === "object" ? options : {};
+    AvoInspector.warnUnknownOptions(opts);
     const outputReference = normalizeOption(opts.outputReference);
     const originHint = normalizeOption(opts.originHint);
     const originAppVersion = normalizeOption(opts.originAppVersion);
@@ -627,6 +631,21 @@ export class AvoInspector {
       resolved.originHint = originHint;
     }
     return resolved;
+  }
+
+  // Warns (always on, rate-limited) when the options object has keys other than the known
+  // ones, such as a typo; the known keys are still used and the event is still tracked.
+  // Never throws: listing a proxy's keys can.
+  private static warnUnknownOptions(opts: object): void {
+    let unknown: string[];
+    try {
+      unknown = Object.keys(opts).filter((key) => KNOWN_TRACK_OPTIONS.indexOf(key) < 0);
+    } catch (e) {
+      return;
+    }
+    if (unknown.length > 0) {
+      AvoLog.unknownTrackOptions(unknown, KNOWN_TRACK_OPTIONS);
+    }
   }
 
   /**
