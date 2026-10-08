@@ -2,12 +2,16 @@
 
 ## 2.0.0
 
-Implements [avohq/spec-first-inspector-server-sdk](https://github.com/avohq/spec-first-inspector-server-sdk) v3.0.1: the `/inspector/v2/track` endpoint, batching with `flush()` and `destroy()`, gzip, and gateway options. This is a breaking release; see [Upgrading from 1.x to 2.0](README.md#upgrading-from-1x-to-20) in the README.
+Implements [avohq/spec-first-inspector-server-sdk](https://github.com/avohq/spec-first-inspector-server-sdk) v3.0.1: the `/inspector/v2/track` endpoint, batching with `flush()` and `destroy()`, gzip, and gateway fields. This is a breaking release; see [Upgrading from 1.x to 2.0](README.md#upgrading-from-1x-to-20) in the README.
+
+Breaking: the track call.
+
+- **`trackSchemaFromEvent` takes one `InspectorEvent` object**, `trackSchemaFromEvent({ eventName, eventProperties, streamId?, outputReference?, originHint?, originAppVersion? })`, and it is the only form: the 1.x positional `trackSchemaFromEvent(eventName, eventProperties, streamId?)` is removed. `InspectorEvent` is exported as a TypeScript type. The wire output for the same values is unchanged. A call whose argument is not an object (such as an unchanged 1.x call from JavaScript) sends nothing, resolves `[]`, and prints an always-on, rate-limited error on stderr naming the fix. `eventProperties` may be absent or `null` (an event with no properties). Avo Codegen's internal entry point keeps its call shape.
+- **Unknown `InspectorEvent` keys are warned about.** A key other than the six above (a typo such as `eventname` or `outputRef`) prints a warning on stderr naming the key, whatever the logging flag, at most once per 10 seconds. Only key names are printed, never values; the event is still tracked with the known keys.
 
 Input handling. All of these behaved the same way in 1.x:
 
 - **Null-prototype objects no longer wipe the schema.** A null-prototype object anywhere in the event properties (for example `querystring.parse()` output), or an object with its own `hasOwnProperty` key, made schema extraction fail: the event was sent with an empty schema and a stack trace was printed. These objects are now extracted exactly like plain objects, and deduplication, event spec validation and encryption handle them too.
-- **Unknown gateway option keys are warned about.** A key in the `trackSchemaFromEvent` options object other than `outputReference`, `originHint` and `originAppVersion` (a typo such as `outputRef`) prints a warning on stderr naming the key, whatever the logging flag, at most once per 10 seconds. Only key names are printed, never values; the event is still tracked with the known options.
 - **A non-string `streamId` no longer rejects.** A number, bigint or boolean (a numeric user id, say) is sent as its string form. Any other non-string is treated as absent, with a warning when logging is on. Before, the track promise rejected, and a call without `.catch()` crashed the process with an unhandled rejection.
 - **A non-string `env` falls back to `dev`** with a warning instead of throwing `value.trim is not a function`.
 - **Non-whole numbers in exponent form are `float`.** `1e-7` and `5e-324` were classified `int`. A number is now `int` when it is a whole number and `float` otherwise; `NaN` and `±Infinity` are `float`.

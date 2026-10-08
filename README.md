@@ -33,16 +33,18 @@ let inspector = new Inspector.AvoInspector({
 });
 ```
 
-Then report each event where you track it:
+Then report each event where you track it, as one `InspectorEvent` object:
 
 ```javascript
-inspector.trackSchemaFromEvent("Purchase", { amount: 42 });
+inspector.trackSchemaFromEvent({ eventName: "Purchase", eventProperties: { amount: 42 } });
 ```
 
-With a gateway-scoped API key, always pass `originHint` and `originAppVersion`. Pass `outputReference` when the payload was bound for a specific output; leave it out for an observation at the gateway checkpoint. They go in the options object, the fourth argument (see [Gateway options](#gateway-options)):
+With a gateway-scoped API key, always pass `originHint` and `originAppVersion`. Pass `outputReference` when the payload was bound for a specific output; leave it out for an observation at the gateway checkpoint (see [Gateway options](#gateway-options)):
 
 ```javascript
-inspector.trackSchemaFromEvent("Purchase", { amount: 42 }, undefined, {
+inspector.trackSchemaFromEvent({
+  eventName: "Purchase",
+  eventProperties: { amount: 42 },
   outputReference: "meta-x7k2q",
   originHint: "android",
   originAppVersion: "4.2.0",
@@ -83,7 +85,7 @@ At the end, flush until the instance reports drained. Each `flush()` waits at mo
 
 ```javascript
 for (const row of rows) {
-  await inspector.trackSchemaFromEvent(row.event, row.properties);
+  await inspector.trackSchemaFromEvent({ eventName: row.event, eventProperties: row.properties });
 }
 
 let drained = false;
@@ -112,7 +114,7 @@ So call `flush()` yourself in those cases:
 
 ```javascript
 export const handler = async (event) => {
-  await inspector.trackSchemaFromEvent("Order Placed", { amount: 42 });
+  await inspector.trackSchemaFromEvent({ eventName: "Order Placed", eventProperties: { amount: 42 } });
   await inspector.flush();
 };
 
@@ -134,7 +136,7 @@ Every event sent with your Codegen after this integration will automatically be 
 
 If you also call `trackSchemaFromEvent` for events that Codegen already reports, the SDK drops the second report of the same observation. A Codegen call and a manual call are treated as duplicates when they have the same event name, the same stream id and deeply equal properties, and arrive within 500 ms of each other in either order. The duplicate call sends nothing and resolves `[]`. Two manual calls, or two Codegen calls, are never deduplicated against each other. The comparison stops at the [schema extraction limits](#schema-extraction-limits): properties nested more than 10 levels deep, with more than 10,000 objects and lists, or with more than 10,000 properties to compare (counting nested ones), are treated as different, so both calls are sent. The exception is a Codegen call and a manual call that pass the very same properties object: the same reference always compares equal, before any limit applies.
 
-Calls that carry [gateway options](#gateway-options) are never deduplicated: each gateway output is a distinct observation. They still go through sampling and batching like any other event.
+Calls that carry [gateway fields](#gateway-options) are never deduplicated: each gateway output is a distinct observation. They still go through sampling and batching like any other event.
 
 # Sending event schemas for events reported outside of Codegen
 
@@ -146,14 +148,28 @@ This method gets actual tracking event parameters, extracts schema automatically
 It is the easiest way to use the library, just call this method at the same place you call your analytics tools' track methods with the same parameters.
 
 ```javascript
-inspector.trackSchemaFromEvent("Event name", {
-  "String Prop": "Prop Value",
-  "Float Prop": 1.0,
-  "Boolean Prop": true,
+inspector.trackSchemaFromEvent({
+  eventName: "Event name",
+  eventProperties: {
+    "String Prop": "Prop Value",
+    "Float Prop": 1.0,
+    "Boolean Prop": true,
+  },
 });
 ```
 
-`trackSchemaFromEvent` returns a promise that resolves with the extracted schema once the event has been through sampling: when the event is queued, or at once when sampling drops it (a dropped event is never queued, so `flush()` does not send it either). In `dev` a queued event is sent within the call, and the promise resolves `[]` if the Inspector API answers with a non-200 status. Only a non-200 does: if the request fails (connection refused, timeout) the promise still resolves the schema, and the failure is logged on stderr, so don't treat a resolved schema as proof of delivery. When 1,000 events are already waiting for a send slot, the promise resolves once fewer wait (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)). You can pass an optional stream id as the third argument to correlate events.
+`trackSchemaFromEvent` takes one `InspectorEvent` object (exported as a TypeScript type):
+
+| Field | Meaning |
+|---|---|
+| `eventName` | The event name. A missing, empty or whitespace-only name is sent as `"Missing Event Name"`. |
+| `eventProperties` | The event's properties. Absent or `null`: an event with no properties. |
+| `streamId` | Optional stream id to correlate events. |
+| `outputReference`, `originHint`, `originAppVersion` | Gateway fields, see [Gateway options](#gateway-options). |
+
+Any other key (a typo such as `eventname` or `outputRef`) is ignored and prints a warning on stderr naming the key, whatever the logging flag, at most once per 10 seconds: `[Avo Inspector] Warning: unknown InspectorEvent key(s) "outputRef" ignored; the known keys are eventName, eventProperties, streamId, outputReference, originHint, originAppVersion`. Only key names are printed, never values. The event is still sent with the keys that were recognised.
+
+`trackSchemaFromEvent` returns a promise that resolves with the extracted schema once the event has been through sampling: when the event is queued, or at once when sampling drops it (a dropped event is never queued, so `flush()` does not send it either). In `dev` a queued event is sent within the call, and the promise resolves `[]` if the Inspector API answers with a non-200 status. Only a non-200 does: if the request fails (connection refused, timeout) the promise still resolves the schema, and the failure is logged on stderr, so don't treat a resolved schema as proof of delivery. When 1,000 events are already waiting for a send slot, the promise resolves once fewer wait (see [High-volume and backfill scripts](#high-volume-and-backfill-scripts)).
 
 ## Schema extraction limits
 
@@ -190,24 +206,21 @@ At most 1,000 events wait for an event spec fetch at once, across every instance
 
 ## Gateway options
 
-When you use a gateway-scoped Inspector API key, pass the gateway coordinates in an optional options object as the fourth argument (JavaScript has no named arguments, so the three are grouped in one object; its TypeScript type is `GatewayOptions`):
+When you use a gateway-scoped Inspector API key, pass the gateway coordinates as fields of the `InspectorEvent`:
 
 ```javascript
-inspector.trackSchemaFromEvent(
-  "Purchase",
-  { amount: 42 },
-  undefined, // streamId
-  {
-    outputReference: "meta-x7k2q", // the gateway output this event was bound for; omit for the gateway checkpoint
-    originHint: "android",         // which source the event came from
-    originAppVersion: "4.2.0",     // that source's app version
-  }
-);
+inspector.trackSchemaFromEvent({
+  eventName: "Purchase",
+  eventProperties: { amount: 42 },
+  outputReference: "meta-x7k2q", // the gateway output this event was bound for; omit for the gateway checkpoint
+  originHint: "android",         // which source the event came from
+  originAppVersion: "4.2.0",     // that source's app version
+});
 ```
 
 - `originHint` must be a low-cardinality label such as `"web"`, `"ios"` or `"android"`, never a user id or any other high-cardinality value.
 - Values are trimmed; blank or non-string values are ignored.
-- Any other key in the options object (a typo such as `outputRef`) is ignored and prints a warning on stderr naming the key, whatever the logging flag, at most once per 10 seconds. Only key names are printed, never values. The event is still sent, with the options that were recognised.
+- A misspelt field (such as `outputRef`) is ignored with a warning, like any unknown `InspectorEvent` key (see [Sending event schemas](#sending-event-schemas-for-events-reported-outside-of-codegen)).
 - `originAppVersion` replaces the constructor `version` for that event. If you pass `originHint` without `originAppVersion`, the event is sent without an app version (`null`), because the constructor version belongs to a different source.
 
 # Enabling logs
@@ -223,6 +236,8 @@ The logging flag is shared by every instance in the process, and each constructo
 Some lines are printed whatever the logging flag, on stderr, because they report lost data or failed sends:
 
 - `Avo Inspector: dropped N event(s) (queue full) in the last Ns.` or `(send backlog full)`: events dropped because the buffer (`maxQueueSize`) or the 10,000-event send backlog is full; `(internal error)`: events in a batch whose send failed with an internal error (logged with the internal-error line below); `(unsent at exit)`: events never sent when the process exited (naturally, past the 10-second exit drain, or through `process.exit()`): still buffered, waiting for a send slot, or still being validated; `(unconfirmed at exit)`: events in sends that had not completed when the process exited, which may or may not have arrived. A process stopped by a signal without a handler prints nothing, so call `flush()` in your signal handlers;
+- `[Avo Inspector] Error: since 2.0.0, trackSchemaFromEvent takes one InspectorEvent object; nothing was sent. Replace trackSchemaFromEvent(eventName, eventProperties) with trackSchemaFromEvent({ eventName, eventProperties }).`: a track call whose argument is not an object, such as a 1.x call with the event name first. Nothing is sent and the call resolves `[]`;
+- `[Avo Inspector] Warning: unknown InspectorEvent key(s) "…" ignored; …`: see [Sending event schemas](#sending-event-schemas-for-events-reported-outside-of-codegen);
 - `Avo Inspector: N event(s) tracked without an event name in the last Ns, sent as "Missing Event Name".`: track calls whose event name is `null`, `undefined`, not a string, empty or whitespace-only. The event is still sent, under the name `"Missing Event Name"`, and the call resolves its schema as usual;
 - `Avo Inspector: N batch(es) rejected with HTTP <status> in the last Ns.`: the Inspector API answered with a status other than 200 (only the status is printed);
 - `Avo Inspector: schema sending failed: Request failed.` or `Request timed out.`: a batch could not be sent;
@@ -234,6 +249,17 @@ Each kind prints at most one line per 10 seconds (per reason or status): the fir
 
 2.0 implements spec 3.0.1. These are the changes you may notice:
 
+- **`trackSchemaFromEvent` takes one `InspectorEvent` object.** The positional forms are gone: the event name, properties and stream id are fields of the object, alongside the gateway fields. Every call site changes:
+
+  ```javascript
+  // 1.x
+  inspector.trackSchemaFromEvent("Purchase", { amount: 42 }, "user-123");
+
+  // 2.0
+  inspector.trackSchemaFromEvent({ eventName: "Purchase", eventProperties: { amount: 42 }, streamId: "user-123" });
+  ```
+
+  TypeScript flags a 1.x call at compile time. In JavaScript, a call whose argument is not an object sends nothing, resolves `[]` and prints `[Avo Inspector] Error: since 2.0.0, trackSchemaFromEvent takes one InspectorEvent object; nothing was sent. …` on stderr, whatever the logging flag (at most once per 10 seconds). Avo Codegen's generated calls are unchanged.
 - **The promise resolves when the event is queued (or dropped by sampling), not when it is delivered.** Outside `dev`, events are batched (see [Batching options](#batching-options)), so `await inspector.trackSchemaFromEvent(...)` no longer means the event reached Avo. In `dev` each event is still sent within the call.
 - **The SDK no longer keeps your process alive.** 1.x ran a keep-alive timer while sends were pending; it is gone. Buffered events are still sent, best-effort, when the process ends naturally (on `beforeExit`), but not on `process.exit()`, on signals, or when a serverless function is frozen. Call `await inspector.flush()` in those cases (see [Flushing before exit](#flushing-before-exit-required)).
 - **A non-200 response in `dev` resolves `[]`.** 1.x resolved the extracted schema whatever the status. Outside `dev` the promise resolves the schema, because the send happens later.
