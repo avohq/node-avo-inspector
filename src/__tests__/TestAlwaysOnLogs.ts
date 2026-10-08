@@ -251,8 +251,38 @@ describe("unknown InspectorEvent keys", () => {
 
     expect(matching(/unknown InspectorEvent key/)).toEqual([
       `[Avo Inspector] Warning: unknown InspectorEvent key(s) "origin_hint" ignored; ${KNOWN}`,
-      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "originAppVersoin" ignored; ${KNOWN} (19 more in the last 10s)`,
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "origin_hint", "originAppVersoin" ignored; ${KNOWN} (19 more in the last 10s)`,
     ]);
+  });
+
+  test("a held count names every distinct key its window saw, not only the first", async () => {
+    const inspector = staging({ batchSize: 30, env: "dev" });
+    captureSends(inspector);
+
+    await inspector.trackSchemaFromEvent({ eventName: "A", outputRef: MARKER } as any);
+    await inspector.trackSchemaFromEvent({ eventname: "B" } as any);
+    await inspector.trackSchemaFromEvent({ eventName: "C", outputRef: MARKER, eventname: "C" } as any);
+    // destroy() prints the held count at once, as the exit does.
+    inspector.destroy();
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "outputRef" ignored; ${KNOWN}`,
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "eventname", "outputRef" ignored; ${KNOWN} (2 more in the last 1s)`,
+    ]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+  });
+
+  test("a held count names at most 5 distinct keys", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+
+    await inspector.trackSchemaFromEvent({ eventName: "A", first: 1 } as any);
+    for (let i = 0; i < 8; i++) await inspector.trackSchemaFromEvent({ eventName: "E", ["k" + i]: 1 } as any);
+    inspector.destroy();
+
+    expect(matching(/unknown InspectorEvent key/)[1]).toBe(
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "k0", "k1", "k2", "k3", "k4", … ignored; ${KNOWN} (8 more in the last 1s)`
+    );
   });
 
   test("many or long key names are capped, and names are quoted", async () => {
@@ -370,6 +400,18 @@ describe("internal errors never print the caught error's text", () => {
       "Avo Inspector: something went wrong. Please report to support@avo.app. (TypeError)",
     ]);
     expect(lines.join("\n")).not.toContain(MARKER);
+  });
+
+  test("a held count names every distinct error type its window saw, not only the first", () => {
+    AvoLog.internal(new TypeError(MARKER));
+    AvoLog.internal(new RangeError(MARKER));
+    AvoLog.internal(new TypeError(MARKER));
+    AvoLog.flushPending();
+
+    expect(lines).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (TypeError)",
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (2 more in the last 1s) (RangeError, TypeError)",
+    ]);
   });
 
   test("the type is a fixed label: an error's own name is never printed", () => {

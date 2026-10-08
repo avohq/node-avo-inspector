@@ -13,7 +13,7 @@ import { monotonicNowMs } from "./utils";
 // "exit" listener prints the rest, synchronously, when the process really exits.
 
 const WINDOW_MS = 10_000;
-// How much of an unknown InspectorEvent key's name is printed (unknownEventKeys).
+// How many names (unknown InspectorEvent keys, error types) a line prints, and how much of each key.
 const MAX_LOGGED_OPTION_KEYS = 5;
 const MAX_LOGGED_OPTION_KEY_LENGTH = 64;
 
@@ -88,9 +88,10 @@ export class AvoLog {
    * (a throwing getter or proxy), so its message or stack can carry a property value.
    */
   static internal(error: unknown): void {
-    const type = AvoLog.errorType(error);
+    AvoLog.noteNames("internal", [AvoLog.errorType(error)]);
     AvoLog.occur("internal", 1, (_total, more, seconds) => {
-      AvoLog.write("error", INTERNAL_ERROR_MESSAGE + AvoLog.suffix(more, seconds) + " (" + type + ")");
+      const types = AvoLog.takeNames("internal", (type) => type);
+      AvoLog.write("error", INTERNAL_ERROR_MESSAGE + AvoLog.suffix(more, seconds) + " (" + types + ")");
     });
   }
 
@@ -147,11 +148,12 @@ export class AvoLog {
    * never a value.
    */
   static unknownEventKeys(keys: string[], known: string[]): void {
-    const names = keys
-      .slice(0, MAX_LOGGED_OPTION_KEYS)
-      .map((key) => JSON.stringify(key.length > MAX_LOGGED_OPTION_KEY_LENGTH ? key.slice(0, MAX_LOGGED_OPTION_KEY_LENGTH) + "…" : key))
-      .join(", ") + (keys.length > MAX_LOGGED_OPTION_KEYS ? ", …" : "");
+    AvoLog.noteNames(
+      "unknown-event-keys",
+      keys.map((key) => (key.length > MAX_LOGGED_OPTION_KEY_LENGTH ? key.slice(0, MAX_LOGGED_OPTION_KEY_LENGTH) + "…" : key))
+    );
     AvoLog.occur("unknown-event-keys", 1, (_total, more, seconds) => {
+      const names = AvoLog.takeNames("unknown-event-keys", (key) => JSON.stringify(key));
       AvoLog.write(
         "warn",
         "[Avo Inspector] Warning: unknown InspectorEvent key(s) " + names + " ignored; the known keys are " +
@@ -191,9 +193,38 @@ export class AvoLog {
     AvoLog.updateExitListener();
   };
 
+  // Distinct names (unknown keys, error types) a kind has seen since its last line, in order,
+  // for the line that reports them: a count line covers every occurrence it counts, so it
+  // names all of theirs, not only the first. At most MAX_LOGGED_OPTION_KEYS + 1 are kept, so
+  // the line can tell that more were seen.
+  private static names: Map<string, string[]> = new Map();
+
+  private static noteNames(kind: string, names: string[]): void {
+    const seen = AvoLog.names.get(kind) || [];
+    for (const name of names) {
+      if (seen.length > MAX_LOGGED_OPTION_KEYS) {
+        break;
+      }
+      if (seen.indexOf(name) < 0) {
+        seen.push(name);
+      }
+    }
+    AvoLog.names.set(kind, seen);
+  }
+
+  // The names noted for `kind`, formatted, joined and capped (", …" past the cap), and forgets
+  // them: the next line names only what is seen after this one.
+  private static takeNames(kind: string, format: (name: string) => string): string {
+    const seen = AvoLog.names.get(kind) || [];
+    AvoLog.names.delete(kind);
+    return seen.slice(0, MAX_LOGGED_OPTION_KEYS).map(format).join(", ") +
+      (seen.length > MAX_LOGGED_OPTION_KEYS ? ", …" : "");
+  }
+
   /** @internal Test-only: forget every window. */
   static _resetForTesting(): void {
     AvoLog.windows.clear();
+    AvoLog.names.clear();
     AvoLog.updateExitListener();
   }
 
