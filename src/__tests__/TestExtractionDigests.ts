@@ -52,14 +52,14 @@ test.each([
 });
 
 test("listDag(6,12): its 6 equal elements per list collapse to one child, digest matches Java and Go", () => {
-  let level: any = { v: 1 };
-  for (let i = 0; i < 12; i++) level = { l: Array.from({ length: 6 }, () => level) };
+  let level: any = { v: 1.5 };
+  for (let i = 0; i < 12; i++) level = { items: Array.from({ length: 6 }, () => level) };
   const schema = AvoSchemaParser.extractSchema(level);
 
   const canonical = canon(schema);
   expect(entries(schema)).toBe(15);
-  expect(canonical.length).toBe(326);
-  expect(sha256(canonical)).toBe("89bb32012c96ce6a34b41fe5d714f71ce2e3feb1e04b4678af39921a77849727");
+  expect(canonical.length).toBe(386);
+  expect(sha256(canonical)).toBe("fa36cee2d9450d07e0b374330e796ce55b03dc8e37b44af34c902d60b0c787e5");
 });
 
 // Binary data (a Buffer here, byte[] in Java, []byte in Go) is one complex value: the depth cap
