@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import { join } from "path";
 
 // The harness drives the built SDK in dist/, so build it first.
@@ -12,24 +12,43 @@ beforeAll(() => {
   ]);
 }, 60_000);
 
-// spawnSync blocks the Jest worker, so Jest's own test timeout cannot stop a hung harness;
-// the child gets a deadline of its own and a timeout fails the test with a clear message.
+// Spawned asynchronously: a synchronous spawn blocks this process, which under
+// --runInBand also hosts the global mock server, so the harness's requests would get no
+// answer. The child gets a deadline of its own and a timeout fails the test with a clear
+// message.
 const HARNESS_TIMEOUT_MS = 20_000;
+// Past the child's deadline, so a hung harness fails with the message above.
+jest.setTimeout(HARNESS_TIMEOUT_MS + 5_000);
 
-function spawnHarness(args: string[], input: string, timeout = HARNESS_TIMEOUT_MS) {
-  return spawnSync(process.execPath, args, {
-    input,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    timeout,
-    killSignal: "SIGKILL",
+type HarnessRun = { status: number | null; signal: NodeJS.Signals | null; stdout: string; timedOut: boolean };
+
+function spawnHarness(args: string[], input: string, timeout = HARNESS_TIMEOUT_MS): Promise<HarnessRun> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args);
+    let stdout = "";
+    let timedOut = false;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeout);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => (stdout += chunk));
+    child.on("error", (err) => {
+      clearTimeout(deadline);
+      reject(err);
+    });
+    child.on("close", (status, signal) => {
+      clearTimeout(deadline);
+      resolve({ status, signal, stdout, timedOut });
+    });
+    child.stdin.end(input);
   });
 }
 
-function runHarnessRaw(input: string) {
-  const result = spawnHarness([harness], input);
-  if (result.error) {
-    throw new Error("harness did not complete: " + result.error.message);
+async function runHarnessRaw(input: string) {
+  const result = await spawnHarness([harness], input);
+  if (result.timedOut) {
+    throw new Error("harness did not complete within " + HARNESS_TIMEOUT_MS + " ms");
   }
   return { status: result.status, output: JSON.parse(result.stdout.trim()) };
 }
@@ -39,8 +58,8 @@ function runHarness(envelope: object) {
 }
 
 describe("conformance harness", () => {
-  test("an envelope without a constructor is a configuration error (exit 2)", () => {
-    const { status, output } = runHarness({
+  test("an envelope without a constructor is a configuration error (exit 2)", async () => {
+    const { status, output } = await runHarness({
       suite: "schema-extraction",
       fixture_id: "no-constructor",
       input: { a: 1 },
@@ -51,8 +70,8 @@ describe("conformance harness", () => {
     expect(output.error).toContain("constructor");
   });
 
-  test("a constructor that is not an object is a configuration error (exit 2)", () => {
-    const { status } = runHarness({
+  test("a constructor that is not an object is a configuration error (exit 2)", async () => {
+    const { status } = await runHarness({
       suite: "schema-extraction",
       fixture_id: "bad-constructor",
       constructor: "test-key",
@@ -62,8 +81,8 @@ describe("conformance harness", () => {
     expect(status).toBe(2);
   });
 
-  test("a well-formed envelope runs the operation (exit 0)", () => {
-    const { status, output } = runHarness({
+  test("a well-formed envelope runs the operation (exit 0)", async () => {
+    const { status, output } = await runHarness({
       suite: "schema-extraction",
       fixture_id: "ok",
       constructor: { apiKey: "test-key", env: "dev", version: "1.0.0" },
@@ -74,8 +93,8 @@ describe("conformance harness", () => {
     expect(output.actual).toEqual([{ propertyName: "a", propertyType: "int" }]);
   });
 
-  test.each(["null", "42", "[]"])("a JSON input that is not an object (%s) is a configuration error (exit 2)", (input) => {
-    const { status, output } = runHarnessRaw(input + "\n");
+  test.each(["null", "42", "[]"])("a JSON input that is not an object (%s) is a configuration error (exit 2)", async (input) => {
+    const { status, output } = await runHarnessRaw(input + "\n");
 
     expect(status).toBe(2);
     expect(output).toMatchObject({ fixture_id: null, passed: false });
@@ -135,54 +154,54 @@ describe("conformance harness", () => {
     ["precondition.samplingRate is negative", "track", { precondition: { samplingRate: -0.1 } }],
   ];
 
-  test.each(malformed)("a malformed envelope is a configuration error (exit 2): %s", (_name, base, overrides) => {
+  test.each(malformed)("a malformed envelope is a configuration error (exit 2): %s", async (_name, base, overrides) => {
     const envelope = { ...bases[base], ...overrides };
     for (const key of Object.keys(envelope)) {
       if (envelope[key] === undefined) delete envelope[key];
     }
 
-    const { status, output } = runHarness(envelope);
+    const { status, output } = await runHarness(envelope);
 
     expect(status).toBe(2);
     expect(output).toMatchObject({ passed: false });
     expect(typeof output.error).toBe("string");
   });
 
-  test.each(Object.keys(bases))("the well-formed %s base envelope runs (exit 0)", (base) => {
-    expect(runHarness(bases[base]).status).toBe(0);
+  test.each(Object.keys(bases))("the well-formed %s base envelope runs (exit 0)", async (base) => {
+    expect((await runHarness(bases[base])).status).toBe(0);
   });
 
   test.each(["schema-extraction", "wire-protocol", "error-handling", "batching"])(
     "every contract suite id is accepted (%s)",
-    (suite) => {
-      expect(runHarness({ ...bases.track, suite }).status).toBe(0);
+    async (suite) => {
+      expect((await runHarness({ ...bases.track, suite })).status).toBe(0);
     }
   );
 
-  test("an extractSchema input of null is passed through (fixture-8)", () => {
-    const { status, output } = runHarness({ ...bases.extract, input: null });
+  test("an extractSchema input of null is passed through (fixture-8)", async () => {
+    const { status, output } = await runHarness({ ...bases.extract, input: null });
 
     expect(status).toBe(0);
     expect(output.actual).toEqual([]);
   });
 
-  test("a child that outlives the deadline is killed and reported, not waited on", () => {
+  test("a child that outlives the deadline is killed and reported, not waited on", async () => {
     const started = Date.now();
-    const hang = spawnHarness(["-e", "setInterval(() => {}, 1000)"], "", 500);
+    const hang = await spawnHarness(["-e", "setInterval(() => {}, 1000)"], "", 500);
 
     expect(hang.signal).toBe("SIGKILL");
-    expect((hang.error as NodeJS.ErrnoException).code).toBe("ETIMEDOUT");
+    expect(hang.timedOut).toBe(true);
     expect(Date.now() - started).toBeLessThan(5000);
   });
 
-  test("a large output envelope reaches the pipe in full before the harness exits", () => {
+  test("a large output envelope reaches the pipe in full before the harness exits", async () => {
     // 10,000 properties (the extraction budget), named long enough for a ~700 KB envelope,
     // far past a pipe buffer.
     const input: { [key: string]: string } = {};
     for (let i = 0; i < 10000; i += 1) {
       input["property_with_a_long_name_padded_to_fill_the_pipe_buffer_" + i] = "value";
     }
-    const { status, output } = runHarness({
+    const { status, output } = await runHarness({
       suite: "schema-extraction",
       fixture_id: "large",
       constructor: { apiKey: "test-key", env: "dev", version: "1.0.0" },
@@ -193,8 +212,8 @@ describe("conformance harness", () => {
     expect(output.actual).toHaveLength(10000);
   });
 
-  test("a constructor that throws is a harness failure (exit 1)", () => {
-    const { status, output } = runHarness({
+  test("a constructor that throws is a harness failure (exit 1)", async () => {
+    const { status, output } = await runHarness({
       suite: "schema-extraction",
       fixture_id: "throws",
       constructor: { apiKey: "", env: "dev", version: "1.0.0" },
