@@ -1,6 +1,6 @@
 {
   "name": "node-avo-inspector",
-  "version": "2.0.0",
+  "version": "2.0.0-beta.0",
   "description": "Avo Inspector for Node.js",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
