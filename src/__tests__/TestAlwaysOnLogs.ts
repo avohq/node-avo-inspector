@@ -1,0 +1,683 @@
+import { format } from "util";
+
+import { AvoInspector } from "../AvoInspector";
+import { InspectorBody } from "../AvoNetworkCallsHandler";
+import { AvoLog } from "../AvoLog";
+
+// Data loss and send failures are logged whatever the logging flag, at most one line per
+// kind (per reason or status) per 10 s; sampling drops and debug lines stay behind the flag.
+
+const API_KEY = "api-key-SECRET-789";
+const MARKER = "PII-MARKER-789@example.com";
+
+let lines: string[] = [];
+let now = 1_000_000;
+
+beforeEach(() => {
+  lines = [];
+  now = 1_000_000;
+  (AvoLog as any).now = () => now;
+  for (const method of ["log", "info", "warn", "error"] as const) {
+    jest.spyOn(console, method).mockImplementation((...args: any[]) => {
+      lines.push(format(...args));
+    });
+  }
+});
+
+// Inspectors created through staging(); afterEach destroys them even when a test fails or
+// times out, then forgets every log window, so nothing logs into the next test.
+let created: AvoInspector[] = [];
+
+afterEach(() => {
+  created.forEach((inspector) => inspector.destroy());
+  created = [];
+  AvoLog._resetForTesting();
+  jest.restoreAllMocks();
+});
+
+// Tests that loop over thousands of events: generous under CPU load, unlike the 5 s default.
+const HEAVY_TEST_TIMEOUT_MS = 30_000;
+
+const staging = (extra: object = {}) => {
+  const inspector = new AvoInspector({
+    apiKey: API_KEY, env: "staging", version: "1.0.0", disableBatchTimer: true, ...extra,
+  });
+  inspector.enableLogging(false);
+  created.push(inspector);
+  return inspector;
+};
+
+const matching = (pattern: RegExp) => lines.filter((line) => pattern.test(line));
+
+function holdSends(inspector: AvoInspector) {
+  const releases: Array<(status: number) => void> = [];
+  jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+    .mockImplementation((_batch: Array<InspectorBody>) => new Promise((resolve) => { releases.push(resolve); }));
+  return releases;
+}
+
+describe("always-on data-loss lines, logging off", () => {
+  test("a buffer overflow burst logs one line per window, then the suppressed total", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 2 });
+
+    for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { email: MARKER } });
+    // (The constructor's batchSize > maxQueueSize warning is a separate line.)
+    expect(matching(/^Avo Inspector: dropped/)).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 1s."]);
+
+    now += 10_000;
+    await inspector.trackSchemaFromEvent({ eventName: "E10", eventProperties: { email: MARKER } });
+    // 7 counted in the first window, plus this one.
+    expect(matching(/^Avo Inspector: dropped/)).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 8 event(s) (queue full) in the last 10s.",
+    ]);
+    inspector.destroy();
+  });
+
+  test("a send backlog overflow logs one line per window with its count", async () => {
+    // prod, not awaited: queued synchronously, and no backpressure wait on held sends.
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    holdSends(inspector);
+
+    // 4 batches (120 events) in flight, then 10,000 events may wait; the drain that first
+    // exceeds it drops 20.
+    for (let i = 0; i < 12_000; i++) inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
+    expect(matching(/send backlog full/)).toEqual([
+      "Avo Inspector: dropped 20 event(s) (send backlog full) in the last 1s.",
+    ]);
+
+    now += 10_000;
+    for (let i = 0; i < 30; i++) inspector.trackSchemaFromEvent({ eventName: "F" + i, eventProperties: {} });
+    const queue = (inspector as any).batchQueue;
+    const totalDropped = 12_030 - 120 - queue.waitingLength - queue.length;
+    expect(matching(/send backlog full/)[1]).toBe(
+      `Avo Inspector: dropped ${totalDropped - 20} event(s) (send backlog full) in the last 10s.`
+    );
+    inspector.destroy();
+  }, HEAVY_TEST_TIMEOUT_MS);
+
+  test("repeated non-200 responses log one line per status per window", async () => {
+    const inspector = staging({ batchSize: 1 });
+    const statuses = [500, 500, 400, 500, 400, 500];
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockImplementation(() => Promise.resolve(statuses.shift() ?? 500));
+
+    for (let i = 0; i < 6; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
+    expect(matching(/rejected/)).toEqual([
+      "Avo Inspector: 1 batch(es) rejected with HTTP 500 in the last 1s.",
+      "Avo Inspector: 1 batch(es) rejected with HTTP 400 in the last 1s.",
+    ]);
+
+    now += 10_000;
+    await inspector.trackSchemaFromEvent({ eventName: "E6", eventProperties: {} });
+    expect(matching(/HTTP 500/)[1]).toBe("Avo Inspector: 4 batch(es) rejected with HTTP 500 in the last 10s.");
+    inspector.destroy();
+  });
+
+  test("a failure storm logs one line per window and reports the suppressed count", async () => {
+    const inspector = staging({ batchSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockRejectedValue("Request failed");
+
+    for (let i = 0; i < 50; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
+    expect(matching(/schema sending failed/)).toEqual(["Avo Inspector: schema sending failed: Request failed."]);
+
+    now += 10_000;
+    await inspector.trackSchemaFromEvent({ eventName: "E50", eventProperties: {} });
+    expect(matching(/schema sending failed/)[1]).toBe(
+      "Avo Inspector: schema sending failed: Request failed. (49 more in the last 10s)"
+    );
+    inspector.destroy();
+  });
+
+  test("sampling drops print nothing with logging off", async () => {
+    const inspector = staging({ batchSize: 1 });
+    inspector._setSamplingRateForTesting(0);
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { email: MARKER } });
+
+    expect(lines).toEqual([]);
+    inspector.destroy();
+  });
+
+  test("sends abandoned by destroy() are not logged", async () => {
+    const inspector = staging({ batchSize: 1 });
+    const releases = holdSends(inspector);
+    const tracks = Array.from({ length: 8 }, (_, i) => inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} }));
+
+    inspector.destroy();
+    releases.forEach((release) => release(500));
+    await Promise.all(tracks);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(lines).toEqual([]);
+  });
+
+  test("always-on lines never contain the API key or property values", async () => {
+    const inspector = staging({ batchSize: 1, maxQueueSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockResolvedValueOnce(503)
+      .mockRejectedValue("Request timed out");
+
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { email: MARKER } });
+
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.join("\n")).not.toContain(API_KEY);
+    expect(lines.join("\n")).not.toContain(MARKER);
+    inspector.destroy();
+  });
+});
+
+describe("the streamId ':' warning", () => {
+  test("prints at most once per 10 s, then reports how many it suppressed", async () => {
+    const inspector = staging({ batchSize: 30 });
+    const warning = "[Avo Inspector] Warning: streamId contains ':' which is not supported";
+
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {}, streamId: "user:" + i });
+    expect(matching(/streamId contains ':'/)).toEqual([warning]);
+
+    now += 10_000;
+    // @ts-ignore The Codegen entry goes through the same path.
+    await inspector._avoFunctionTrackSchemaFromEvent("E20", {}, "id", "hash", "user:20");
+    expect(matching(/streamId contains ':'/)).toEqual([warning, warning + " (19 more in the last 10s)"]);
+    inspector.destroy();
+  });
+});
+
+const captureSends = (inspector: AvoInspector) => {
+  const sent: InspectorBody[] = [];
+  jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+    .mockImplementation((batch: Array<InspectorBody>) => {
+      sent.push(...batch);
+      return Promise.resolve(200);
+    });
+  return sent;
+};
+
+describe("unknown InspectorEvent keys", () => {
+  const KNOWN = "the known keys are eventName, eventProperties, streamId, outputReference, originHint, originAppVersion";
+
+  test("a typo is warned by key name only, and the event is still sent with the known keys", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await expect(
+      inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 }, outputRef: MARKER, originHint: "web" } as any)
+    ).resolves.toEqual([{ propertyName: "a", propertyType: "int" }]);
+    await inspector.flush();
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "outputRef" ignored; ${KNOWN}`,
+    ]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].originHint).toBe("web");
+    expect(sent[0]).not.toHaveProperty("outputReference");
+  });
+
+  test("a misspelt eventName is warned, and the event is sent as Missing Event Name", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await inspector.trackSchemaFromEvent({ eventname: "Signed Up", eventProperties: { a: 1 } } as any);
+    await inspector.flush();
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "eventname" ignored; ${KNOWN}`,
+    ]);
+    expect(sent.map((event) => event.eventName)).toEqual(["Missing Event Name"]);
+  });
+
+  test("every known key, or only some, print nothing", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+
+    await inspector.trackSchemaFromEvent({
+      eventName: "E1", eventProperties: {}, streamId: "s", outputReference: "o", originHint: "web", originAppVersion: "1",
+    });
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
+    await inspector.trackSchemaFromEvent({ eventName: "E3" });
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([]);
+  });
+
+  test("prints at most once per 10 s, then reports how many it suppressed", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {}, origin_hint: "web" } as any);
+    now += 10_000;
+    await inspector.trackSchemaFromEvent({ eventName: "E20", originAppVersoin: "1" } as any);
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "origin_hint" ignored; ${KNOWN}`,
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "origin_hint", "originAppVersoin" ignored; ${KNOWN} (19 more in the last 10s)`,
+    ]);
+  });
+
+  test("a held count names every distinct key its window saw, not only the first", async () => {
+    const inspector = staging({ batchSize: 30, env: "dev" });
+    captureSends(inspector);
+
+    await inspector.trackSchemaFromEvent({ eventName: "A", outputRef: MARKER } as any);
+    await inspector.trackSchemaFromEvent({ eventname: "B" } as any);
+    await inspector.trackSchemaFromEvent({ eventName: "C", outputRef: MARKER, eventname: "C" } as any);
+    // destroy() prints the held count at once, as the exit does.
+    inspector.destroy();
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "outputRef" ignored; ${KNOWN}`,
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "eventname", "outputRef" ignored; ${KNOWN} (2 more in the last 1s)`,
+    ]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+  });
+
+  test("a held count names at most 5 distinct keys", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+
+    await inspector.trackSchemaFromEvent({ eventName: "A", first: 1 } as any);
+    for (let i = 0; i < 8; i++) await inspector.trackSchemaFromEvent({ eventName: "E", ["k" + i]: 1 } as any);
+    inspector.destroy();
+
+    expect(matching(/unknown InspectorEvent key/)[1]).toBe(
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "k0", "k1", "k2", "k3", "k4", … ignored; ${KNOWN} (8 more in the last 1s)`
+    );
+  });
+
+  test("many or long key names are capped, and names are quoted", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+    const extra: any = { ["x".repeat(100)]: 1, "a\nb": 2, k3: 3, k4: 4, k5: 5, k6: 6 };
+
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: {}, ...extra });
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "${"x".repeat(64)}…", "a\\nb", "k3", "k4", "k5", … ignored; ${KNOWN}`,
+    ]);
+  });
+
+  test.each(["dev", "staging", "prod"])("never throws (%s): an event whose key listing throws is tracked without a warning", async (env) => {
+    const inspector = staging({ batchSize: 30, env });
+    captureSends(inspector);
+    const event = new Proxy({ eventName: "E", eventProperties: { a: 1 } }, { ownKeys: () => { throw new Error(MARKER); } });
+
+    await expect(inspector.trackSchemaFromEvent(event)).resolves.toEqual([{ propertyName: "a", propertyType: "int" }]);
+    expect(matching(/unknown InspectorEvent key|something went wrong/)).toEqual([]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+  });
+
+  test("the Codegen entry point keeps its positional call and does not warn about its gateway fields", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await inspector._avoFunctionTrackSchemaFromEvent("E", { a: 1 }, "id", "hash", "s", { originHint: "web" });
+    await inspector.flush();
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ eventName: "E", avoFunction: true, eventId: "id", eventHash: "hash", originHint: "web" });
+  });
+});
+
+describe("a track call that is not one InspectorEvent", () => {
+  const ERROR =
+    "[Avo Inspector] Error: since 2.0.0, trackSchemaFromEvent takes one InspectorEvent object; nothing was sent. " +
+    "Replace trackSchemaFromEvent(eventName, eventProperties) with trackSchemaFromEvent({ eventName, eventProperties }).";
+
+  test.each(["dev", "staging", "prod"])("a 1.x call (%s) sends nothing, resolves [] and prints the fix, without values", async (env) => {
+    const inspector = staging({ batchSize: 1, env });
+    const sent = captureSends(inspector);
+
+    // @ts-ignore The 1.x positional form, as an untyped JavaScript caller still writes it.
+    await expect(inspector.trackSchemaFromEvent(MARKER, { email: MARKER })).resolves.toEqual([]);
+    await inspector.flush();
+
+    expect(sent).toEqual([]);
+    expect(matching(/takes one InspectorEvent/)).toEqual([ERROR]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+  });
+
+  test.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["a number", 7],
+    ["an array", [{ eventName: "E" }]],
+  ])("%s is not an event either", async (_name, value) => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await expect(inspector.trackSchemaFromEvent(value as any)).resolves.toEqual([]);
+    await inspector.flush();
+
+    expect(sent).toEqual([]);
+    expect(matching(/takes one InspectorEvent/)).toEqual([ERROR]);
+  });
+
+  test("prints at most once per 10 s, then reports how many it suppressed", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+
+    // @ts-ignore 1.x positional calls.
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, { i });
+    now += 10_000;
+    // @ts-ignore
+    await inspector.trackSchemaFromEvent("E5", {});
+
+    expect(matching(/takes one InspectorEvent/)).toEqual([ERROR, ERROR + " (4 more in the last 10s)"]);
+  });
+});
+
+describe("an InspectorEvent without properties", () => {
+  test.each([
+    ["absent", { eventName: "E" }],
+    ["null", { eventName: "E", eventProperties: null }],
+  ])("eventProperties %s: the event is sent with no properties", async (_name, event) => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await expect(inspector.trackSchemaFromEvent(event)).resolves.toEqual([]);
+    await inspector.flush();
+
+    expect(sent.map((e) => [e.eventName, e.eventProperties])).toEqual([["E", []]]);
+    expect(matching(/takes one InspectorEvent|unknown InspectorEvent key|something went wrong/)).toEqual([]);
+  });
+});
+
+describe("internal errors never print the caught error's text", () => {
+  test("a property getter that throws with a value in its message: the value is not logged", async () => {
+    const inspector = staging();
+    const props = {
+      get email(): string {
+        throw new TypeError("cannot read " + MARKER);
+      },
+    };
+
+    expect(inspector.extractSchema(props)).toEqual([]);
+
+    const internal = matching(/something went wrong/);
+    expect(internal).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (TypeError)",
+    ]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+  });
+
+  test("a held count names every distinct error type its window saw, not only the first", () => {
+    AvoLog.internal(new TypeError(MARKER));
+    AvoLog.internal(new RangeError(MARKER));
+    AvoLog.internal(new TypeError(MARKER));
+    AvoLog.flushPending();
+
+    expect(lines).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (TypeError)",
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (2 more in the last 1s) (RangeError, TypeError)",
+    ]);
+  });
+
+  test("the type is a fixed label: an error's own name is never printed", () => {
+    const renamed = new TypeError("hidden");
+    renamed.name = MARKER;
+    AvoLog.internal(renamed);
+
+    expect(lines).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (TypeError)",
+    ]);
+  });
+
+  test("a throwing name getter or proxy trap cannot break or leak into the line", () => {
+    const getter = new Error("hidden");
+    Object.defineProperty(getter, "name", { get() { throw new Error(MARKER); } });
+    const proxy = new Proxy({}, { getPrototypeOf() { throw new Error(MARKER); } });
+
+    expect(() => AvoLog.internal(getter)).not.toThrow();
+    now += 10_000;
+    expect(() => AvoLog.internal(proxy)).not.toThrow();
+
+    expect(lines).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (Error)",
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (unknown)",
+    ]);
+  });
+
+  test("only the error's type is printed, whatever was thrown", () => {
+    AvoLog.internal(new RangeError(MARKER));
+    now += 10_000;
+    AvoLog.internal(MARKER);
+
+    expect(lines).toEqual([
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (RangeError)",
+      "Avo Inspector: something went wrong. Please report to support@avo.app. (string)",
+    ]);
+  });
+});
+
+describe("a missing event name", () => {
+  // Captures every batch the dev instance sends.
+  const dev = () => {
+    const inspector = new AvoInspector({ apiKey: API_KEY, env: "dev", version: "1.0.0" });
+    created.push(inspector);
+    const sent: InspectorBody[] = [];
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+      .mockImplementation((batch: Array<InspectorBody>) => { sent.push(...batch); return Promise.resolve(200); });
+    return { inspector, sent };
+  };
+  const line = 'Avo Inspector: 1 event(s) tracked without an event name in the last 1s, sent as "Missing Event Name".';
+  const schema = [{ propertyName: "a", propertyType: "int" }];
+
+  test.each([
+    ["null", null], ["undefined", undefined], ["a number", 5], ["an object", {}], ["empty", ""], ["whitespace-only", "  "],
+  ])("a %s event name is sent as \"Missing Event Name\", with one line", async (_label, eventName) => {
+    const { inspector, sent } = dev();
+
+    await expect(inspector.trackSchemaFromEvent({ eventName: eventName as any, eventProperties: { a: 1 } })).resolves.toEqual(schema);
+
+    expect(sent.map((event) => [event.eventName, event.eventProperties])).toEqual([["Missing Event Name", schema]]);
+    expect(matching(/without an event name/)).toEqual([line]);
+    inspector.destroy();
+  });
+
+  test("the Codegen path sends it as \"Missing Event Name\" too", async () => {
+    const { inspector, sent } = dev();
+
+    // @ts-ignore
+    await expect(inspector._avoFunctionTrackSchemaFromEvent(undefined, { a: 1 }, "id", "hash")).resolves.toEqual(schema);
+
+    expect(sent.map((event) => [event.eventName, event.avoFunction, event.eventId])).toEqual([["Missing Event Name", true, "id"]]);
+    expect(matching(/without an event name/)).toEqual([line]);
+    inspector.destroy();
+  });
+
+  test("the line is rate-limited and reports the suppressed count", async () => {
+    const { inspector, sent } = dev();
+
+    for (let i = 0; i < 3; i++) await inspector.trackSchemaFromEvent({ eventName: "", eventProperties: { i } });
+    now += 10_000;
+    await inspector.trackSchemaFromEvent({ eventName: null as any, eventProperties: { i: 3 } });
+
+    expect(sent).toHaveLength(4);
+    expect(matching(/without an event name/)).toEqual([
+      line,
+      'Avo Inspector: 3 event(s) tracked without an event name in the last 10s, sent as "Missing Event Name".',
+    ]);
+    inspector.destroy();
+  });
+
+  test("a valid name is sent unchanged, surrounding whitespace included, with no line", async () => {
+    const { inspector, sent } = dev();
+
+    await inspector.trackSchemaFromEvent({ eventName: "  Signed Up ", eventProperties: { a: 1 } });
+
+    expect(sent.map((event) => event.eventName)).toEqual(["  Signed Up "]);
+    expect(matching(/without an event name/)).toEqual([]);
+    inspector.destroy();
+  });
+});
+
+describe("a batch dispatch that fails internally", () => {
+  const internal = "Avo Inspector: something went wrong. Please report to support@avo.app.";
+
+  test("a dispatch that throws logs the internal error and the dropped events", async () => {
+    const inspector = staging({ batchSize: 2 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockImplementation(() => {
+      throw new Error("boom");
+    });
+
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
+    await inspector.flush();
+
+    expect(matching(/something went wrong/)).toEqual([expect.stringContaining(internal)]);
+    expect(matching(/internal error/)).toEqual(["Avo Inspector: dropped 2 event(s) (internal error) in the last 1s."]);
+    inspector.destroy();
+  });
+
+  test("a dispatch that rejects logs the internal error and the dropped events", async () => {
+    const inspector = staging({ batchSize: 3 });
+    jest.spyOn(inspector as any, "sendBatch").mockImplementation(() => Promise.reject(new Error("boom")));
+
+    for (let i = 0; i < 3; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
+    await inspector.flush();
+
+    expect(matching(/something went wrong/)).toEqual([expect.stringContaining(internal)]);
+    expect(matching(/internal error/)).toEqual(["Avo Inspector: dropped 3 event(s) (internal error) in the last 1s."]);
+    inspector.destroy();
+  });
+});
+
+describe("a send failure with an arbitrary error", () => {
+  test.each([
+    ["an Error", new TypeError("MARKER-in-message-1"), "Request failed (TypeError)"],
+    ["a non-fixed string", "MARKER-in-message-2", "Request failed (string)"],
+  ])("%s prints only a fixed reason and its type, never the message", async (_label, error, reason) => {
+    const inspector = staging({ batchSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockRejectedValue(error);
+
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
+
+    expect(lines.join("\n")).not.toContain("MARKER-in-message");
+    // One window for both: the key is the fixed reason, not the message.
+    expect(matching(/schema sending failed/)).toEqual([`Avo Inspector: schema sending failed: ${reason}.`]);
+    inspector.destroy();
+  });
+
+  test("the fixed transport reasons are printed as is", async () => {
+    const inspector = staging({ batchSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockRejectedValue("Request timed out");
+
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
+
+    expect(matching(/schema sending failed/)).toEqual(["Avo Inspector: schema sending failed: Request timed out."]);
+    inspector.destroy();
+  });
+});
+
+describe("pending counts at lifecycle points, worded by real elapsed time", () => {
+  const dropLines = () => matching(/^Avo Inspector: dropped/);
+
+  test("a burst of 5,000 drops, then flush() after the window, prints one line at once and one with the rest", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+
+    for (let i = 0; i < 5001; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
+    now += 12_000;
+    await inspector.flush();
+
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 4999 event(s) (queue full) in the last 12s.",
+    ]);
+    inspector.destroy();
+  }, HEAVY_TEST_TIMEOUT_MS);
+
+  test("flush() inside the window leaves the count pending, so serverless flushes keep the limit", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
+    now += 3_000;
+    await inspector.flush();
+    expect(dropLines()).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 1s."]);
+
+    inspector.destroy();
+    expect(dropLines()[1]).toBe("Avo Inspector: dropped 3 event(s) (queue full) in the last 3s.");
+  });
+
+  test("a count left pending by an early flush() is printed by the first flush() after its window", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
+    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
+
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
+    now += 3_000;
+    await inspector.flush();
+    expect(dropLines()).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 1s."]);
+
+    now += 10_000;
+    await inspector.flush();
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 3 event(s) (queue full) in the last 13s.",
+    ]);
+    inspector.destroy();
+  });
+
+  test("destroy() prints a pending count", async () => {
+    const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
+    for (let i = 0; i < 4; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
+    now += 2_000;
+
+    inspector.destroy();
+
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 2 event(s) (queue full) in the last 2s.",
+    ]);
+  });
+
+  test("beforeExit prints only expired counts: it also fires at idle points that are not the exit", () => {
+    AvoLog.failed("Request failed");
+    AvoLog.failed("Request failed");
+    now += 4_000;
+
+    // An idle point inside the window: the count stays pending (the real exit prints it;
+    // see TestExitLogs, which runs real processes).
+    process.emit("beforeExit", 0);
+    expect(matching(/schema sending failed/)).toEqual(["Avo Inspector: schema sending failed: Request failed."]);
+
+    now += 6_000;
+    process.emit("beforeExit", 0);
+    expect(matching(/schema sending failed/)).toEqual([
+      "Avo Inspector: schema sending failed: Request failed.",
+      "Avo Inspector: schema sending failed: Request failed. (1 more in the last 10s)",
+    ]);
+  });
+
+  test("a stale count reports its real span", () => {
+    AvoLog.dropped(1, "queue full");
+    AvoLog.dropped(2, "queue full");
+    now += 3_600_000;
+
+    AvoLog.dropped(1, "queue full");
+
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 3 event(s) (queue full) in the last 3600s.",
+    ]);
+  });
+
+  test("a flushed count is not printed again", async () => {
+    AvoLog.dropped(1, "queue full");
+    AvoLog.dropped(5, "queue full");
+    AvoLog.flushPending();
+    AvoLog.flushPending();
+    now += 10_000;
+
+    AvoLog.dropped(1, "queue full");
+
+    expect(dropLines()).toEqual([
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 5 event(s) (queue full) in the last 1s.",
+      "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
+    ]);
+  });
+});

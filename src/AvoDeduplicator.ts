@@ -1,9 +1,29 @@
-import { deepEquals } from "./utils";
+import { deepEquals, monotonicNowMs } from "./utils";
+
+// A registration, in time order, so expired ones are popped from the front. `generation`
+// identifies it among registrations of the same key.
+interface Registration {
+  time: number;
+  key: string;
+  generation: number;
+}
 
 export class AvoDeduplicator {
-  avoFunctionsEvents: { [time: number]: string } = {};
-  manualEvents: { [time: number]: string } = {};
+  // Every registration, oldest first; `head` is the first one not yet expired. Cleanup pops
+  // from the front, so its cost is amortised O(1) per call.
+  avoFunctionsEvents: Array<Registration> = [];
+  manualEvents: Array<Registration> = [];
+  private avoFunctionsHead = 0;
+  private manualHead = 0;
   private msToConsiderOld = 500;
+  // Milliseconds from a monotonic clock: the log must stay in time order, and a wall clock
+  // stepping back (NTP, manual change) would stall expiry. Replaceable in tests.
+  private now: () => number = monotonicNowMs;
+  // The generation of each key's latest registration. A key's params always belong to its
+  // latest registration, so only that registration's expiry may delete them.
+  private avoFunctionsLatest: { [key: string]: number } = {};
+  private manualLatest: { [key: string]: number } = {};
+  private nextGeneration = 0;
 
   // Keyed by streamId\0eventName to prevent cross-stream suppression on server
   avoFunctionsEventsParams: {
@@ -25,11 +45,14 @@ export class AvoDeduplicator {
 
     const key = AvoDeduplicator.dedupKey(eventName, streamId);
 
+    const registration = { time: this.now(), key, generation: this.nextGeneration++ };
     if (fromAvoFunction) {
-      this.avoFunctionsEvents[Date.now()] = key;
+      this.avoFunctionsEvents.push(registration);
+      this.avoFunctionsLatest[key] = registration.generation;
       this.avoFunctionsEventsParams[key] = params;
     } else {
-      this.manualEvents[Date.now()] = key;
+      this.manualEvents.push(registration);
+      this.manualLatest[key] = registration.generation;
       this.manualEventsParams[key] = params;
     }
 
@@ -114,37 +137,53 @@ export class AvoDeduplicator {
   }
 
   private clearOldEvents() {
-    const now = Date.now();
-
-    for (const time in this.avoFunctionsEvents) {
-      if (this.avoFunctionsEvents.hasOwnProperty(time)) {
-        const timestamp = Number(time) || 0;
-        if (now - timestamp > this.msToConsiderOld) {
-          const key = this.avoFunctionsEvents[time];
-          delete this.avoFunctionsEvents[time];
-          delete this.avoFunctionsEventsParams[key];
-        }
-      }
+    const now = this.now();
+    this.avoFunctionsHead = this.expire(
+      this.avoFunctionsEvents, this.avoFunctionsHead, this.avoFunctionsEventsParams, this.avoFunctionsLatest, now
+    );
+    this.manualHead = this.expire(
+      this.manualEvents, this.manualHead, this.manualEventsParams, this.manualLatest, now
+    );
+    if (this.avoFunctionsHead > 1024 && this.avoFunctionsHead * 2 > this.avoFunctionsEvents.length) {
+      this.avoFunctionsEvents = this.avoFunctionsEvents.slice(this.avoFunctionsHead);
+      this.avoFunctionsHead = 0;
     }
-
-    for (const time in this.manualEvents) {
-      if (this.manualEvents.hasOwnProperty(time)) {
-        const timestamp = Number(time) || 0;
-        if (now - timestamp > this.msToConsiderOld) {
-          const key = this.manualEvents[time];
-          delete this.manualEvents[time];
-          delete this.manualEventsParams[key];
-        }
-      }
+    if (this.manualHead > 1024 && this.manualHead * 2 > this.manualEvents.length) {
+      this.manualEvents = this.manualEvents.slice(this.manualHead);
+      this.manualHead = 0;
     }
+  }
+
+  // Pops every registration older than msToConsiderOld and deletes a key's params only when
+  // the popped registration is still that key's latest; returns the new head.
+  private expire(
+    registrations: Array<Registration>,
+    head: number,
+    paramsByKey: { [key: string]: { [propName: string]: any } },
+    latestByKey: { [key: string]: number },
+    now: number
+  ): number {
+    while (head < registrations.length && now - registrations[head].time > this.msToConsiderOld) {
+      const { key, generation } = registrations[head];
+      if (latestByKey[key] === generation) {
+        delete paramsByKey[key];
+        delete latestByKey[key];
+      }
+      head++;
+    }
+    return head;
   }
 
   // used in tests
   private _clearEvents() {
-    this.avoFunctionsEvents = {};
-    this.manualEvents = {};
+    this.avoFunctionsEvents = [];
+    this.manualEvents = [];
+    this.avoFunctionsHead = 0;
+    this.manualHead = 0;
 
     this.avoFunctionsEventsParams = {};
     this.manualEventsParams = {};
+    this.avoFunctionsLatest = {};
+    this.manualLatest = {};
   }
 }

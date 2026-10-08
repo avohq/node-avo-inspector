@@ -44,7 +44,7 @@ describe("AvoNetworkCallsHandler", () => {
   });
 
   test("trackSchemaFromEvent sends only event call (no sessionStarted)", async () => {
-    await inspector.trackSchemaFromEvent(eventName, properties);
+    await inspector.trackSchemaFromEvent({ eventName, eventProperties: properties });
 
     // Should be called once (event only, no sessionStarted)
     expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(1);
@@ -66,7 +66,7 @@ describe("AvoNetworkCallsHandler", () => {
   });
 
   test("trackSchemaFromEvent with streamId sets anonymousId to streamId", async () => {
-    await inspector.trackSchemaFromEvent(eventName, properties, "user-stream-123");
+    await inspector.trackSchemaFromEvent({ eventName, eventProperties: properties, streamId: "user-stream-123" });
 
     expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(1);
     expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
@@ -78,7 +78,7 @@ describe("AvoNetworkCallsHandler", () => {
   });
 
   test("trackSchemaFromEvent without streamId sets anonymousId to empty string", async () => {
-    await inspector.trackSchemaFromEvent(eventName, properties);
+    await inspector.trackSchemaFromEvent({ eventName, eventProperties: properties });
 
     expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(1);
     expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledWith([
@@ -91,7 +91,7 @@ describe("AvoNetworkCallsHandler", () => {
   test("trackSchemaFromEvent with streamId containing ':' logs warning", async () => {
     const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
-    await inspector.trackSchemaFromEvent(eventName, properties, "invalid:stream");
+    await inspector.trackSchemaFromEvent({ eventName, eventProperties: properties, streamId: "invalid:stream" });
 
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       "[Avo Inspector] Warning: streamId contains ':' which is not supported"
@@ -134,9 +134,10 @@ describe("AvoNetworkCallsHandler", () => {
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     inspectorCallSpy.mockRejectedValueOnce('Network error');
 
-    await inspector.trackSchemaFromEvent(eventName, properties);
+    await inspector.trackSchemaFromEvent({ eventName, eventProperties: properties });
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Avo Inspector: schema sending failed: Network error.');
+    // A reason other than the two fixed transport texts prints only its type.
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Avo Inspector: schema sending failed: Request failed (string).');
     consoleErrorSpy.mockRestore();
   });
 
@@ -162,7 +163,7 @@ describe("AvoNetworkCallsHandler", () => {
   test("trackSchemaFromEvent with streamId containing ':' still sends the event", async () => {
     const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
-    await inspector.trackSchemaFromEvent(eventName, properties, "bad:stream");
+    await inspector.trackSchemaFromEvent({ eventName, eventProperties: properties, streamId: "bad:stream" });
 
     // Warning is logged
     expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -182,8 +183,8 @@ describe("AvoNetworkCallsHandler", () => {
   });
 
   test("same event with different streamIds is not deduplicated", async () => {
-    await inspector.trackSchemaFromEvent(eventName, properties, "stream-a");
-    await inspector.trackSchemaFromEvent(eventName, properties, "stream-b");
+    await inspector.trackSchemaFromEvent({ eventName, eventProperties: properties, streamId: "stream-a" });
+    await inspector.trackSchemaFromEvent({ eventName, eventProperties: properties, streamId: "stream-b" });
 
     expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(2);
   });
@@ -197,7 +198,7 @@ describe("AvoNetworkCallsHandler", () => {
     });
 
     await expect(
-      inspector.trackSchemaFromEvent(eventName, properties)
+      inspector.trackSchemaFromEvent({ eventName, eventProperties: properties })
     ).rejects.toBe(
       "Avo Inspector: something went wrong. Please report to support@avo.app."
     );

@@ -26,3 +26,5 @@ yarn-error.log*
 
 .vscode
 .cache
+# Conformance: spec checkout fetched by scripts/run-conformance.sh
+/.spec-repo

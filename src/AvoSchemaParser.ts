@@ -2,7 +2,46 @@ let isArray = (obj: any): boolean => {
   return Object.prototype.toString.call(obj) === "[object Array]";
 };
 
+let isComplex = (value: any): boolean => {
+  return typeof value === "object" && value != null;
+};
+
+// Binary data is never enumerated (a Buffer has one indexed key per byte): an ArrayBuffer view
+// is typed by its element type, as Java and Go type primitive arrays. A float view
+// (Float16Array, Float32Array, Float64Array) is list(float) with children ["float"], any other
+// (Buffer, integer typed array, DataView) list(int) with ["int"]; an ArrayBuffer or
+// SharedArrayBuffer is an object with no properties. It is still one complex value: the leaf
+// rules apply to it first, and mapping it costs one expansion.
+const FLOAT_VIEW_TAGS = ["[object Float16Array]", "[object Float32Array]", "[object Float64Array]"];
+const binaryElementType = (value: any): string | null => {
+  if (!ArrayBuffer.isView(value)) {
+    return null;
+  }
+  return FLOAT_VIEW_TAGS.indexOf(Object.prototype.toString.call(value)) >= 0 ? "float" : "int";
+};
+const isArrayBufferLike = (value: any): boolean => {
+  const tag = Object.prototype.toString.call(value);
+  return tag === "[object ArrayBuffer]" || tag === "[object SharedArrayBuffer]";
+};
+// A view's children, whatever its length: its elements are never visited.
+const binaryChildren = (_value: ArrayBufferView, elementType: string): string[] => [elementType];
+
+// Deeper complex values are reported as "object" instead of being descended into.
+const MAX_DEPTH = 10;
+// Complex values expanded per extractSchema call. Shared references that are not cycles
+// can otherwise expand exponentially; the rest are reported as "object" like the depth cap.
+const MAX_EXPANSIONS = 10000;
+// Properties emitted per extractSchema call, at every depth; past it the rest are omitted
+// (in iteration order). Independent of MAX_EXPANSIONS: one object with a million keys is a
+// single expansion.
+const MAX_PROPERTIES = 10000;
+
 export class AvoSchemaParser {
+  /**
+   * Maps each property to its name, type and (for objects and lists) child schema.
+   * Values nested deeper than MAX_DEPTH, cyclic references, and complex values past the
+   * MAX_EXPANSIONS budget are reported as "object".
+   */
   static extractSchema(eventProperties: {
     [propName: string]: any;
   }): Array<{
@@ -10,37 +49,87 @@ export class AvoSchemaParser {
     propertyType: string;
     children?: any;
   }> {
-    if (eventProperties === null || eventProperties === undefined) {
+    // Only an object has named properties. JavaScript callers can pass anything, and
+    // mapping a primitive, an array or binary data as the root would return a bare type or
+    // an element list instead of properties (the wire's eventProperties is a list of them).
+    if (
+      !isComplex(eventProperties) ||
+      isArray(eventProperties) ||
+      binaryElementType(eventProperties) !== null ||
+      isArrayBufferLike(eventProperties)
+    ) {
       return [];
     }
 
-    let mapping = (object: any) => {
+    // Objects and arrays on the path from the root to the value being mapped. A value that
+    // is its own ancestor (a cycle) is reported like one past the depth cap, so an object
+    // holding itself under several keys cannot expand exponentially.
+    const ancestors = new Set<any>();
+    let expansions = 0;
+    let properties = 0;
+    const isLeaf = (value: any, depth: number): boolean =>
+      isComplex(value) &&
+      (depth >= MAX_DEPTH || ancestors.has(value) || expansions >= MAX_EXPANSIONS);
+
+    let mapping = (object: any, depth: number) => {
+      if (isComplex(object)) {
+        ancestors.add(object);
+        expansions += 1;
+      }
+      try {
+        return mapValue(object, depth);
+      } finally {
+        ancestors.delete(object);
+      }
+    };
+
+    let mapValue = (object: any, depth: number): any => {
+      const elementType = binaryElementType(object);
+      if (elementType !== null) {
+        return binaryChildren(object, elementType);
+      }
+      if (isArrayBufferLike(object)) {
+        return [];
+      }
       if (isArray(object)) {
         let list = object.map((x: any) => {
-          return mapping(x);
+          return isLeaf(x, depth) ? "object" : mapping(x, depth + 1);
         });
         return this.removeDuplicates(list);
-      } else if (typeof object === "object") {
+      } else if (isComplex(object)) {
+        // isComplex, not typeof: a null list element is the type "null" (spec §9.2), not
+        // an object to enumerate.
         let mappedResult: any = [];
-        for (var key in object) {
-          if (object.hasOwnProperty(key)) {
-            let val = object[key];
-
-            let mappedEntry: {
-              propertyName: string;
-              propertyType: string;
-              children?: any;
-            } = {
-              propertyName: key,
-              propertyType: this.getPropValueType(val),
-            };
-
-            if (typeof val === "object" && val != null) {
-              mappedEntry["children"] = mapping(val);
-            }
-
-            mappedResult.push(mappedEntry);
+        // Object.keys, not object.hasOwnProperty: a null-prototype object has no such method,
+        // and a property named "hasOwnProperty" would shadow it.
+        for (const key of Object.keys(object)) {
+          if (properties >= MAX_PROPERTIES) {
+            break;
           }
+          properties += 1;
+          let val = object[key];
+
+          let mappedEntry: {
+            propertyName: string;
+            propertyType: string;
+            children?: any;
+          } = {
+            propertyName: key,
+            propertyType: this.getPropValueType(val),
+          };
+
+          // Binary data takes this path too, as in Java and Go: past the limits it is "object",
+          // otherwise mapping types it with one expansion, without walking its bytes.
+          if (isComplex(val)) {
+            if (isLeaf(val, depth)) {
+              mappedEntry.propertyType = "object";
+              mappedEntry["children"] = [];
+            } else {
+              mappedEntry["children"] = mapping(val, depth + 1);
+            }
+          }
+
+          mappedResult.push(mappedEntry);
         }
 
         return mappedResult;
@@ -49,26 +138,44 @@ export class AvoSchemaParser {
       }
     };
 
-    var mappedEventProps = mapping(eventProperties);
+    var mappedEventProps = mapping(eventProperties, 0);
 
     return mappedEventProps;
   }
 
+  // A list's children: each distinct child schema once, the first occurrence, in order. Children
+  // are compared by value (childKey), so equal elements, such as one Buffer repeated, leave one
+  // child. Only the output is deduplicated: every element was already mapped and counted
+  // toward the limits.
   private static removeDuplicates(array: Array<any>): Array<any> {
-    // XXX TODO fix any types
-    var primitives: any = { boolean: {}, number: {}, string: {} };
-    var objects: Array<any> = [];
-
+    const seen = new Set<string>();
     return array.filter((item: any) => {
-      var type: string = typeof item;
-      if (type in primitives) {
-        return primitives[type].hasOwnProperty(item)
-          ? false
-          : (primitives[type][item] = true);
-      } else {
-        return objects.indexOf(item) >= 0 ? false : objects.push(item);
+      const key = this.childKey(item);
+      if (seen.has(key)) {
+        return false;
       }
+      seen.add(key);
+      return true;
     });
+  }
+
+  // A canonical key for a child schema: a type string; an object's properties, sorted so that
+  // property order does not matter; or a nested list's children, in order.
+  private static childKey(child: any): string {
+    if (typeof child === "string") {
+      return JSON.stringify(child);
+    }
+    if (child.length > 0 && !isArray(child[0]) && typeof child[0] === "object") {
+      const properties = child.map(
+        (entry: any) =>
+          JSON.stringify(entry.propertyName) +
+          ":" +
+          JSON.stringify(entry.propertyType) +
+          (entry.children !== undefined ? ":" + this.childKey(entry.children) : "")
+      );
+      return "{" + properties.sort().join(",") + "}";
+    }
+    return "[" + child.map((element: any) => this.childKey(element)).join(",") + "]";
   }
 
 
@@ -78,12 +185,12 @@ export class AvoSchemaParser {
       return "null";
     } else if (propType === "string") {
       return "string";
-    } else if (propType === "number" || propType === "bigint") {
-      if ((propValue + "").indexOf(".") >= 0) {
-        return "float";
-      } else {
-        return "int";
-      }
+    } else if (propType === "bigint") {
+      return "int";
+    } else if (propType === "number") {
+      // Whole numbers (including 0.0, which JS cannot tell from 0) are "int"; everything
+      // else, including exponent forms like 1e-7, NaN and ±Infinity, is "float".
+      return Number.isInteger(propValue) ? "int" : "float";
     } else if (propType === "boolean") {
       return "boolean";
     } else if (propType === "object") {
@@ -95,6 +202,10 @@ export class AvoSchemaParser {
 }
 
   private static getPropValueType(propValue: any): string {
+    const elementType = binaryElementType(propValue);
+    if (elementType !== null) {
+      return `list(${elementType})`;
+    }
     if (isArray(propValue)){
 
       //we now know that propValue is an array. get first element in propValue array
@@ -105,6 +216,10 @@ export class AvoSchemaParser {
       }
       else {
       let propElementType = this.getBasicPropType(propElement);
+      // "list(unknown)" is not a wire type; elements with no JSON type count as objects.
+      if (propElementType === "unknown") {
+        propElementType = "object";
+      }
       return `list(${propElementType})`
       }
     }
