@@ -314,28 +314,28 @@ describe("Schema Parsing", () => {
     test("shared references expand at most 10000 objects and lists per call; the rest map to object", () => {
       // Every list holds the next under 4 elements: a DAG, not a cycle, so the ancestor
       // check does not apply. Lists, so the 10,000-property budget is not what stops it.
-      // Unbounded, it expands 4^0 + ... + 4^7 (~22k) lists within the depth cap.
-      let level: any = [1];
-      for (let i = 0; i < 7; i += 1) level = [level, level, level, level];
+      // Equal elements leave one child in the output, so the budget shows in what follows:
+      // unbounded, 7 levels expand 4^0 + ... + 4^7 (~22k) lists within the depth cap and
+      // spend it, while 6 levels (5,461) do not.
+      const dag = (levels: number) => {
+        let level: any = [1];
+        for (let i = 0; i < levels; i += 1) level = [level, level, level, level];
+        return level;
+      };
+      const containsObject = (elements: any[]): boolean =>
+        elements.some((element) => element === "object" || (Array.isArray(element) && containsObject(element)));
 
-      let expanded = 0;
-      let truncated = 0;
-      const walk = (elements: any[]) =>
-        elements.forEach((element) => {
-          if (Array.isArray(element)) {
-            expanded += 1;
-            walk(element);
-          } else if (element === "object") {
-            truncated += 1;
-          }
-        });
-      const schema = inspector.extractSchema({ l: level });
-      expanded += 1; // the list under "l"
-      walk(schema[0].children);
+      const [spent, after] = inspector.extractSchema({ l: dag(7), after: { k: 1 } });
+      expect(containsObject(spent.children)).toBe(true);
+      expect(after).toEqual({ propertyName: "after", propertyType: "object", children: [] });
 
-      // The root object counts toward the 10,000 but is not a list.
-      expect(expanded).toBe(9999);
-      expect(truncated).toBeGreaterThan(0);
+      const [control, controlAfter] = inspector.extractSchema({ l: dag(6), after: { k: 1 } });
+      expect(containsObject(control.children)).toBe(false);
+      expect(controlAfter).toEqual({
+        propertyName: "after",
+        propertyType: "object",
+        children: [{ propertyName: "k", propertyType: "int" }],
+      });
     });
 
     test("a DAG of objects is cut off by the 10,000-property budget", () => {
@@ -354,16 +354,16 @@ describe("Schema Parsing", () => {
     });
 
     test("an array element past the expansion budget maps to the type string object", () => {
-      const list = Array.from({ length: 10001 }, () => ({ v: 1 }));
+      // Each element has its own property name, so no two expanded elements are equal.
+      const list = Array.from({ length: 10001 }, (_, i) => ({ ["v" + i]: 1 }));
 
       const [entry] = inspector.extractSchema({ list });
 
-      // Expanded elements are distinct arrays, so removeDuplicates keeps each; the
-      // "object" strings past the budget collapse into one.
+      // The "object" strings past the budget collapse into one.
       // The event properties object and the list count toward the 10,000: 9,998 expanded
       // elements, then one collapsed "object".
       expect(entry.children.length).toBe(9999);
-      expect(entry.children[0]).toEqual([{ propertyName: "v", propertyType: "int" }]);
+      expect(entry.children[0]).toEqual([{ propertyName: "v0", propertyType: "int" }]);
       expect(entry.children[entry.children.length - 1]).toBe("object");
     });
   });

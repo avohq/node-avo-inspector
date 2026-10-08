@@ -143,21 +143,39 @@ export class AvoSchemaParser {
     return mappedEventProps;
   }
 
+  // A list's children: each distinct child schema once, the first occurrence, in order. Children
+  // are compared by value (childKey), so equal elements, such as one Buffer repeated, leave one
+  // child. Only the output is deduplicated: every element was already mapped and counted
+  // toward the limits.
   private static removeDuplicates(array: Array<any>): Array<any> {
-    // XXX TODO fix any types
-    var primitives: any = { boolean: {}, number: {}, string: {} };
-    var objects: Array<any> = [];
-
+    const seen = new Set<string>();
     return array.filter((item: any) => {
-      var type: string = typeof item;
-      if (type in primitives) {
-        return primitives[type].hasOwnProperty(item)
-          ? false
-          : (primitives[type][item] = true);
-      } else {
-        return objects.indexOf(item) >= 0 ? false : objects.push(item);
+      const key = this.childKey(item);
+      if (seen.has(key)) {
+        return false;
       }
+      seen.add(key);
+      return true;
     });
+  }
+
+  // A canonical key for a child schema: a type string; an object's properties, sorted so that
+  // property order does not matter; or a nested list's children, in order.
+  private static childKey(child: any): string {
+    if (typeof child === "string") {
+      return JSON.stringify(child);
+    }
+    if (child.length > 0 && !isArray(child[0]) && typeof child[0] === "object") {
+      const properties = child.map(
+        (entry: any) =>
+          JSON.stringify(entry.propertyName) +
+          ":" +
+          JSON.stringify(entry.propertyType) +
+          (entry.children !== undefined ? ":" + this.childKey(entry.children) : "")
+      );
+      return "{" + properties.sort().join(",") + "}";
+    }
+    return "[" + child.map((element: any) => this.childKey(element)).join(",") + "]";
   }
 
 

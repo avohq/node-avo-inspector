@@ -44,7 +44,7 @@ static extractSchema(eventProperties: { [propName: string]: any }): Array<{
    - A leaf property is emitted as `{ propertyType: "object", children: [] }` (even if it is an array).
    - A leaf list element is emitted as the string `"object"`.
    - Shared, non-cyclic references are re-expanded at each occurrence (ancestors are path-scoped), consuming budget each time.
-4. De-duplication: primitive-typed items (boolean/number/string) are de-duplicated by value; other items (entry arrays) by identity only, so structurally equal objects in a list each produce their own entry.
+4. De-duplication: a list's children hold each distinct child schema once, the first occurrence, in first-occurrence order (as in Java and Go). Children are compared by value through a canonical key (`childKey`): a type string by itself; an object's entries by name, type and children, sorted so property order does not matter; a nested list's children in order. A `Set` of keys keeps it linear in the output size (no pairwise compare). It runs on the mapped output only, so every element has already been expanded and counted toward `MAX_EXPANSIONS` and `MAX_PROPERTIES`; an empty object and an empty list both map to `[]` and so are one child.
 
 ### Type classification
 

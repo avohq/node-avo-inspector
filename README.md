@@ -151,6 +151,8 @@ A property cut off this way is reported as `"object"` with empty `children`; a l
 
 At most 10,000 properties are reported per call, counting nested ones; past that the remaining properties are left out, in the order the object lists them.
 
+A list's `children` hold each distinct element schema once, in the order they first appear: `[{ a: 1, b: "x" }, { b: "y", a: 2 }, { a: 3 }]` has two children, `[{a: int, b: string}]` and `[{a: int}]`, because objects with the same property names and types are equal whatever their property order. Every element still counts toward the limits above.
+
 Binary data is never walked byte by byte: a `Float32Array` or `Float64Array` is reported as `list(float)` with children `["float"]`, any other typed array, `Buffer` or `DataView` as `list(int)` with children `["int"]`, and an `ArrayBuffer` as `"object"` with empty `children`, whatever their size. Each one still counts as one value toward the limits above, like an object or a list: past them it is cut off and reported as `"object"`, as the Java and Go SDKs do.
 
 For example, an object that refers to itself:
