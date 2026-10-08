@@ -267,7 +267,7 @@ describe("wire protocol", () => {
   };
   const partialBodies: Array<[string, string]> = [
     ["parses as JSON", '{"samplingRate":0}'],
-    ["does not parse", '{"samplingRate":0'],
+    ["does not parse", '{"samplingRate":0.1'],
     ["is empty", ""],
   ];
 
