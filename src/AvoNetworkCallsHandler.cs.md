@@ -89,7 +89,7 @@ Sets the sticky `aborted` flag, empties the in-flight set and destroys each requ
    - status 200: parse the body as JSON; if it is non-null and `samplingRate` is a number in `[0, 1]`, adopt it. A parse failure is logged (when logging) and ignored.
    - any other status: logged (when logging).
    - Resolve with the HTTP status code in both cases (non-200 is not an error).
-9. A response that is aborted, errors or closes before its body is complete: reject with `"Request failed"`.
+9. A response that is aborted, errors or closes before its body is complete: its status already arrived and decides, as for an unparseable body. Log it (when logging), leave the sampling rate unchanged, and resolve with the status code, so a cut-off 200 counts as delivered and any other status as a non-200 (as in Java and Go).
 10. On request `error`: reject with the string `"Request failed"`. If creating the request throws synchronously (for example invalid request options), reject with `"Request failed"` too; nothing was started, so no request is tracked. The only rejection reasons are `"Request failed"` and `"Request timed out"`.
 11. Wall-clock timeout of 10 s for the whole request (unref'd timer): reject with `"Request timed out"` and destroy the request.
 

@@ -315,13 +315,15 @@ export class AvoNetworkCallsHandler {
             }
             finish(() => resolve(res.statusCode));
           });
-          // A response cut off mid-body emits neither "end" nor a request "error".
+          // A response cut off mid-body emits neither "end" nor a request "error". Its status
+          // already arrived and decides, as for an unparseable body: a 200 is delivered (the
+          // sampling rate is unchanged), anything else a non-200.
           const truncated = () => {
             if (!res.complete) {
               if (AvoInspector.shouldLog && !settled) {
-                console.error("Avo Inspector: [network] Response ended before its body was complete");
+                console.warn("Avo Inspector: [network] Response ended before its body was complete");
               }
-              finish(() => reject("Request failed"));
+              finish(() => resolve(res.statusCode));
             }
           };
           res.on("aborted", truncated);

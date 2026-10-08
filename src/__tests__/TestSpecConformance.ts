@@ -254,7 +254,7 @@ describe("wire protocol", () => {
     }
   });
 
-  test("a 200 response cut off after its headers fails the send promptly", async () => {
+  test("a 200 response cut off after its headers is delivered, promptly, with the sampling rate unchanged", async () => {
     responders.push((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "100" });
       res.write('{"samplingRate":1');
@@ -266,10 +266,37 @@ describe("wire protocol", () => {
     const body = handler.bodyForEventSchemaCall("", "E", [], null, null);
 
     const started = Date.now();
-    await expect(handler.callInspectorWithBatchBody([body])).rejects.toBe("Request failed");
+    await expect(handler.callInspectorWithBatchBody([body])).resolves.toBe(200);
     expect(Date.now() - started).toBeLessThan(5000);
     expect(handler.getSamplingRate()).toBe(0.5);
   }, 15_000);
+
+  test("a track whose 200 response is cut off resolves its schema and logs no failed send", async () => {
+    responders.push((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "100" });
+      res.write('{"samplingRate":0');
+      setTimeout(() => res.socket!.destroy(), 20);
+    });
+    const inspector = dev();
+
+    await expect(inspector.trackSchemaFromEvent("E", { a: 1 })).resolves.toEqual([
+      { propertyName: "a", propertyType: "int" },
+    ]);
+    expect(await inspector.flush(1000)).toBe(true);
+    const errors = (console.error as jest.Mock).mock.calls.map((args) => String(args[0]));
+    expect(errors.filter((line) => line.includes("sending failed") || line.includes("Request failed"))).toEqual([]);
+    expect(inspector.avoNetworkCallsHandler.getSamplingRate()).toBe(1);
+  });
+
+  test("a non-200 response cut off after its headers is a non-200", async () => {
+    responders.push((_req, res) => {
+      res.writeHead(503, { "Content-Type": "application/json", "Content-Length": "100" });
+      res.write("{");
+      setTimeout(() => res.socket!.destroy(), 20);
+    });
+
+    await expect(dev().trackSchemaFromEvent("E", { a: 1 })).resolves.toEqual([]);
+  });
 
   test("a 3xx is a non-200 response and is never followed", async () => {
     responders.push((_req, res) => {
