@@ -76,3 +76,26 @@ test.each([
   expect(canonical.length).toBe(length);
   expect(sha256(canonical)).toBe(digest);
 });
+
+// Parity fixture F1: numeric typed arrays are typed by element type (float32/float64 arrays in
+// Java and Go), never walked, so an empty one has the same type.
+test("F1, typed arrays by element type: structure and digest match Java and Go", () => {
+  const schema = AvoSchemaParser.extractSchema({
+    d: new Float64Array([0.5, 1.5]),
+    f: new Float32Array([0.5]),
+    e: new Float64Array([]),
+    b: Buffer.from([1, 2]),
+    i: new Int32Array([1, 2]),
+  });
+  expect(schema).toEqual([
+    { propertyName: "d", propertyType: "list(float)", children: ["float"] },
+    { propertyName: "f", propertyType: "list(float)", children: ["float"] },
+    { propertyName: "e", propertyType: "list(float)", children: ["float"] },
+    { propertyName: "b", propertyType: "list(int)", children: ["int"] },
+    { propertyName: "i", propertyType: "list(int)", children: ["int"] },
+  ]);
+
+  const canonical = canon(schema);
+  expect(canonical.length).toBe(123);
+  expect(sha256(canonical)).toBe("bd4dcad1a3f78a8bf7d1ad8a88c878beb77c6c59b6c40abfb7f2706df3433985");
+});

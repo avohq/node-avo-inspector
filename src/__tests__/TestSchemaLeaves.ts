@@ -3,8 +3,9 @@ import { AvoInspector } from "../AvoInspector";
 import { InspectorBody } from "../AvoNetworkCallsHandler";
 import { deepEquals } from "../utils";
 
-// Binary values are leaves: an ArrayBuffer view is list(int) with children ["int"] (as Java
-// and Go type byte arrays), never visited; an ArrayBuffer is an empty object. And at most 10,000 properties
+// Binary values are leaves: an ArrayBuffer view is typed by its element type (as Java and Go
+// type primitive arrays), list(float) with children ["float"] for a float view and list(int)
+// with ["int"] for any other, never visited; an ArrayBuffer is an empty object. And at most 10,000 properties
 // are emitted per extraction, at every depth.
 
 const MiB = 1024 * 1024;
@@ -26,14 +27,29 @@ describe("binary values", () => {
     ["Uint8Array", new Uint8Array(4), "list(int)", ["int"]],
     ["Int32Array", new Int32Array(4), "list(int)", ["int"]],
     ["BigInt64Array", new BigInt64Array(4), "list(int)", ["int"]],
-    ["Float64Array", new Float64Array(4), "list(int)", ["int"]],
-    ["Float32Array", new Float32Array(4), "list(int)", ["int"]],
+    ["BigUint64Array", new BigUint64Array(4), "list(int)", ["int"]],
+    ["Float64Array", new Float64Array([0.5, 1.5]), "list(float)", ["float"]],
+    ["Float32Array", new Float32Array([0.5]), "list(float)", ["float"]],
+    ["a Float64Array of whole numbers", new Float64Array([1, 2]), "list(float)", ["float"]],
+    ["an empty Float64Array", new Float64Array(0), "list(float)", ["float"]],
     ["DataView", new DataView(new ArrayBuffer(4)), "list(int)", ["int"]],
     ["an empty Uint8Array", new Uint8Array(0), "list(int)", ["int"]],
     ["ArrayBuffer", new ArrayBuffer(4 * MiB), "object", []],
     ["SharedArrayBuffer", new SharedArrayBuffer(16), "object", []],
   ])("%s", (_name, value, propertyType, children) => {
     expect(extract({ v: value })).toEqual([{ propertyName: "v", propertyType, children }]);
+  });
+
+  // Float16Array exists only in newer Node versions.
+  const Float16 = (globalThis as any).Float16Array;
+  (typeof Float16 === "function" ? test : test.skip)("Float16Array is list(float)", () => {
+    expect(extract({ v: new Float16(2) })).toEqual([{ propertyName: "v", propertyType: "list(float)", children: ["float"] }]);
+  });
+
+  test("a float view inside a list is a list of floats", () => {
+    expect(extract({ rows: [new Float64Array(2)] })).toEqual([
+      { propertyName: "rows", propertyType: "list(object)", children: [["float"]] },
+    ]);
   });
 
   test("a Buffer inside a list is a list of ints too", () => {

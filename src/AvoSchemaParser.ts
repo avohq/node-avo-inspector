@@ -7,10 +7,18 @@ let isComplex = (value: any): boolean => {
 };
 
 // Binary data is never enumerated (a Buffer has one indexed key per byte): an ArrayBuffer view
-// (Buffer, typed array, DataView) is list(int) with children ["int"], as Java and Go type byte
-// arrays; an ArrayBuffer or SharedArrayBuffer an object with no properties. It is still one
-// complex value: the leaf rules apply to it first, and mapping it costs one expansion.
-const binaryElementType = (value: any): string | null => (ArrayBuffer.isView(value) ? "int" : null);
+// is typed by its element type, as Java and Go type primitive arrays. A float view
+// (Float16Array, Float32Array, Float64Array) is list(float) with children ["float"], any other
+// (Buffer, integer typed array, DataView) list(int) with ["int"]; an ArrayBuffer or
+// SharedArrayBuffer is an object with no properties. It is still one complex value: the leaf
+// rules apply to it first, and mapping it costs one expansion.
+const FLOAT_VIEW_TAGS = ["[object Float16Array]", "[object Float32Array]", "[object Float64Array]"];
+const binaryElementType = (value: any): string | null => {
+  if (!ArrayBuffer.isView(value)) {
+    return null;
+  }
+  return FLOAT_VIEW_TAGS.indexOf(Object.prototype.toString.call(value)) >= 0 ? "float" : "int";
+};
 const isArrayBufferLike = (value: any): boolean => {
   const tag = Object.prototype.toString.call(value);
   return tag === "[object ArrayBuffer]" || tag === "[object SharedArrayBuffer]";
