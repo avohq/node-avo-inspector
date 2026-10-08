@@ -208,6 +208,31 @@ describe("backpressure in an awaited loop", () => {
     expect(elapsedMs).toBeLessThan(110_000);
   }, 130_000);
 });
+describe("an awaited track whose send waits for a slot", () => {
+  test("batch size 1 (dev and prod): the hold resolves the call with its schema, and its event is sent or reported", async () => {
+    // 24 sends take every slot for 8 s each, so the awaited track's send starts only after
+    // its 30 s hold has run out.
+    trackDelayMs = 8000;
+    const script = (env: string) => `
+      const inspector = new AvoInspector({ apiKey: "k", env: "${env}", version: "1.0.0", batchSize: 1 });
+      inspector.enableLogging(false);
+      (async () => {
+        for (let i = 0; i < 24; i++) inspector.trackSchemaFromEvent("E" + i, { i });
+        const schema = await inspector.trackSchemaFromEvent("Awaited", { i: 24 });
+        console.log("AFTER AWAIT " + JSON.stringify(schema));
+      })();
+    `;
+    const runs = await Promise.all(["dev", "prod"].map((env) => runChild(script(env), 90_000)));
+
+    runs.forEach(({ code, stdout, stderr }) => {
+      expect(code).toBe(0);
+      expect(stdout).toContain('AFTER AWAIT [{"propertyName":"i","propertyType":"int"}]');
+      expect(reported(stderr, "unsent at exit")).toBeGreaterThanOrEqual(1);
+    });
+    expect(received.length + runs.reduce((sum, { stderr }) => sum + reported(stderr, "unsent at exit"), 0)).toBe(50);
+  }, 100_000);
+});
+
 describe("exit while a spec fetch hangs", () => {
   test("events already validated are sent; only the one still being validated is held back", async () => {
     const { stderr } = await runChild(`

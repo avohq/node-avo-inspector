@@ -28,8 +28,8 @@ const DEFAULT_BATCH_FLUSH_SECONDS = 30;
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_FLUSH_TIMEOUT_MS = 10_000;
 // The longest a track call can stay pending on its own work: a spec fetch (a socket wait
-// and the fetch, 10 s each), then, in dev, its send (10 s). A backpressure wait has its own
-// ref'd timer.
+// and the fetch, 10 s each), then, in dev, its send (10 s). A send that also waits for a
+// free slot can take longer; the call then resolves with its schema when the hold runs out.
 const AWAITED_TRACK_HOLD_MS = 30_000;
 
 // A track call's promise that notices when someone awaits it. The SDK's sockets and
@@ -38,7 +38,9 @@ const AWAITED_TRACK_HOLD_MS = 30_000;
 // the exit drain could end the process before the loop resumes. Once the promise is
 // awaited (await, then, catch, finally, Promise.all all call then), a ref'd timer holds the
 // process until it settles, at most AWAITED_TRACK_HOLD_MS; a fire-and-forget call with
-// .catch() counts. A call whose promise nothing touches holds nothing.
+// .catch() counts. A call whose promise nothing touches holds nothing. A call still pending
+// when its hold runs out resolves with `onHoldExpired()`, so the script resumes; its event
+// stays queued, and goes out with the exit drain or is reported as lost at exit.
 class AwaitedTrackPromise<T> extends Promise<T> {
   static get [Symbol.species]() {
     return Promise;
@@ -59,7 +61,7 @@ class AwaitedTrackPromise<T> extends Promise<T> {
   }
 }
 
-const holdWhileAwaited = <T>(work: Promise<T>): Promise<T> => {
+const holdWhileAwaited = <T>(work: Promise<T>, onHoldExpired: () => T): Promise<T> => {
   let settled = false;
   let hold: ReturnType<typeof setTimeout> | null = null;
   const done = () => {
@@ -69,7 +71,9 @@ const holdWhileAwaited = <T>(work: Promise<T>): Promise<T> => {
       hold = null;
     }
   };
+  let release: (value: T) => void = () => {};
   const tracked = new AwaitedTrackPromise<T>((resolve, reject) => {
+    release = resolve;
     work.then(
       (value) => {
         done();
@@ -83,7 +87,11 @@ const holdWhileAwaited = <T>(work: Promise<T>): Promise<T> => {
   });
   tracked.onFirstAwait = () => {
     if (!settled) {
-      hold = setTimeout(() => {}, AWAITED_TRACK_HOLD_MS);
+      hold = setTimeout(() => {
+        hold = null;
+        settled = true;
+        release(onHoldExpired());
+      }, AWAITED_TRACK_HOLD_MS);
     }
   };
   return tracked;
@@ -128,6 +136,10 @@ type SchemaEntry = {
   propertyType: string;
   children?: any;
 };
+
+// What a track call resolves with if its hold runs out first (holdWhileAwaited): the
+// event's schema, once extracted.
+type TrackCall = { schema: Array<SchemaEntry> };
 
 type SendOutcome = "ok" | "non200" | "failed";
 
@@ -631,7 +643,11 @@ export class AvoInspector {
     streamId?: string,
     options?: TrackOptions
   ): Promise<Array<SchemaEntry>> {
-    return holdWhileAwaited(this.track(eventName, eventProperties, false, null, null, streamId, options));
+    const call: TrackCall = { schema: [] };
+    return holdWhileAwaited(
+      this.track(eventName, eventProperties, false, null, null, streamId, options, call),
+      () => call.schema
+    );
   }
 
   /**
@@ -646,7 +662,11 @@ export class AvoInspector {
     streamId?: string,
     options?: TrackOptions
   ): Promise<Array<SchemaEntry>> {
-    return holdWhileAwaited(this.track(eventName, eventProperties, true, eventId, eventHash, streamId, options));
+    const call: TrackCall = { schema: [] };
+    return holdWhileAwaited(
+      this.track(eventName, eventProperties, true, eventId, eventHash, streamId, options, call),
+      () => call.schema
+    );
   }
 
   // Shared by the manual and Codegen entry points.
@@ -657,7 +677,8 @@ export class AvoInspector {
     eventId: string | null,
     eventHash: string | null,
     streamId: string | undefined,
-    options: TrackOptions | undefined
+    options: TrackOptions | undefined,
+    call: TrackCall
   ): Promise<Array<SchemaEntry>> {
     AvoInspector.lastTrackAt = monotonicNowMs();
     try {
@@ -678,6 +699,7 @@ export class AvoInspector {
         this.shouldRegisterEvent(eventName, eventProperties, fromAvoFunction, anonymousId, trackOptions)
       ) {
         let eventSchema = this.extractSchema(eventProperties, false);
+        call.schema = eventSchema;
         if (AvoInspector.shouldLog) {
           // The schema (names and types), never the values: the logging flag is shared by
           // every instance, so a prod instance can log once any dev instance turns it on.
