@@ -59,7 +59,7 @@ async function expectSentUnvalidated(inspector: AvoInspector, sent: InspectorBod
 test("a cache miss whose validation throws sends the event unvalidated", async () => {
   const { inspector, sent } = staging();
 
-  const track = inspector.trackSchemaFromEvent("Throws", throwsOnSecondRead(), "s1");
+  const track = inspector.trackSchemaFromEvent({ eventName: "Throws", eventProperties: throwsOnSecondRead(), streamId: "s1" });
 
   await expectSentUnvalidated(inspector, sent, track);
   inspector.destroy();
@@ -68,11 +68,11 @@ test("a cache miss whose validation throws sends the event unvalidated", async (
 test("a cache hit whose validation throws behaves the same", async () => {
   const { inspector, sent } = staging();
   // Caches the spec for ("Throws", "s1").
-  await inspector.trackSchemaFromEvent("Throws", { a: "x" }, "s1");
+  await inspector.trackSchemaFromEvent({ eventName: "Throws", eventProperties: { a: "x" }, streamId: "s1" });
   await inspector.flush();
   sent.length = 0;
 
-  const track = inspector.trackSchemaFromEvent("Throws", throwsOnSecondRead(), "s1");
+  const track = inspector.trackSchemaFromEvent({ eventName: "Throws", eventProperties: throwsOnSecondRead(), streamId: "s1" });
 
   await expectSentUnvalidated(inspector, sent, track);
   inspector.destroy();
@@ -84,7 +84,7 @@ describe("an error thrown while queueing", () => {
     // Fault injection: the queue throws when the event is added.
     (inspector as any).batchQueue.enqueue = () => { throw new RangeError("injected"); };
 
-    await expect(inspector.trackSchemaFromEvent("Throws", { a: "x" }, "s1"))
+    await expect(inspector.trackSchemaFromEvent({ eventName: "Throws", eventProperties: { a: "x" }, streamId: "s1" }))
       .rejects.toBe("Avo Inspector: something went wrong. Please report to support@avo.app.");
     expect(console.error).toHaveBeenCalledWith(
       "Avo Inspector: something went wrong. Please report to support@avo.app. (RangeError)"

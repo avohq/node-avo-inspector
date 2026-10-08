@@ -62,7 +62,7 @@ const dropLines = () => (console.warn as jest.Mock).mock.calls.map((c) => c.join
 test("an awaited 20,000-event loop delivers every event", async () => {
   const inspector = prod();
 
-  for (let i = 0; i < 20_000; i++) await inspector.trackSchemaFromEvent("E", { i });
+  for (let i = 0; i < 20_000; i++) await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { i } });
   await expect(inspector.flush()).resolves.toBe(true);
 
   expect(new Set(delivered).size).toBe(20_000);
@@ -76,7 +76,7 @@ test("tracks that are not awaited are unaffected: the backlog cap still applies"
   const inspector = prod();
 
   const started = Date.now();
-  for (let i = 0; i < 20_000; i++) inspector.trackSchemaFromEvent("E", { i });
+  for (let i = 0; i < 20_000; i++) inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { i } });
   expect(Date.now() - started).toBeLessThan(5_000);
 
   expect((inspector as any).batchQueue.waitingLength).toBeLessThanOrEqual(10_000);
@@ -90,7 +90,7 @@ test("50,000 calls that are not awaited, against hung sends, retain under one ba
   respond = () => {};
   const inspector = prod();
 
-  for (let i = 0; i < 50_000; i++) inspector.trackSchemaFromEvent("E", { i });
+  for (let i = 0; i < 50_000; i++) inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { i } });
 
   // Reaching the 10,000-event cap means the callers are not awaiting: every waiter is
   // released, and none is created while the backlog stays at the cap.
@@ -104,11 +104,11 @@ test("50,000 calls that are not awaited, against hung sends, retain under one ba
 test.each([0, 12_000])("an awaited loop is throttled against a hung endpoint, also after an un-awaited burst of %i", async (burst) => {
   respond = () => {};
   const inspector = prod();
-  for (let i = 0; i < burst; i++) inspector.trackSchemaFromEvent("Burst", { i });
+  for (let i = 0; i < burst; i++) inspector.trackSchemaFromEvent({ eventName: "Burst", eventProperties: { i } });
 
   let reached = 0;
   const loop = (async () => {
-    for (; reached < 3000; reached++) await inspector.trackSchemaFromEvent("Loop", { i: reached });
+    for (; reached < 3000; reached++) await inspector.trackSchemaFromEvent({ eventName: "Loop", eventProperties: { i: reached } });
   })();
   await new Promise((resolve) => setTimeout(resolve, 300));
 
@@ -127,7 +127,7 @@ test("against a hung endpoint, each awaited track waits about one request timeou
   let longest = 0;
   for (let i = 0; i < 1_500; i++) {
     const started = Date.now();
-    await inspector.trackSchemaFromEvent("E", { i });
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { i } });
     longest = Math.max(longest, Date.now() - started);
   }
 
@@ -144,11 +144,11 @@ test("destroy() releases a track waiting for a slot: it resolves []", async () =
   respond = () => {};
   const inspector = prod();
   // 4 batches in flight and 1,000 events waiting.
-  for (let i = 0; i < (4 + 1_000 / 30 + 1) * 30; i++) inspector.trackSchemaFromEvent("E", { i });
+  for (let i = 0; i < (4 + 1_000 / 30 + 1) * 30; i++) inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { i } });
   expect((inspector as any).batchQueue.waitingLength).toBeGreaterThanOrEqual(1_000);
 
   let result: any = "pending";
-  inspector.trackSchemaFromEvent("Waiting", { a: 1 }).then((r) => { result = r; });
+  inspector.trackSchemaFromEvent({ eventName: "Waiting", eventProperties: { a: 1 } }).then((r) => { result = r; });
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(result).toBe("pending");
 

@@ -18,13 +18,24 @@ test("the built declarations type-check with skipLibCheck off", () => {
   // A user's code, against the published signatures.
   const consumer = join(outDir, "consumer.ts");
   writeFileSync(consumer, [
-    `import { AvoInspector } from "./index";`,
+    `import { AvoInspector, InspectorEvent } from "./index";`,
     `async function drain(inspector: AvoInspector): Promise<void> {`,
     `  const drained: boolean = await inspector.flush(1000);`,
     `  while (!(await inspector.flush())) {}`,
     `  void drained;`,
     `}`,
+    `async function track(inspector: AvoInspector): Promise<void> {`,
+    `  const event: InspectorEvent = { eventName: "Purchase", eventProperties: { amount: 42 }, originHint: "web" };`,
+    `  await inspector.trackSchemaFromEvent(event);`,
+    `  await inspector.trackSchemaFromEvent({ eventName: "Purchase" });`,
+    `  // @ts-expect-error The 1.x positional form no longer type-checks.`,
+    `  await inspector.trackSchemaFromEvent("Purchase", { amount: 42 });`,
+    `  // @ts-expect-error A misspelt key is an excess property on an object literal.`,
+    `  await inspector.trackSchemaFromEvent({ eventName: "Purchase", outputRef: "o" });`,
+    `  await inspector._avoFunctionTrackSchemaFromEvent("Purchase", {}, "id", "hash", "s", { originHint: "web" });`,
+    `}`,
     `void drain;`,
+    `void track;`,
   ].join("\n"));
 
   const result = spawnSync(...tsc([

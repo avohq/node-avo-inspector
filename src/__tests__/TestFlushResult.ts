@@ -27,7 +27,7 @@ test("an empty instance has drained", async () => {
 test("a normal send drains", async () => {
   const inspector = staging();
   const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
-  await inspector.trackSchemaFromEvent("E", { a: 1 });
+  await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } });
 
   await expect(inspector.flush()).resolves.toBe(true);
   expect(send).toHaveBeenCalledTimes(1);
@@ -37,7 +37,7 @@ test("a normal send drains", async () => {
 test("a hung send makes a short flush report false; once it completes, flush reports true", async () => {
   const inspector = staging();
   const release = hungSends(inspector);
-  await inspector.trackSchemaFromEvent("E", { a: 1 });
+  await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } });
 
   await expect(inspector.flush(100)).resolves.toBe(false);
 
@@ -49,7 +49,7 @@ test("a hung send makes a short flush report false; once it completes, flush rep
 test("flush(0) starts the sends and reports false while they are in flight", async () => {
   const inspector = staging();
   const release = hungSends(inspector);
-  await inspector.trackSchemaFromEvent("E", { a: 1 });
+  await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } });
 
   await expect(inspector.flush(0)).resolves.toBe(false);
   expect(inspector.avoNetworkCallsHandler.callInspectorWithBatchBody).toHaveBeenCalledTimes(1);
@@ -62,7 +62,7 @@ test("flush(0) starts the sends and reports false while they are in flight", asy
 test("a destroyed instance has nothing pending", async () => {
   const inspector = staging();
   hungSends(inspector);
-  await inspector.trackSchemaFromEvent("E", { a: 1 });
+  await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } });
   inspector.flush(0);
 
   inspector.destroy();

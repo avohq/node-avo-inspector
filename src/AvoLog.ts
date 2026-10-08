@@ -13,7 +13,7 @@ import { monotonicNowMs } from "./utils";
 // "exit" listener prints the rest, synchronously, when the process really exits.
 
 const WINDOW_MS = 10_000;
-// How much of an unknown gateway option's name is printed (unknownGatewayOptions).
+// How much of an unknown InspectorEvent key's name is printed (unknownEventKeys).
 const MAX_LOGGED_OPTION_KEYS = 5;
 const MAX_LOGGED_OPTION_KEY_LENGTH = 64;
 
@@ -141,21 +141,36 @@ export class AvoLog {
   }
 
   /**
-   * A track call's options object with keys the SDK does not know (a typo such as
-   * `outputRef`). Only the key names are printed, JSON-quoted, at most
+   * A tracked InspectorEvent with keys the SDK does not know (a typo such as `outputRef` or
+   * `eventname`). Only the key names are printed, JSON-quoted, at most
    * MAX_LOGGED_OPTION_KEYS of them, each cut to MAX_LOGGED_OPTION_KEY_LENGTH characters;
    * never a value.
    */
-  static unknownGatewayOptions(keys: string[], known: string[]): void {
+  static unknownEventKeys(keys: string[], known: string[]): void {
     const names = keys
       .slice(0, MAX_LOGGED_OPTION_KEYS)
       .map((key) => JSON.stringify(key.length > MAX_LOGGED_OPTION_KEY_LENGTH ? key.slice(0, MAX_LOGGED_OPTION_KEY_LENGTH) + "…" : key))
       .join(", ") + (keys.length > MAX_LOGGED_OPTION_KEYS ? ", …" : "");
-    AvoLog.occur("unknown-gateway-options", 1, (_total, more, seconds) => {
+    AvoLog.occur("unknown-event-keys", 1, (_total, more, seconds) => {
       AvoLog.write(
         "warn",
-        "[Avo Inspector] Warning: unknown gateway option(s) " + names + " ignored; the known options are " +
+        "[Avo Inspector] Warning: unknown InspectorEvent key(s) " + names + " ignored; the known keys are " +
           known.join(", ") + AvoLog.suffix(more, seconds)
+      );
+    });
+  }
+
+  /**
+   * trackSchemaFromEvent called with something other than an InspectorEvent object, such
+   * as a 1.x call with the event name first. Nothing about the argument is printed.
+   */
+  static notAnInspectorEvent(): void {
+    AvoLog.occur("not-an-inspector-event", 1, (_total, more, seconds) => {
+      AvoLog.write(
+        "error",
+        "[Avo Inspector] Error: since 2.0.0, trackSchemaFromEvent takes one InspectorEvent object; nothing was sent. " +
+          "Replace trackSchemaFromEvent(eventName, eventProperties) with trackSchemaFromEvent({ eventName, eventProperties })." +
+          AvoLog.suffix(more, seconds)
       );
     });
   }

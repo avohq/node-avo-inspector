@@ -88,7 +88,7 @@ function runChild(script: string, target: string = endpoint): Promise<{ elapsedM
 
 const trackWithoutFlush = `
   const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
-  inspector.trackSchemaFromEvent("Exit Event", { a: 1 });
+  inspector.trackSchemaFromEvent({ eventName: "Exit Event", eventProperties: { a: 1 } });
 `;
 
 describe("exit against an endpoint that never answers", () => {
@@ -129,7 +129,7 @@ describe("exit against an endpoint that never answers", () => {
       const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
       const hold = setInterval(() => {}, 1000);
       const tracks = [];
-      for (let i = 0; i < 45; i++) tracks.push(inspector.trackSchemaFromEvent("E" + i, { i }));
+      for (let i = 0; i < 45; i++) tracks.push(inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { i } }));
       Promise.all(tracks).then(() => clearInterval(hold));
     `, hungEndpoint);
 
@@ -166,7 +166,7 @@ describe("exit while a spec fetch hangs", () => {
     await runChild(`
       const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 3 });
       (async () => {
-        for (let i = 0; i < 4; i++) await inspector.trackSchemaFromEvent("E" + i, { i });
+        for (let i = 0; i < 4; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { i } });
       })();
     `);
     // One size-triggered batch of 3, then the 1-event tail at the exit: not 4 single sends.
@@ -236,7 +236,7 @@ describe("events still unsent at exit are logged", () => {
       // Held open while validating, so no idle point lets the exit drain send early.
       setInterval(() => {}, 1000);
       (async () => {
-        for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent("E" + i, { i });
+        for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { i } });
         process.exit(0);
       })();
     `, slowEndpoint);
@@ -250,7 +250,7 @@ describe("events still unsent at exit are logged", () => {
     const { stderr } = await runChild(`
       const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
       // Not awaited, and nothing holds the process: the exit drain starts at once.
-      for (let i = 0; i < 3000; i++) inspector.trackSchemaFromEvent("E" + i, { i });
+      for (let i = 0; i < 3000; i++) inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { i } });
     `, slowEndpoint);
 
     const lines = exitLines(stderr);
@@ -302,7 +302,7 @@ describe("exit while an explicit long flush() runs", () => {
     // flush's 20 s but past the exit drain's own 10 s.
     const { stdout, elapsedMs } = await runChild(`
       const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 1 });
-      for (let i = 0; i < 5; i++) inspector.trackSchemaFromEvent("E" + i, { i });
+      for (let i = 0; i < 5; i++) inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { i } });
       inspector.flush(20000).then(() => console.log("FLUSHED"));
     `, slowEndpoint);
 
@@ -339,7 +339,7 @@ describe("drain on beforeExit", () => {
       process.on("warning", (w) => { process.stderr.write("WARNING " + w.name + "\\n"); process.exitCode = 3; });
       for (let i = 0; i < 25; i++) {
         const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
-        inspector.trackSchemaFromEvent("E" + i, {});
+        inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
       }
       if (process.listenerCount("beforeExit") !== 1) process.exitCode = 4;
     `;
@@ -370,7 +370,7 @@ describe("exit hook registration", () => {
     );
     expect(counts()).toEqual(before);
 
-    await Promise.all(inspectors.map((inspector) => inspector.trackSchemaFromEvent("E", {})));
+    await Promise.all(inspectors.map((inspector) => inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: {} })));
     // One beforeExit drain and one exit report; never a signal handler.
     expect(counts()).toEqual([before[0] + 1, before[1] + 1, before[2], before[3]]);
 
@@ -395,7 +395,7 @@ describe("exit deadline", () => {
   test("a stale deadline from an earlier beforeExit does not skip the next drain", async () => {
     const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30, disableBatchTimer: true });
     const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
-    await inspector.trackSchemaFromEvent("E", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: {} });
     // An earlier exit drain left its deadline behind a minute ago.
     (AvoInspector as any).exitDeadline = require("../utils").monotonicNowMs() - 60_000;
 
@@ -417,7 +417,7 @@ describe("exit deadline", () => {
     inspector.enableLogging(false);
     // A send that never completes.
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockImplementation(() => new Promise(() => {}));
-    await inspector.trackSchemaFromEvent("E", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: {} });
 
     (AvoInspector as any).drainOnExit();
     const deadline = (AvoInspector as any).exitDeadline;
@@ -434,7 +434,7 @@ describe("exit deadline", () => {
     const now = () => require("../utils").monotonicNowMs();
     const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30, disableBatchTimer: true });
     const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
-    await inspector.trackSchemaFromEvent("E", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: {} });
     // The exit drain's deadline passed 5 s ago while the app's own beforeExit work kept the
     // loop alive; the last track was before it.
     (AvoInspector as any).exitDeadline = now() - 5_000;
@@ -445,7 +445,7 @@ describe("exit deadline", () => {
     expect(send).not.toHaveBeenCalled();
 
     // A track after the deadline means the process carried on: the next exit gets a new one.
-    await inspector.trackSchemaFromEvent("F", {});
+    await inspector.trackSchemaFromEvent({ eventName: "F", eventProperties: {} });
     (AvoInspector as any).drainOnExit();
     await new Promise((resolve) => setImmediate(resolve));
     expect(send).toHaveBeenCalledTimes(1);

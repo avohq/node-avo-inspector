@@ -27,11 +27,11 @@ test("an event name with a lone surrogate, logging on: every track settles, on a
 
   // Two concurrent cache misses of the same key, then a cache hit.
   const misses = [
-    inspector.trackSchemaFromEvent(BROKEN_NAME, { a: 1 }, "s"),
-    inspector.trackSchemaFromEvent(BROKEN_NAME, { a: 1 }, "s"),
+    inspector.trackSchemaFromEvent({ eventName: BROKEN_NAME, eventProperties: { a: 1 }, streamId: "s" }),
+    inspector.trackSchemaFromEvent({ eventName: BROKEN_NAME, eventProperties: { a: 1 }, streamId: "s" }),
   ];
   await expect(settledWithin(Promise.all(misses), 3000)).resolves.toBe(true);
-  await expect(settledWithin(inspector.trackSchemaFromEvent(BROKEN_NAME, { a: 1 }, "s"), 3000)).resolves.toBe(true);
+  await expect(settledWithin(inspector.trackSchemaFromEvent({ eventName: BROKEN_NAME, eventProperties: { a: 1 }, streamId: "s" }), 3000)).resolves.toBe(true);
 
   expect((AvoInspector as any).waitingValidations).toBe(0);
   await expect(inspector.flush(1000)).resolves.toBe(true);
@@ -44,7 +44,7 @@ test("a fetch() that throws frees the waiting slot and the event is sent unvalid
   const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", disableBatchTimer: true });
   const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
 
-  await expect(inspector.trackSchemaFromEvent("E", { a: 1 }, "s")).resolves.toHaveLength(1);
+  await expect(inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 }, streamId: "s" })).resolves.toHaveLength(1);
   expect((AvoInspector as any).waitingValidations).toBe(0);
   await expect(inspector.flush()).resolves.toBe(true);
   expect(send.mock.calls[0][0][0].eventSpecMetadata).toBeUndefined();

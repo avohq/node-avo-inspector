@@ -27,7 +27,7 @@ test.each([
   jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
     .mockImplementation((batch) => { sent.push(...batch); return Promise.resolve(200); });
 
-  const schema: any[] = await inspector.trackSchemaFromEvent("E", { a: 1, b: [{ x: 1 }] }, "s");
+  const schema: any[] = await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1, b: [{ x: 1 }] }, streamId: "s" });
   schema[0].propertyType = "MUTATED";
   schema[1].children[0] = "MUTATED";
   schema.pop();

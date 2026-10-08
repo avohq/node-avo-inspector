@@ -40,10 +40,10 @@ Output envelope: `{ fixture_id, passed, actual, outcome: "resolve" | "reject", e
    - `trackSchemaFromEvent`: await the call; `actual` = resolved value or rejection reason, `outcome` accordingly.
    - `sequence`: steps run in order and each appends `{ action, outcome, value }` to `actual`:
      - `track`: settled like `trackSchemaFromEvent`.
-     - `trackN`: starts `count` calls `trackSchemaFromEvent("<prefix><i>", {}, streamId ?? "")` concurrently, awaits all; `value: count`.
+     - `trackN`: starts `count` calls `trackSchemaFromEvent({ eventName: "<prefix><i>", eventProperties: {}, streamId: streamId ?? "" })` concurrently, awaits all; `value: count`.
      - `flush`: awaits `flush()` or `flush(timeoutMs)`; `value` = the boolean it resolves to (`true` drained, `false` the timeout won).
      - `destroy`: calls `destroy()`; `value: null`.
-7. Trailing optional arguments not supplied by the fixture are omitted from the `trackSchemaFromEvent` call (`streamId`, `options`); `options` is passed verbatim.
+7. The fixture's track input is passed as one InspectorEvent: `{ eventName, eventProperties }`, plus `streamId` only when the fixture supplies it, with `options` (when supplied) spread in verbatim. Fixture JSON is unchanged.
 8. Success envelopes have `passed: true`, `error: null`, exit 0.
 
 ## Non-functional requirements

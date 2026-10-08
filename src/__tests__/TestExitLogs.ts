@@ -70,7 +70,7 @@ const remainder = (count: number) => new RegExp(`^Avo Inspector: ${count} batch\
 test("idle points between awaited flushes do not print; the real exit prints the remainder", async () => {
   const lines = await rejectedLines(`
     (async () => {
-      for (let k = 0; k < 50; k++) { await j.trackSchemaFromEvent("E", { a: 1 }); await j.flush(5000); }
+      for (let k = 0; k < 50; k++) { await j.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } }); await j.flush(5000); }
     })();
   `);
 
@@ -83,10 +83,10 @@ test("a burst followed by a natural exit prints the remainder", async () => {
   const lines = await rejectedLines(`
     (async () => {
       const tracks = [];
-      for (let k = 0; k < 10; k++) tracks.push(j.trackSchemaFromEvent("E" + k, { a: k }));
+      for (let k = 0; k < 10; k++) tracks.push(j.trackSchemaFromEvent({ eventName: "E" + k, eventProperties: { a: k } }));
       await Promise.all(tracks);
       await j.flush(5000);
-      for (let k = 0; k < 9; k++) await j.trackSchemaFromEvent("F" + k, { a: k }).then(() => j.flush(5000));
+      for (let k = 0; k < 9; k++) await j.trackSchemaFromEvent({ eventName: "F" + k, eventProperties: { a: k } }).then(() => j.flush(5000));
     })();
   `);
 
@@ -99,7 +99,7 @@ test("with a keepalive interval the output is the same", async () => {
   const lines = await rejectedLines(`
     const keepalive = setInterval(() => {}, 1000);
     (async () => {
-      for (let k = 0; k < 50; k++) { await j.trackSchemaFromEvent("E", { a: 1 }); await j.flush(5000); }
+      for (let k = 0; k < 50; k++) { await j.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } }); await j.flush(5000); }
       clearInterval(keepalive);
     })();
   `);
@@ -110,7 +110,7 @@ test("with a keepalive interval the output is the same", async () => {
 test("process.exit() also prints the remainder", async () => {
   const lines = await rejectedLines(`
     (async () => {
-      for (let k = 0; k < 50; k++) { await j.trackSchemaFromEvent("E", { a: 1 }); await j.flush(5000); }
+      for (let k = 0; k < 50; k++) { await j.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } }); await j.flush(5000); }
       process.exit(0);
     })();
   `);

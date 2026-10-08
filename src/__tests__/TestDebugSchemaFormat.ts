@@ -27,7 +27,7 @@ test("the parsed and saved debug lines print the schema", async () => {
   inspector.enableLogging(true);
   jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
 
-  await inspector.trackSchemaFromEvent("E", { a: 1, b: "x" });
+  await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1, b: "x" } });
   inspector.destroy();
 
   expect(lines()).toContain("Avo Inspector: Parsed schema " + printed);

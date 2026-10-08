@@ -89,7 +89,7 @@ describe("default endpoint", () => {
     const urls = stubHttps();
     const inspector = create("dev");
 
-    await inspector.trackSchemaFromEvent("E", { a: 1 });
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } });
 
     const tracks = urls.filter((url) => !url.includes("/trackingPlan/"));
     expect(tracks).toEqual([trackingEndpoint]);
@@ -105,7 +105,7 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     process.env.AVO_INSPECTOR_MOCK_ENDPOINT = `http://127.0.0.1:${port}/private/path?token=abc`;
     const inspector = create("dev");
 
-    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
 
     expect(requests).toHaveLength(5);
     expect(warningsAbout(console.warn)).toEqual([
@@ -123,7 +123,7 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     const inspector = create("dev");
     inspector.enableLogging(true);
 
-    await inspector.trackSchemaFromEvent("E", { a: 1 });
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } });
 
     const logged = (console.log as jest.Mock).mock.calls.map((call) => call.join(" "));
     expect(logged).toContain(`Avo Inspector: [network] POST http://127.0.0.1:${port}`);
@@ -139,8 +139,8 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     const urls = stubHttps();
     const inspector = create("dev");
 
-    await expect(inspector.trackSchemaFromEvent("E1", { a: 1 })).resolves.toHaveLength(1);
-    await expect(inspector.trackSchemaFromEvent("E2", { a: 1 })).resolves.toHaveLength(1);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: { a: 1 } })).resolves.toHaveLength(1);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: { a: 1 } })).resolves.toHaveLength(1);
 
     expect(urls.filter((url) => url.endsWith("/inspector/v2/track"))).toEqual([
       "https://api.avo.app/inspector/v2/track",
@@ -182,7 +182,7 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockImplementation((batch) => { sent.push(...batch); return Promise.resolve(200); });
 
-    await inspector.trackSchemaFromEvent("Spec Event", { a: "x" }, "stream-1");
+    await inspector.trackSchemaFromEvent({ eventName: "Spec Event", eventProperties: { a: "x" }, streamId: "stream-1" });
     await inspector.flush();
 
     // The mock's origin, the spec path, and the usual query; never the override's own path.
@@ -202,7 +202,7 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     const read = jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor");
     const inspector = new AvoInspector({ apiKey: "secret-key-123", env: "dev", version: "1.0.0" });
 
-    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, { a: "x" });
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { a: "x" } });
     await inspector.flush();
 
     expect(requests).toHaveLength(5);
@@ -215,7 +215,7 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     const inspector = create("staging");
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
 
-    await inspector.trackSchemaFromEvent("E", { a: "x" }, "s");
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: "x" }, streamId: "s" });
 
     // An answered fetch (even with no spec) is cached; a failed one is not.
     expect((inspector as any).eventSpecCache.get("secret-key-123\0s\0E")).toBeDefined();
@@ -227,7 +227,7 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
     const urls = stubHttps();
     const inspector = create("prod");
 
-    await inspector.trackSchemaFromEvent("E", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: {} });
     await inspector.flush();
 
     expect(urls).toEqual(["https://api.avo.app/inspector/v2/track"]);

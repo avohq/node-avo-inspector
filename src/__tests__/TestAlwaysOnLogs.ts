@@ -60,12 +60,12 @@ describe("always-on data-loss lines, logging off", () => {
   test("a buffer overflow burst logs one line per window, then the suppressed total", async () => {
     const inspector = staging({ batchSize: 30, maxQueueSize: 2 });
 
-    for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent("E" + i, { email: MARKER });
+    for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { email: MARKER } });
     // (The constructor's batchSize > maxQueueSize warning is a separate line.)
     expect(matching(/^Avo Inspector: dropped/)).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 1s."]);
 
     now += 10_000;
-    await inspector.trackSchemaFromEvent("E10", { email: MARKER });
+    await inspector.trackSchemaFromEvent({ eventName: "E10", eventProperties: { email: MARKER } });
     // 7 counted in the first window, plus this one.
     expect(matching(/^Avo Inspector: dropped/)).toEqual([
       "Avo Inspector: dropped 1 event(s) (queue full) in the last 1s.",
@@ -81,13 +81,13 @@ describe("always-on data-loss lines, logging off", () => {
 
     // 4 batches (120 events) in flight, then 10,000 events may wait; the drain that first
     // exceeds it drops 20.
-    for (let i = 0; i < 12_000; i++) inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 12_000; i++) inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     expect(matching(/send backlog full/)).toEqual([
       "Avo Inspector: dropped 20 event(s) (send backlog full) in the last 1s.",
     ]);
 
     now += 10_000;
-    for (let i = 0; i < 30; i++) inspector.trackSchemaFromEvent("F" + i, {});
+    for (let i = 0; i < 30; i++) inspector.trackSchemaFromEvent({ eventName: "F" + i, eventProperties: {} });
     const queue = (inspector as any).batchQueue;
     const totalDropped = 12_030 - 120 - queue.waitingLength - queue.length;
     expect(matching(/send backlog full/)[1]).toBe(
@@ -102,14 +102,14 @@ describe("always-on data-loss lines, logging off", () => {
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockImplementation(() => Promise.resolve(statuses.shift() ?? 500));
 
-    for (let i = 0; i < 6; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 6; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     expect(matching(/rejected/)).toEqual([
       "Avo Inspector: 1 batch(es) rejected with HTTP 500 in the last 1s.",
       "Avo Inspector: 1 batch(es) rejected with HTTP 400 in the last 1s.",
     ]);
 
     now += 10_000;
-    await inspector.trackSchemaFromEvent("E6", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E6", eventProperties: {} });
     expect(matching(/HTTP 500/)[1]).toBe("Avo Inspector: 4 batch(es) rejected with HTTP 500 in the last 10s.");
     inspector.destroy();
   });
@@ -118,11 +118,11 @@ describe("always-on data-loss lines, logging off", () => {
     const inspector = staging({ batchSize: 1 });
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockRejectedValue("Request failed");
 
-    for (let i = 0; i < 50; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 50; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     expect(matching(/schema sending failed/)).toEqual(["Avo Inspector: schema sending failed: Request failed."]);
 
     now += 10_000;
-    await inspector.trackSchemaFromEvent("E50", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E50", eventProperties: {} });
     expect(matching(/schema sending failed/)[1]).toBe(
       "Avo Inspector: schema sending failed: Request failed. (49 more in the last 10s)"
     );
@@ -134,7 +134,7 @@ describe("always-on data-loss lines, logging off", () => {
     inspector._setSamplingRateForTesting(0);
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
 
-    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent("E" + i, { email: MARKER });
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { email: MARKER } });
 
     expect(lines).toEqual([]);
     inspector.destroy();
@@ -143,7 +143,7 @@ describe("always-on data-loss lines, logging off", () => {
   test("sends abandoned by destroy() are not logged", async () => {
     const inspector = staging({ batchSize: 1 });
     const releases = holdSends(inspector);
-    const tracks = Array.from({ length: 8 }, (_, i) => inspector.trackSchemaFromEvent("E" + i, {}));
+    const tracks = Array.from({ length: 8 }, (_, i) => inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} }));
 
     inspector.destroy();
     releases.forEach((release) => release(500));
@@ -159,7 +159,7 @@ describe("always-on data-loss lines, logging off", () => {
       .mockResolvedValueOnce(503)
       .mockRejectedValue("Request timed out");
 
-    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, { email: MARKER });
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { email: MARKER } });
 
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.join("\n")).not.toContain(API_KEY);
@@ -173,7 +173,7 @@ describe("the streamId ':' warning", () => {
     const inspector = staging({ batchSize: 30 });
     const warning = "[Avo Inspector] Warning: streamId contains ':' which is not supported";
 
-    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent("E" + i, {}, "user:" + i);
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {}, streamId: "user:" + i });
     expect(matching(/streamId contains ':'/)).toEqual([warning]);
 
     now += 10_000;
@@ -184,29 +184,30 @@ describe("the streamId ':' warning", () => {
   });
 });
 
-describe("unknown gateway option keys", () => {
-  const KNOWN = "the known options are outputReference, originHint, originAppVersion";
-  const captureSends = (inspector: AvoInspector) => {
-    const sent: InspectorBody[] = [];
-    jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
-      .mockImplementation((batch: Array<InspectorBody>) => {
-        sent.push(...batch);
-        return Promise.resolve(200);
-      });
-    return sent;
-  };
+const captureSends = (inspector: AvoInspector) => {
+  const sent: InspectorBody[] = [];
+  jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
+    .mockImplementation((batch: Array<InspectorBody>) => {
+      sent.push(...batch);
+      return Promise.resolve(200);
+    });
+  return sent;
+};
 
-  test("a typo is warned by key name only, and the event is still sent with the known options", async () => {
+describe("unknown InspectorEvent keys", () => {
+  const KNOWN = "the known keys are eventName, eventProperties, streamId, outputReference, originHint, originAppVersion";
+
+  test("a typo is warned by key name only, and the event is still sent with the known keys", async () => {
     const inspector = staging({ batchSize: 30, env: "prod" });
     const sent = captureSends(inspector);
 
     await expect(
-      inspector.trackSchemaFromEvent("E", { a: 1 }, undefined, { outputRef: MARKER, originHint: "web" } as any)
+      inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 }, outputRef: MARKER, originHint: "web" } as any)
     ).resolves.toEqual([{ propertyName: "a", propertyType: "int" }]);
     await inspector.flush();
 
-    expect(matching(/unknown gateway option/)).toEqual([
-      `[Avo Inspector] Warning: unknown gateway option(s) "outputRef" ignored; ${KNOWN}`,
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "outputRef" ignored; ${KNOWN}`,
     ]);
     expect(lines.join("\n")).not.toContain(MARKER);
     expect(sent).toHaveLength(1);
@@ -214,54 +215,142 @@ describe("unknown gateway option keys", () => {
     expect(sent[0]).not.toHaveProperty("outputReference");
   });
 
-  test("the known options alone, or none, print nothing", async () => {
+  test("a misspelt eventName is warned, and the event is sent as Missing Event Name", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await inspector.trackSchemaFromEvent({ eventname: "Signed Up", eventProperties: { a: 1 } } as any);
+    await inspector.flush();
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "eventname" ignored; ${KNOWN}`,
+    ]);
+    expect(sent.map((event) => event.eventName)).toEqual(["Missing Event Name"]);
+  });
+
+  test("every known key, or only some, print nothing", async () => {
     const inspector = staging({ batchSize: 30, env: "prod" });
     captureSends(inspector);
 
-    await inspector.trackSchemaFromEvent("E1", {}, undefined, { outputReference: "o", originHint: "web", originAppVersion: "1" });
-    await inspector.trackSchemaFromEvent("E2", {}, undefined, {});
-    await inspector.trackSchemaFromEvent("E3", {});
+    await inspector.trackSchemaFromEvent({
+      eventName: "E1", eventProperties: {}, streamId: "s", outputReference: "o", originHint: "web", originAppVersion: "1",
+    });
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
+    await inspector.trackSchemaFromEvent({ eventName: "E3" });
 
-    expect(matching(/unknown gateway option/)).toEqual([]);
+    expect(matching(/unknown InspectorEvent key/)).toEqual([]);
   });
 
   test("prints at most once per 10 s, then reports how many it suppressed", async () => {
     const inspector = staging({ batchSize: 30, env: "prod" });
     captureSends(inspector);
 
-    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent("E" + i, {}, undefined, { origin_hint: "web" } as any);
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {}, origin_hint: "web" } as any);
     now += 10_000;
-    // @ts-ignore The Codegen entry goes through the same path.
-    await inspector._avoFunctionTrackSchemaFromEvent("E20", {}, "id", "hash", undefined, { originAppVersoin: "1" });
+    await inspector.trackSchemaFromEvent({ eventName: "E20", originAppVersoin: "1" } as any);
 
-    expect(matching(/unknown gateway option/)).toEqual([
-      `[Avo Inspector] Warning: unknown gateway option(s) "origin_hint" ignored; ${KNOWN}`,
-      `[Avo Inspector] Warning: unknown gateway option(s) "originAppVersoin" ignored; ${KNOWN} (19 more in the last 10s)`,
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "origin_hint" ignored; ${KNOWN}`,
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "originAppVersoin" ignored; ${KNOWN} (19 more in the last 10s)`,
     ]);
   });
 
   test("many or long key names are capped, and names are quoted", async () => {
     const inspector = staging({ batchSize: 30, env: "prod" });
     captureSends(inspector);
-    const options: any = { ["x".repeat(100)]: 1, "a\nb": 2, k3: 3, k4: 4, k5: 5, k6: 6 };
+    const extra: any = { ["x".repeat(100)]: 1, "a\nb": 2, k3: 3, k4: 4, k5: 5, k6: 6 };
 
-    await inspector.trackSchemaFromEvent("E", {}, undefined, options);
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: {}, ...extra });
 
-    expect(matching(/unknown gateway option/)).toEqual([
-      `[Avo Inspector] Warning: unknown gateway option(s) "${"x".repeat(64)}…", "a\\nb", "k3", "k4", "k5", … ignored; ${KNOWN}`,
+    expect(matching(/unknown InspectorEvent key/)).toEqual([
+      `[Avo Inspector] Warning: unknown InspectorEvent key(s) "${"x".repeat(64)}…", "a\\nb", "k3", "k4", "k5", … ignored; ${KNOWN}`,
     ]);
   });
 
-  test.each(["dev", "staging", "prod"])("never throws (%s): a proxy whose key listing throws is tracked without a warning", async (env) => {
+  test.each(["dev", "staging", "prod"])("never throws (%s): an event whose key listing throws is tracked without a warning", async (env) => {
     const inspector = staging({ batchSize: 30, env });
     captureSends(inspector);
-    const options = new Proxy({}, { ownKeys: () => { throw new Error(MARKER); } });
+    const event = new Proxy({ eventName: "E", eventProperties: { a: 1 } }, { ownKeys: () => { throw new Error(MARKER); } });
 
-    await expect(inspector.trackSchemaFromEvent("E", { a: 1 }, undefined, options)).resolves.toEqual([
-      { propertyName: "a", propertyType: "int" },
-    ]);
-    expect(matching(/unknown gateway option|something went wrong/)).toEqual([]);
+    await expect(inspector.trackSchemaFromEvent(event)).resolves.toEqual([{ propertyName: "a", propertyType: "int" }]);
+    expect(matching(/unknown InspectorEvent key|something went wrong/)).toEqual([]);
     expect(lines.join("\n")).not.toContain(MARKER);
+  });
+
+  test("the Codegen entry point keeps its positional call and does not warn about its gateway fields", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await inspector._avoFunctionTrackSchemaFromEvent("E", { a: 1 }, "id", "hash", "s", { originHint: "web" });
+    await inspector.flush();
+
+    expect(matching(/unknown InspectorEvent key/)).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ eventName: "E", avoFunction: true, eventId: "id", eventHash: "hash", originHint: "web" });
+  });
+});
+
+describe("a track call that is not one InspectorEvent", () => {
+  const ERROR =
+    "[Avo Inspector] Error: since 2.0.0, trackSchemaFromEvent takes one InspectorEvent object; nothing was sent. " +
+    "Replace trackSchemaFromEvent(eventName, eventProperties) with trackSchemaFromEvent({ eventName, eventProperties }).";
+
+  test.each(["dev", "staging", "prod"])("a 1.x call (%s) sends nothing, resolves [] and prints the fix, without values", async (env) => {
+    const inspector = staging({ batchSize: 1, env });
+    const sent = captureSends(inspector);
+
+    // @ts-ignore The 1.x positional form, as an untyped JavaScript caller still writes it.
+    await expect(inspector.trackSchemaFromEvent(MARKER, { email: MARKER })).resolves.toEqual([]);
+    await inspector.flush();
+
+    expect(sent).toEqual([]);
+    expect(matching(/takes one InspectorEvent/)).toEqual([ERROR]);
+    expect(lines.join("\n")).not.toContain(MARKER);
+  });
+
+  test.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["a number", 7],
+    ["an array", [{ eventName: "E" }]],
+  ])("%s is not an event either", async (_name, value) => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await expect(inspector.trackSchemaFromEvent(value as any)).resolves.toEqual([]);
+    await inspector.flush();
+
+    expect(sent).toEqual([]);
+    expect(matching(/takes one InspectorEvent/)).toEqual([ERROR]);
+  });
+
+  test("prints at most once per 10 s, then reports how many it suppressed", async () => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    captureSends(inspector);
+
+    // @ts-ignore 1.x positional calls.
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, { i });
+    now += 10_000;
+    // @ts-ignore
+    await inspector.trackSchemaFromEvent("E5", {});
+
+    expect(matching(/takes one InspectorEvent/)).toEqual([ERROR, ERROR + " (4 more in the last 10s)"]);
+  });
+});
+
+describe("an InspectorEvent without properties", () => {
+  test.each([
+    ["absent", { eventName: "E" }],
+    ["null", { eventName: "E", eventProperties: null }],
+  ])("eventProperties %s: the event is sent with no properties", async (_name, event) => {
+    const inspector = staging({ batchSize: 30, env: "prod" });
+    const sent = captureSends(inspector);
+
+    await expect(inspector.trackSchemaFromEvent(event)).resolves.toEqual([]);
+    await inspector.flush();
+
+    expect(sent.map((e) => [e.eventName, e.eventProperties])).toEqual([["E", []]]);
+    expect(matching(/takes one InspectorEvent|unknown InspectorEvent key|something went wrong/)).toEqual([]);
   });
 });
 
@@ -338,7 +427,7 @@ describe("a missing event name", () => {
   ])("a %s event name is sent as \"Missing Event Name\", with one line", async (_label, eventName) => {
     const { inspector, sent } = dev();
 
-    await expect(inspector.trackSchemaFromEvent(eventName as any, { a: 1 })).resolves.toEqual(schema);
+    await expect(inspector.trackSchemaFromEvent({ eventName: eventName as any, eventProperties: { a: 1 } })).resolves.toEqual(schema);
 
     expect(sent.map((event) => [event.eventName, event.eventProperties])).toEqual([["Missing Event Name", schema]]);
     expect(matching(/without an event name/)).toEqual([line]);
@@ -359,9 +448,9 @@ describe("a missing event name", () => {
   test("the line is rate-limited and reports the suppressed count", async () => {
     const { inspector, sent } = dev();
 
-    for (let i = 0; i < 3; i++) await inspector.trackSchemaFromEvent("", { i });
+    for (let i = 0; i < 3; i++) await inspector.trackSchemaFromEvent({ eventName: "", eventProperties: { i } });
     now += 10_000;
-    await inspector.trackSchemaFromEvent(null as any, { i: 3 });
+    await inspector.trackSchemaFromEvent({ eventName: null as any, eventProperties: { i: 3 } });
 
     expect(sent).toHaveLength(4);
     expect(matching(/without an event name/)).toEqual([
@@ -374,7 +463,7 @@ describe("a missing event name", () => {
   test("a valid name is sent unchanged, surrounding whitespace included, with no line", async () => {
     const { inspector, sent } = dev();
 
-    await inspector.trackSchemaFromEvent("  Signed Up ", { a: 1 });
+    await inspector.trackSchemaFromEvent({ eventName: "  Signed Up ", eventProperties: { a: 1 } });
 
     expect(sent.map((event) => event.eventName)).toEqual(["  Signed Up "]);
     expect(matching(/without an event name/)).toEqual([]);
@@ -391,8 +480,8 @@ describe("a batch dispatch that fails internally", () => {
       throw new Error("boom");
     });
 
-    await inspector.trackSchemaFromEvent("E1", {});
-    await inspector.trackSchemaFromEvent("E2", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
     await inspector.flush();
 
     expect(matching(/something went wrong/)).toEqual([expect.stringContaining(internal)]);
@@ -404,7 +493,7 @@ describe("a batch dispatch that fails internally", () => {
     const inspector = staging({ batchSize: 3 });
     jest.spyOn(inspector as any, "sendBatch").mockImplementation(() => Promise.reject(new Error("boom")));
 
-    for (let i = 0; i < 3; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 3; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     await inspector.flush();
 
     expect(matching(/something went wrong/)).toEqual([expect.stringContaining(internal)]);
@@ -421,8 +510,8 @@ describe("a send failure with an arbitrary error", () => {
     const inspector = staging({ batchSize: 1 });
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockRejectedValue(error);
 
-    await inspector.trackSchemaFromEvent("E1", {});
-    await inspector.trackSchemaFromEvent("E2", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
 
     expect(lines.join("\n")).not.toContain("MARKER-in-message");
     // One window for both: the key is the fixed reason, not the message.
@@ -434,7 +523,7 @@ describe("a send failure with an arbitrary error", () => {
     const inspector = staging({ batchSize: 1 });
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockRejectedValue("Request timed out");
 
-    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
 
     expect(matching(/schema sending failed/)).toEqual(["Avo Inspector: schema sending failed: Request timed out."]);
     inspector.destroy();
@@ -448,7 +537,7 @@ describe("pending counts at lifecycle points, worded by real elapsed time", () =
     const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
 
-    for (let i = 0; i < 5001; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 5001; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     now += 12_000;
     await inspector.flush();
 
@@ -463,7 +552,7 @@ describe("pending counts at lifecycle points, worded by real elapsed time", () =
     const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
 
-    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     now += 3_000;
     await inspector.flush();
     expect(dropLines()).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 1s."]);
@@ -476,7 +565,7 @@ describe("pending counts at lifecycle points, worded by real elapsed time", () =
     const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
 
-    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     now += 3_000;
     await inspector.flush();
     expect(dropLines()).toEqual(["Avo Inspector: dropped 1 event(s) (queue full) in the last 1s."]);
@@ -492,7 +581,7 @@ describe("pending counts at lifecycle points, worded by real elapsed time", () =
 
   test("destroy() prints a pending count", async () => {
     const inspector = staging({ batchSize: 30, maxQueueSize: 1 });
-    for (let i = 0; i < 4; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 4; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     now += 2_000;
 
     inspector.destroy();

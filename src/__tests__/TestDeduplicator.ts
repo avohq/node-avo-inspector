@@ -93,10 +93,10 @@ describe("Deduplicator", () => {
     const inspector = new AvoInspector(defaultOptions);
     inspector.enableLogging(false);
 
-    const manuallyTrackedSchema = await inspector.trackSchemaFromEvent(
-      "test",
-      testObject
-    );
+    const manuallyTrackedSchema = await inspector.trackSchemaFromEvent({
+      eventName: "test",
+      eventProperties: testObject,
+    });
     // @ts-ignore
     const avoTrackedSchema = await inspector._avoFunctionTrackSchemaFromEvent(
       "test",
@@ -104,10 +104,10 @@ describe("Deduplicator", () => {
       "eventId",
       "eventhash"
     );
-    const manuallyTrackedSchemaAgain = await inspector.trackSchemaFromEvent(
-      "test",
-      testObject
-    );
+    const manuallyTrackedSchemaAgain = await inspector.trackSchemaFromEvent({
+      eventName: "test",
+      eventProperties: testObject,
+    });
 
     expect(manuallyTrackedSchema.length).toBe(4);
     expect(manuallyTrackedSchema.length + avoTrackedSchema.length + manuallyTrackedSchemaAgain.length).toBe(8);
@@ -124,10 +124,10 @@ describe("Deduplicator", () => {
       "eventId",
       "eventhash"
     );
-    const manuallyTrackedSchema = await inspector.trackSchemaFromEvent(
-      "test",
-      testObject
-    );
+    const manuallyTrackedSchema = await inspector.trackSchemaFromEvent({
+      eventName: "test",
+      eventProperties: testObject,
+    });
     // @ts-ignore
     const avoTrackedSchemaAgain = await inspector._avoFunctionTrackSchemaFromEvent(
       "test",
@@ -145,14 +145,14 @@ describe("Deduplicator", () => {
     const inspector = new AvoInspector(defaultOptions);
     inspector.enableLogging(false);
 
-    const manuallyTrackedSchema = await inspector.trackSchemaFromEvent(
-      "test",
-      testObject
-    );
-    const manuallyTrackedSchemaAgain = await inspector.trackSchemaFromEvent(
-      "test",
-      testObject
-    );
+    const manuallyTrackedSchema = await inspector.trackSchemaFromEvent({
+      eventName: "test",
+      eventProperties: testObject,
+    });
+    const manuallyTrackedSchemaAgain = await inspector.trackSchemaFromEvent({
+      eventName: "test",
+      eventProperties: testObject,
+    });
 
     expect(manuallyTrackedSchema.length).toBe(4);
     expect(manuallyTrackedSchemaAgain.length).toBe(4);

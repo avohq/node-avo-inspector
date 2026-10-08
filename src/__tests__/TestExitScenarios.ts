@@ -125,7 +125,7 @@ describe("an awaited loop whose tracks wait on spec fetches", () => {
     inspector.enableLogging(false);
     (async () => {
       let n = 0;
-      for (; n < ${rows}; n++) await inspector.trackSchemaFromEvent("Row Event", { a: n }, "user-" + n);
+      for (; n < ${rows}; n++) await inspector.trackSchemaFromEvent({ eventName: "Row Event", eventProperties: { a: n }, streamId: "user-" + n });
       console.log("LOOP DONE " + n);
       ${after}
     })();
@@ -194,7 +194,7 @@ describe("backpressure in an awaited loop", () => {
       const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
       (async () => {
         let n = 0;
-        for (; n < 3000; n++) await inspector.trackSchemaFromEvent("E", { n });
+        for (; n < 3000; n++) await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { n } });
         console.log("LOOP DONE " + n);
       })();
     `, 120_000);
@@ -217,8 +217,8 @@ describe("an awaited track whose send waits for a slot", () => {
       const inspector = new AvoInspector({ apiKey: "k", env: "${env}", version: "1.0.0", batchSize: 1 });
       inspector.enableLogging(false);
       (async () => {
-        for (let i = 0; i < 24; i++) inspector.trackSchemaFromEvent("E" + i, { i });
-        const schema = await inspector.trackSchemaFromEvent("Awaited", { i: 24 });
+        for (let i = 0; i < 24; i++) inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { i } });
+        const schema = await inspector.trackSchemaFromEvent({ eventName: "Awaited", eventProperties: { i: 24 } });
         console.log("AFTER AWAIT " + JSON.stringify(schema));
       })();
     `;
@@ -238,8 +238,8 @@ describe("exit while a spec fetch hangs", () => {
     const { stderr } = await runChild(`
       const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
       (async () => {
-        for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent("E" + i, { i });
-        inspector.trackSchemaFromEvent("Hang", { i: 5 });
+        for (let i = 0; i < 5; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { i } });
+        inspector.trackSchemaFromEvent({ eventName: "Hang", eventProperties: { i: 5 } });
       })();
     `);
 
@@ -252,8 +252,8 @@ describe("exit while a spec fetch hangs", () => {
     await runChild(`
       const prod = new AvoInspector({ apiKey: "k", env: "prod", version: "1.0.0", batchSize: 30 });
       const staging = new AvoInspector({ apiKey: "k2", env: "staging", version: "1.0.0", batchSize: 30 });
-      for (let i = 0; i < 5; i++) prod.trackSchemaFromEvent("P" + i, { i });
-      staging.trackSchemaFromEvent("Hang", { i: 0 });
+      for (let i = 0; i < 5; i++) prod.trackSchemaFromEvent({ eventName: "P" + i, eventProperties: { i } });
+      staging.trackSchemaFromEvent({ eventName: "Hang", eventProperties: { i: 0 } });
     `);
 
     expect(received.filter((name) => name.startsWith("P")).sort()).toEqual(["P0", "P1", "P2", "P3", "P4"]);
@@ -262,8 +262,8 @@ describe("exit while a spec fetch hangs", () => {
   test("9 hung spec fetches (8 at once, 1 a second later): the exit ends within one deadline, and every event is sent or reported", async () => {
     const { stderr, elapsedMs } = await runChild(`
       const inspector = new AvoInspector({ apiKey: "k", env: "staging", version: "1.0.0", batchSize: 30 });
-      for (let i = 0; i < 8; i++) inspector.trackSchemaFromEvent("Hang" + i, { i });
-      setTimeout(() => inspector.trackSchemaFromEvent("Hang8", { i: 8 }), 1000);
+      for (let i = 0; i < 8; i++) inspector.trackSchemaFromEvent({ eventName: "Hang" + i, eventProperties: { i } });
+      setTimeout(() => inspector.trackSchemaFromEvent({ eventName: "Hang8", eventProperties: { i: 8 } }), 1000);
     `);
 
     expect(elapsedMs).toBeLessThan(14_000);

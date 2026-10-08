@@ -25,10 +25,10 @@ test("200 tracks sharing one fetch evict none of the warm keys", async () => {
   inspector.enableLogging(false);
   jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody").mockResolvedValue(200);
 
-  for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent("Warm" + i, { a: 1 });
-  await Promise.all(Array.from({ length: 200 }, () => inspector.trackSchemaFromEvent("Hot", { a: 1 })));
+  for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent({ eventName: "Warm" + i, eventProperties: { a: 1 } });
+  await Promise.all(Array.from({ length: 200 }, () => inspector.trackSchemaFromEvent({ eventName: "Hot", eventProperties: { a: 1 } })));
   const before = fetch.mock.calls.length;
-  for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent("Warm" + i, { a: 1 });
+  for (let i = 0; i < 10; i++) await inspector.trackSchemaFromEvent({ eventName: "Warm" + i, eventProperties: { a: 1 } });
 
   expect(fetch.mock.calls.length - before).toBe(0);
   inspector.destroy();

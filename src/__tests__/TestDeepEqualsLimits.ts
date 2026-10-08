@@ -65,7 +65,7 @@ describe("deduplicating a deeply nested payload", () => {
     // @ts-ignore
     await expect(inspector._avoFunctionTrackSchemaFromEvent("Deep", { p: nested(100_000) }, "id", "hash"))
       .resolves.toHaveLength(1);
-    await expect(inspector.trackSchemaFromEvent("Deep", { p: nested(100_000) })).resolves.toHaveLength(1);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "Deep", eventProperties: { p: nested(100_000) } })).resolves.toHaveLength(1);
     await inspector.flush();
 
     expect(sent.map((e) => e.eventName)).toEqual(["Deep", "Deep"]);

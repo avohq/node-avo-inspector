@@ -63,7 +63,7 @@ describe("bounded concurrent batch sends", () => {
     const inspector = staging({ batchSize: 2 });
     const { send, batches, releaseAll } = holdSends(inspector);
 
-    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     expect(send).toHaveBeenCalledTimes(4);
 
     await releaseAll();
@@ -77,7 +77,7 @@ describe("bounded concurrent batch sends", () => {
     inspector.enableLogging(true);
     const { batches, releaseAll } = holdSends(inspector);
 
-    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 20; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     expect(console.warn).not.toHaveBeenCalledWith(expect.stringMatching(/dropped/));
     await releaseAll();
 
@@ -91,7 +91,7 @@ describe("bounded concurrent batch sends", () => {
     const inspector = staging({ env: "prod" });
     const { batches, releaseAll } = holdSends(inspector);
 
-    for (let i = 0; i < 9000; i++) inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 9000; i++) inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
     const flushing = inspector.flush();
     await releaseAll();
     await flushing;
@@ -106,7 +106,7 @@ describe("bounded concurrent batch sends", () => {
 
     let maxWaiting = 0;
     for (let i = 0; i < 20_000; i++) {
-      inspector.trackSchemaFromEvent("E" + i, {});
+      inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
       maxWaiting = Math.max(maxWaiting, (inspector as any).batchQueue.waitingLength);
     }
     expect(maxWaiting).toBe(10_000);
@@ -130,7 +130,7 @@ describe("bounded concurrent batch sends", () => {
   test("flush() waits for batches still waiting for a send slot", async () => {
     const inspector = staging({ batchSize: 2 });
     const { send, releaseAll } = holdSends(inspector);
-    for (let i = 0; i < 12; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 12; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
 
     let flushed = false;
     const flushing = inspector.flush().then(() => { flushed = true; });
@@ -146,7 +146,7 @@ describe("bounded concurrent batch sends", () => {
   test("destroy() discards batches still waiting for a send slot", async () => {
     const inspector = staging({ batchSize: 2 });
     const { send, batches, releaseAll } = holdSends(inspector);
-    for (let i = 0; i < 12; i++) await inspector.trackSchemaFromEvent("E" + i, {});
+    for (let i = 0; i < 12; i++) await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} });
 
     inspector.destroy();
     expect((inspector as any).batchQueue.waitingLength).toBe(0);
@@ -164,7 +164,7 @@ describe("bounded concurrent batch sends", () => {
     created.push(inspector);
     const { send, releaseAll } = holdSends(inspector);
 
-    const tracks = Array.from({ length: 6 }, (_, i) => inspector.trackSchemaFromEvent("E" + i, { a: i }));
+    const tracks = Array.from({ length: 6 }, (_, i) => inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { a: i } }));
     // Each event is sent once its spec fetch (answered by the test mock) completes.
     await waitFor(() => send.mock.calls.length >= 4);
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -236,7 +236,7 @@ describe("flush() during event spec validation", () => {
     const inspector = staging({ batchSize: 30 });
     const { send, batches, releaseAll } = holdSends(inspector);
 
-    const tracks = Array.from({ length: 20 }, (_, i) => inspector.trackSchemaFromEvent("E" + i, {}));
+    const tracks = Array.from({ length: 20 }, (_, i) => inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: {} }));
     const flushing = inspector.flush();
     expect(specCallbacks).toHaveLength(20);
     specCallbacks.forEach((callback) => callback(null));
@@ -257,11 +257,11 @@ describe("flush() during event spec validation", () => {
     const inspector = staging({ batchSize: 2 });
     const { send, batches, releaseAll } = holdSends(inspector);
 
-    const a = inspector.trackSchemaFromEvent("A", {});
+    const a = inspector.trackSchemaFromEvent({ eventName: "A", eventProperties: {} });
     let flushed = false;
     const flushing = inspector.flush().then(() => { flushed = true; });
     // B starts after flush(), so it is not flush-marked.
-    const b = inspector.trackSchemaFromEvent("B", {});
+    const b = inspector.trackSchemaFromEvent({ eventName: "B", eventProperties: {} });
     // Both validations settle in the same turn: A queues (flush-marked, no size trigger), then
     // B reaches batchSize 2 and its size-triggered drain sends A and B before A's own drain.
     specCallbacks["A"](null);
@@ -294,7 +294,7 @@ describe("a batch send that throws synchronously", () => {
     });
 
     const results = [];
-    for (let i = 0; i < 8; i++) results.push(await inspector.trackSchemaFromEvent("E" + i, { a: i }));
+    for (let i = 0; i < 8; i++) results.push(await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { a: i } }));
     const started = Date.now();
     await inspector.flush();
 
@@ -316,7 +316,7 @@ describe("the Codegen duplicate-shape scan in extractSchema", () => {
     const scan = jest.spyOn(AvoDeduplicator.prototype, "hasSeenEventParams");
 
     inspector.enableLogging(true);
-    await inspector.trackSchemaFromEvent("E", { a: 1 }); // tracking passes shouldLogIfEnabled = false
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } }); // tracking passes shouldLogIfEnabled = false
     inspector.enableLogging(false);
     inspector.extractSchema({ a: 1 });
     expect(scan).not.toHaveBeenCalled();

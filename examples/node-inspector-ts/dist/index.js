@@ -29,7 +29,7 @@ let eventParams = {
     }
 };
 inspector.enableLogging(true); // default is true for dev and false for prod
-inspector.trackSchemaFromEvent(eventName, eventParams).then((eventSchema) => {
+inspector.trackSchemaFromEvent({ eventName: eventName, eventProperties: eventParams }).then((eventSchema) => {
     console.log("Event schema queued for Avo Inspector", eventSchema);
     // Events are batched outside dev: flush before the process exits.
     return inspector.flush();

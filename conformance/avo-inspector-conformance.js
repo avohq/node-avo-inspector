@@ -137,14 +137,14 @@ function validateEnvelope(envelope) {
   return operation;
 }
 
-// Omit trailing arguments the fixture does not supply; options are passed verbatim.
+// The fixture's track input as one InspectorEvent: a streamId the fixture does not supply
+// stays absent, and the gateway options are spread in verbatim.
 function callTrack(inspector, eventName, eventProperties, streamId, options) {
-  if (options !== undefined) {
-    return inspector.trackSchemaFromEvent(eventName, eventProperties, streamId, options);
+  const event = { eventName, eventProperties };
+  if (streamId !== undefined) {
+    event.streamId = streamId;
   }
-  return streamId === undefined
-    ? inspector.trackSchemaFromEvent(eventName, eventProperties)
-    : inspector.trackSchemaFromEvent(eventName, eventProperties, streamId);
+  return inspector.trackSchemaFromEvent(options !== undefined ? { ...event, ...options } : event);
 }
 
 async function settle(promise) {
@@ -172,7 +172,7 @@ async function runSequence(inspector, steps) {
       // Single-threaded Node: concurrently scheduled tasks, joined together.
       const tasks = [];
       for (let i = 0; i < count; i += 1) {
-        tasks.push(inspector.trackSchemaFromEvent(`${prefix}${i}`, {}, streamId));
+        tasks.push(inspector.trackSchemaFromEvent({ eventName: `${prefix}${i}`, eventProperties: {}, streamId }));
       }
       await Promise.all(tasks);
       actual.push({ action, outcome: "resolve", value: count });

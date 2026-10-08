@@ -95,7 +95,7 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
 
   test("tracking such an event sends its full schema", async () => {
     const query = querystring.parse("utm_source=google");
-    const schema = await dev().trackSchemaFromEvent("Page Viewed", { path: "/home", query });
+    const schema = await dev().trackSchemaFromEvent({ eventName: "Page Viewed", eventProperties: { path: "/home", query } });
 
     expect(schema).toHaveLength(2);
     expect(captured[0][0].eventProperties).toEqual(schema);
@@ -114,7 +114,7 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
     // @ts-ignore
     await inspector._avoFunctionTrackSchemaFromEvent("E", nullProto({ a: 1 }), "id", "hash");
 
-    await expect(inspector.trackSchemaFromEvent("E", nullProto({ a: 1 }))).resolves.toEqual([]);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: nullProto({ a: 1 }) })).resolves.toEqual([]);
     expect(captured).toHaveLength(1);
   });
 
@@ -134,7 +134,7 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
       .spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockResolvedValue(200);
 
-    await inspector.trackSchemaFromEvent("E", { query: nullProto({ a: "1" }) });
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { query: nullProto({ a: "1" }) } });
     await inspector.flush();
 
     const event = send.mock.calls[0][0][0];
@@ -147,7 +147,7 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
     ecdh.generateKeys();
     const inspector = dev({ publicEncryptionKey: ecdh.getPublicKey("hex") });
 
-    await inspector.trackSchemaFromEvent("E", { query: nullProto({ a: "1" }) });
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { query: nullProto({ a: "1" }) } });
 
     const [property] = captured[0][0].eventProperties;
     expect(property.propertyName).toBe("query");
@@ -167,7 +167,7 @@ describe("non-string streamId", () => {
     [BigInt(10), "10"],
     [true, "true"],
   ])("%p is sent as the string %p and the call resolves", async (streamId, expected) => {
-    const schema = await dev().trackSchemaFromEvent("Login", { a: 1 }, streamId as any);
+    const schema = await dev().trackSchemaFromEvent({ eventName: "Login", eventProperties: { a: 1 }, streamId: streamId as any });
 
     expect(schema).toEqual([{ propertyName: "a", propertyType: "int" }]);
     expect(captured[0][0].streamId).toBe(expected);
@@ -178,7 +178,7 @@ describe("non-string streamId", () => {
     ["a symbol", Symbol("s")],
     ["a function", () => 1],
   ])("%s is treated as absent, with a warning when logging is on", async (_label, streamId) => {
-    const schema = await dev().trackSchemaFromEvent("Login", { a: 1 }, streamId as any);
+    const schema = await dev().trackSchemaFromEvent({ eventName: "Login", eventProperties: { a: 1 }, streamId: streamId as any });
 
     expect(schema).toHaveLength(1);
     expect(captured[0][0].streamId).toBe("");
@@ -189,7 +189,7 @@ describe("non-string streamId", () => {
 
   test("no warning for an ignored streamId when logging is off", async () => {
     const inspector = new AvoInspector({ apiKey: "test-key", env: "staging", version: "1.0.0" });
-    await inspector.trackSchemaFromEvent("Login", {}, { id: 1 } as any);
+    await inspector.trackSchemaFromEvent({ eventName: "Login", eventProperties: {}, streamId: { id: 1 } as any });
 
     expect(console.warn).not.toHaveBeenCalled();
     inspector.destroy();

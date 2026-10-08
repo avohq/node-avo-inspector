@@ -36,14 +36,14 @@ test("past 1,000 events waiting for a spec, the next is sent without validation"
 
   // The cap is shared by every instance: 600 + 400 fill it.
   for (let i = 0; i < 600; i++) {
-    a.inspector.trackSchemaFromEvent("E" + i, { p: "x" }, "s");
+    a.inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { p: "x" }, streamId: "s" });
   }
   for (let i = 0; i < 400; i++) {
-    b.inspector.trackSchemaFromEvent("F" + i, { p: "x" }, "s");
+    b.inspector.trackSchemaFromEvent({ eventName: "F" + i, eventProperties: { p: "x" }, streamId: "s" });
   }
   expect(fetch).toHaveBeenCalledTimes(CAP);
 
-  const over = b.inspector.trackSchemaFromEvent("Over", { p: "x" }, "s");
+  const over = b.inspector.trackSchemaFromEvent({ eventName: "Over", eventProperties: { p: "x" }, streamId: "s" });
   await expect(settledWithin(over, 500)).resolves.toBe(true);
   expect(fetch).toHaveBeenCalledTimes(CAP);
   await b.inspector.flush(1);
@@ -52,7 +52,7 @@ test("past 1,000 events waiting for a spec, the next is sent without validation"
 
   // Destroying an instance frees its places.
   a.inspector.destroy();
-  b.inspector.trackSchemaFromEvent("AfterDestroy", { p: "x" }, "s");
+  b.inspector.trackSchemaFromEvent({ eventName: "AfterDestroy", eventProperties: { p: "x" }, streamId: "s" });
   expect(fetch).toHaveBeenCalledTimes(CAP + 1);
   b.inspector.destroy();
   expect((AvoInspector as any).waitingValidations).toBe(0);
@@ -64,12 +64,12 @@ test("a settled fetch frees its place", async () => {
     deliver.push(() => callback(null));
   });
   const { inspector } = staging();
-  const tracks = Array.from({ length: CAP }, (_, i) => inspector.trackSchemaFromEvent("E" + i, { p: "x" }, "s"));
+  const tracks = Array.from({ length: CAP }, (_, i) => inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { p: "x" }, streamId: "s" }));
   deliver.forEach((d) => d());
   deliver = [];
   await Promise.all(tracks);
 
-  inspector.trackSchemaFromEvent("Next", { p: "x" }, "s");
+  inspector.trackSchemaFromEvent({ eventName: "Next", eventProperties: { p: "x" }, streamId: "s" });
   expect(fetch).toHaveBeenCalledTimes(CAP + 1);
   inspector.destroy();
   expect((AvoInspector as any).waitingValidations).toBe(0);

@@ -38,10 +38,21 @@ constructor(options: {
 
 type SchemaEntry = { propertyName: string; propertyType: string; children?: any };
 
-export interface GatewayOptions {
+export interface InspectorEvent {
+  eventName: string;                                      // missing/blank → "Missing Event Name"
+  eventProperties?: { [propName: string]: any } | null;   // absent/null → no properties
+  streamId?: string;
   outputReference?: string;  // gateway output; absent = gateway checkpoint
   originHint?: string;       // low-cardinality source label
   originAppVersion?: string; // per-event app version override
+}
+
+// The Codegen entry point's gateway fields (same meaning as on InspectorEvent). Not re-exported from
+// the package root; not @internal, since stripInternal would drop it from the public method's typings.
+export interface CodegenGatewayFields {
+  outputReference?: string;
+  originHint?: string;
+  originAppVersion?: string;
 }
 
 type SendOutcome = "ok" | "non200" | "failed";
@@ -76,14 +87,19 @@ Called by application code (manual tracking) and by Avo Codegen (`_avoFunctionTr
 9. Creates the batch queue: dispatch is `sendBatch`, a discarded batch's outcome is `"failed"`, and every swapped-out batch is registered as pending as soon as it is swapped out.
 10. Outside prod, creates the event spec fetcher (with the network handler's `mockEndpoint`), cache and validator.
 
-### trackSchemaFromEvent(eventName, eventProperties, streamId?, options?) / _avoFunctionTrackSchemaFromEvent(eventName, eventProperties, eventId, eventHash, streamId?, options?)
+### trackSchemaFromEvent(event: InspectorEvent) / _avoFunctionTrackSchemaFromEvent(eventName, eventProperties, eventId, eventHash, streamId?, options?: CodegenGatewayFields)
 
-Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `eventHash`).
+`trackSchemaFromEvent` takes one `InspectorEvent`, the only public track form (no positional overloads):
+- **IMPORTANT:** an argument that is not a non-array object (`undefined`, `null`, a primitive, an array; for instance a 1.x call `trackSchemaFromEvent(name, props)` from JavaScript) sends nothing, calls `AvoLog.notAnInspectorEvent()` (always on, rate-limited, prints no part of the argument) and resolves `[]`.
+- Keys other than `KNOWN_EVENT_KEYS` (the six InspectorEvent fields) are passed to `AvoLog.unknownEventKeys` (always on, rate-limited, names only); a failure to list the keys (a proxy) is ignored, so this never throws. The known fields are still used.
+- Each field is read once; a throwing getter is an internal error (step 6). The fields feed the shared path below: `eventName`, `eventProperties` (absent or null maps to no properties), `streamId`, and the three gateway fields.
+
+`_avoFunctionTrackSchemaFromEvent` is called by Codegen-generated code and keeps its positional shape; its optional gateway fields are not checked for unknown keys. Both delegate to one shared path (Codegen sets `fromAvoFunction`, `eventId`, `eventHash`).
 
 1. After `destroy()`: resolves `[]` and does nothing.
 1a. **Missing event name:** an `eventName` that is `null`, `undefined`, not a string, empty or whitespace-only is replaced by `MISSING_EVENT_NAME` (`"Missing Event Name"`, from `AvoLog`), and `AvoLog.missingEventName()` reports it (always on, rate-limited). The event then goes through every step below like any other: deduplication, extraction, sampling, validation and batching. The call resolves its schema and never throws, in every env. A valid name is used unchanged, surrounding whitespace included.
 2. Anonymous id: `streamId` normalized through `AvoStreamId`, else the generated anonymous id (empty).
-3. Gateway options (`resolveGatewayOptions`): keys of an object `options` other than `KNOWN_GATEWAY_OPTIONS` (`outputReference`, `originHint`, `originAppVersion`) are passed to `AvoLog.unknownGatewayOptions` (always on, rate-limited); a failure to list the keys (a proxy) is ignored, so this never throws. Each known field is trimmed; a non-string or blank value is absent, and non-object `options` counts as none. The event is gateway-scoped when any field is present. `appVersion` is `originAppVersion` if present, else `null` when `originHint` is present, else the instance version. `outputReference` / `originHint` are included only when present.
+3. Gateway fields (`resolveGatewayFields`): each field is trimmed; a non-string or blank value is absent, and non-object `options` counts as none. The event is gateway-scoped when any field is present. `appVersion` is `originAppVersion` if present, else `null` when `originHint` is present, else the instance version. `outputReference` / `originHint` are included only when present.
 4. Deduplication: a gateway-scoped event is always registered and never passed to the deduplicator. Otherwise `avoDeduplicator.shouldRegisterEvent(...)`; a duplicate logs "Deduplicated event" and resolves `[]`.
 5. Extracts the schema (`extractSchema(props, false)`); when logging, prints `Supplied event <eventName> with schema <JSON of the schema>` (names, types and children, never values). Then samples and enqueues (below).
 6. A synchronous exception is logged with `AvoLog.internal` (always on, rate-limited) and the call rejects with `"Avo Inspector: something went wrong. Please report to support@avo.app."`.

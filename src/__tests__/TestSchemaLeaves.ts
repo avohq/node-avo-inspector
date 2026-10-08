@@ -111,7 +111,7 @@ describe("tracking a large binary value", () => {
 
     const file = Buffer.alloc(mib * MiB, 7);
     const started = Date.now();
-    inspector.trackSchemaFromEvent("Upload", { file, name: "x" });
+    inspector.trackSchemaFromEvent({ eventName: "Upload", eventProperties: { file, name: "x" } });
     expect(Date.now() - started).toBeLessThan(200);
     await expect(inspector.flush()).resolves.toBe(true);
 
@@ -147,7 +147,7 @@ describe("binary data or an array as the whole properties argument", () => {
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockImplementation((batch) => { sent.push(...batch); return Promise.resolve(200); });
 
-    await expect(inspector.trackSchemaFromEvent("Root", root)).resolves.toEqual([]);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "Root", eventProperties: root })).resolves.toEqual([]);
     await inspector.flush();
     expect(sent).toHaveLength(1);
     expect(sent[0].eventProperties).toEqual([]);

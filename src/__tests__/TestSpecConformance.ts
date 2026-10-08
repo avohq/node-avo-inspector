@@ -71,7 +71,7 @@ const dev = (extra: object = {}) =>
 describe("wire protocol", () => {
   test("sends the five required headers and a v2-shaped body without trackingId/sessionId", async () => {
     const inspector = dev();
-    await inspector.trackSchemaFromEvent("Signed Up", { plan: "pro" }, "stream-1");
+    await inspector.trackSchemaFromEvent({ eventName: "Signed Up", eventProperties: { plan: "pro" }, streamId: "stream-1" });
 
     expect(captured).toHaveLength(1);
     const { headers, body } = captured[0];
@@ -101,7 +101,7 @@ describe("wire protocol", () => {
     const inspector = dev();
     const props: { [key: string]: string } = {};
     for (let i = 0; i < 40; i++) props["attribute_" + i] = "value";
-    await inspector.trackSchemaFromEvent("Large", props);
+    await inspector.trackSchemaFromEvent({ eventName: "Large", eventProperties: props });
 
     const { headers, body } = captured[0];
     expect(headers["content-encoding"]).toBe("gzip");
@@ -115,7 +115,7 @@ describe("wire protocol", () => {
     const inspector = dev();
     const props: { [key: string]: string } = {};
     for (let i = 0; i < 40; i++) props["attribute_" + i] = "value";
-    await inspector.trackSchemaFromEvent("Large", props);
+    await inspector.trackSchemaFromEvent({ eventName: "Large", eventProperties: props });
 
     expect(gzipSync).not.toHaveBeenCalled();
     expect(captured[0].headers["content-encoding"]).toBe("gzip");
@@ -127,7 +127,7 @@ describe("wire protocol", () => {
     const inspector = dev();
     const props: { [key: string]: string } = {};
     for (let i = 0; i < 40; i++) props["attribute_" + i] = "value";
-    await inspector.trackSchemaFromEvent("Large", props);
+    await inspector.trackSchemaFromEvent({ eventName: "Large", eventProperties: props });
 
     const { headers, body } = captured[0];
     expect(headers["content-encoding"]).toBeUndefined();
@@ -140,7 +140,7 @@ describe("wire protocol", () => {
     const props: { [key: string]: string } = {};
     for (let i = 0; i < 40; i++) props["attribute_" + i] = "value";
 
-    const tracked = inspector.trackSchemaFromEvent("Large", props);
+    const tracked = inspector.trackSchemaFromEvent({ eventName: "Large", eventProperties: props });
     inspector.destroy();
     await tracked;
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -151,7 +151,7 @@ describe("wire protocol", () => {
   test("a track whose properties root is an array sends eventProperties [] and resolves []", async () => {
     const inspector = dev();
 
-    await expect(inspector.trackSchemaFromEvent("E", [1, 2] as any)).resolves.toEqual([]);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: [1, 2] as any })).resolves.toEqual([]);
 
     expect(captured).toHaveLength(1);
     expect(captured[0].body[0].eventProperties).toEqual([]);
@@ -159,7 +159,10 @@ describe("wire protocol", () => {
 
   test("non-string gateway option values are treated as absent", async () => {
     const inspector = dev();
-    await inspector.trackSchemaFromEvent("purchase", { a: 1 }, "s", {
+    await inspector.trackSchemaFromEvent({
+      eventName: "purchase",
+      eventProperties: { a: 1 },
+      streamId: "s",
       outputReference: 7 as any,
       originHint: false as any,
       originAppVersion: { v: 1 } as any,
@@ -191,8 +194,7 @@ describe("wire protocol", () => {
       expect(() => dev({ apiKey: "test" + ch + "key" })).toThrow(
         new Error("[Avo Inspector] apiKey must not contain control characters")
       );
-    }
-  );
+    });
 
   test("the send guard refuses any control character, without contacting the server", async () => {
     const handler = new AvoNetworkCallsHandler("test\u0001key", "dev", "", "1.0.0", VERSION);
@@ -218,7 +220,7 @@ describe("wire protocol", () => {
 
   test("a tab in the API key is allowed and sent verbatim", async () => {
     const inspector = dev({ apiKey: "test\tkey" });
-    await inspector.trackSchemaFromEvent("E", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: {} });
 
     expect(captured[0].headers["api-key"]).toBe("test\tkey");
   });
@@ -288,7 +290,7 @@ describe("wire protocol", () => {
     responders.push(cutOff(partial));
     const inspector = dev();
 
-    await expect(inspector.trackSchemaFromEvent("E", { a: 1 })).resolves.toEqual([
+    await expect(inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } })).resolves.toEqual([
       { propertyName: "a", propertyType: "int" },
     ]);
     expect(await inspector.flush(1000)).toBe(true);
@@ -304,7 +306,7 @@ describe("wire protocol", () => {
       setTimeout(() => res.socket!.destroy(), 20);
     });
 
-    await expect(dev().trackSchemaFromEvent("E", { a: 1 })).resolves.toEqual([]);
+    await expect(dev().trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } })).resolves.toEqual([]);
   });
 
   test("a 3xx is a non-200 response and is never followed", async () => {
@@ -313,7 +315,7 @@ describe("wire protocol", () => {
       res.end();
     });
 
-    await expect(dev().trackSchemaFromEvent("E", { a: 1 })).resolves.toEqual([]);
+    await expect(dev().trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } })).resolves.toEqual([]);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(captured).toHaveLength(1);
@@ -345,7 +347,7 @@ describe("cyclic event properties with logging on", () => {
     const inspector = dev();
     inspector.enableLogging(true);
 
-    const schema = await inspector.trackSchemaFromEvent("Cyclic", cyclicProps());
+    const schema = await inspector.trackSchemaFromEvent({ eventName: "Cyclic", eventProperties: cyclicProps() });
 
     expect(schema[0]).toEqual({ propertyName: "plan", propertyType: "string" });
     expect(captured).toHaveLength(1);
@@ -357,7 +359,7 @@ describe("cyclic event properties with logging on", () => {
 
     // @ts-ignore
     await inspector._avoFunctionTrackSchemaFromEvent("Cyclic", cyclicProps(), "id", "hash");
-    await expect(inspector.trackSchemaFromEvent("Cyclic", cyclicProps())).resolves.toEqual([]);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "Cyclic", eventProperties: cyclicProps() })).resolves.toEqual([]);
     expect(captured).toHaveLength(1);
   });
 
@@ -378,7 +380,7 @@ describe("cyclic event properties with logging on", () => {
     ecdh.generateKeys();
     const inspector = dev({ publicEncryptionKey: ecdh.getPublicKey("hex") });
 
-    const schema = await inspector.trackSchemaFromEvent("Cyclic", cyclicProps());
+    const schema = await inspector.trackSchemaFromEvent({ eventName: "Cyclic", eventProperties: cyclicProps() });
 
     expect(schema).toHaveLength(2);
     expect(captured[0].body[0].eventProperties.map((p: any) => p.propertyName)).toEqual(["plan"]);
@@ -394,7 +396,7 @@ describe("an internal error while building the body", () => {
       throw new Error("boom");
     });
 
-    await expect(inspector.trackSchemaFromEvent("E", { a: 1 })).rejects.toBe(internalError);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } })).rejects.toBe(internalError);
   });
 
   test("rejects with the same string when validation is active", async () => {
@@ -405,7 +407,7 @@ describe("an internal error while building the body", () => {
       throw new Error("boom");
     });
 
-    await expect(inspector.trackSchemaFromEvent("E", { a: 1 })).rejects.toBe(internalError);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } })).rejects.toBe(internalError);
     expect(console.error).toHaveBeenCalledWith(internalError + " (Error)");
     expect((inspector as any).batchQueue.length).toBe(0);
   });
@@ -416,7 +418,10 @@ describe("deduplication", () => {
     const inspector = dev();
     // @ts-ignore
     await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "s1");
-    const schema = await inspector.trackSchemaFromEvent("Purchase", { a: 1 }, "s1", {
+    const schema = await inspector.trackSchemaFromEvent({
+      eventName: "Purchase",
+      eventProperties: { a: 1 },
+      streamId: "s1",
       outputReference: "meta-x7k2q",
     });
 
@@ -429,7 +434,10 @@ describe("deduplication", () => {
     const inspector = dev();
     // @ts-ignore
     await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "s1");
-    const schema = await inspector.trackSchemaFromEvent("Purchase", { a: 1 }, "s1", {
+    const schema = await inspector.trackSchemaFromEvent({
+      eventName: "Purchase",
+      eventProperties: { a: 1 },
+      streamId: "s1",
       originAppVersion: " 1.0.0 ",
     });
 
@@ -442,7 +450,7 @@ describe("deduplication", () => {
     // @ts-ignore
     await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "s1");
     await expect(
-      inspector.trackSchemaFromEvent("Purchase", { a: 1 }, "s1", { outputReference: "  ", originHint: "" })
+      inspector.trackSchemaFromEvent({ eventName: "Purchase", eventProperties: { a: 1 }, streamId: "s1", outputReference: "  ", originHint: "" })
     ).resolves.toEqual([]);
     expect(captured).toHaveLength(1);
   });
@@ -451,7 +459,7 @@ describe("deduplication", () => {
     const inspector = dev();
     // @ts-ignore
     await inspector._avoFunctionTrackSchemaFromEvent("Purchase", { a: 1 }, "eventId", "hash", "s1");
-    await expect(inspector.trackSchemaFromEvent("Purchase", { a: 1 }, "s1")).resolves.toEqual([]);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "Purchase", eventProperties: { a: 1 }, streamId: "s1" })).resolves.toEqual([]);
     expect(captured).toHaveLength(1);
   });
 
@@ -494,15 +502,15 @@ describe("sampling", () => {
       respondWith(200, { samplingRate: 7 })
     );
 
-    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
     expect(handler.getSamplingRate()).toBe(0.9);
 
     jest.spyOn(Math, "random").mockReturnValue(0);
-    await inspector.trackSchemaFromEvent("E2", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
     expect(handler.getSamplingRate()).toBe(0.9);
-    await inspector.trackSchemaFromEvent("E3", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E3", eventProperties: {} });
     expect(handler.getSamplingRate()).toBe(0.9);
-    await inspector.trackSchemaFromEvent("E4", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E4", eventProperties: {} });
     expect(handler.getSamplingRate()).toBe(0.9);
   });
 
@@ -512,12 +520,12 @@ describe("sampling", () => {
     const random = jest.spyOn(Math, "random");
 
     random.mockReturnValueOnce(0.7); // dropped
-    await inspector.trackSchemaFromEvent("Dropped", {});
+    await inspector.trackSchemaFromEvent({ eventName: "Dropped", eventProperties: {} });
     random.mockReturnValueOnce(0.2); // kept
-    await inspector.trackSchemaFromEvent("Kept", {});
+    await inspector.trackSchemaFromEvent({ eventName: "Kept", eventProperties: {} });
     inspector._setSamplingRateForTesting(1.0);
     random.mockReturnValueOnce(0.2);
-    await inspector.trackSchemaFromEvent("Kept later", {});
+    await inspector.trackSchemaFromEvent({ eventName: "Kept later", eventProperties: {} });
     await inspector.flush();
 
     expect(captured).toHaveLength(1);
@@ -531,7 +539,7 @@ describe("sampling", () => {
 describe("batching", () => {
   test("dev forces batch size 1 whatever was configured", async () => {
     const inspector = dev({ batchSize: 30 });
-    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
     expect(captured).toHaveLength(1);
   });
 
@@ -542,13 +550,13 @@ describe("batching", () => {
     };
     responders.push(fail, fail);
 
-    await expect(dev().trackSchemaFromEvent("E", { a: 1 })).resolves.toEqual([]);
+    await expect(dev().trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } })).resolves.toEqual([]);
 
     const batched = staging({ batchSize: 1 + 1 });
-    await expect(batched.trackSchemaFromEvent("E", { a: 1 })).resolves.toEqual([
+    await expect(batched.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } })).resolves.toEqual([
       { propertyName: "a", propertyType: "int" },
     ]);
-    await batched.trackSchemaFromEvent("E", { a: 1 });
+    await batched.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } });
     await batched.flush();
     expect(captured).toHaveLength(2);
   });
@@ -559,9 +567,9 @@ describe("batching", () => {
     const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockResolvedValue(200);
 
-    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
     jest.advanceTimersByTime(3000);
-    await inspector.trackSchemaFromEvent("E2", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
     jest.advanceTimersByTime(1999);
     expect(send).not.toHaveBeenCalled();
 
@@ -576,7 +584,7 @@ describe("batching", () => {
     const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockResolvedValue(200);
 
-    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
     jest.advanceTimersByTime(60_000);
     expect(send).not.toHaveBeenCalled();
   });
@@ -600,8 +608,8 @@ describe("batching", () => {
       const inspector = prod({ batchSize: 2 });
       const { release } = deferredSend(inspector);
 
-      inspector.trackSchemaFromEvent("E1", {});
-      inspector.trackSchemaFromEvent("E2", {});
+      inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
+      inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
       expect((inspector as any).pending.size).toBe(1);
 
       let flushed = false;
@@ -619,7 +627,7 @@ describe("batching", () => {
       const inspector = prod({ batchSize: 30, batchFlushSeconds: 1 });
       deferredSend(inspector);
 
-      inspector.trackSchemaFromEvent("E1", {});
+      inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
       jest.advanceTimersByTime(1000);
 
       expect((inspector as any).batchQueue.length).toBe(0);
@@ -632,12 +640,12 @@ describe("batching", () => {
     responders.push((req) => req.socket.destroy()); // connection dropped mid-request
     const inspector = staging({ batchSize: 2 });
 
-    await expect(inspector.trackSchemaFromEvent("E1", { a: 1 })).resolves.toHaveLength(1);
-    await inspector.trackSchemaFromEvent("E2", {});
+    await expect(inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: { a: 1 } })).resolves.toHaveLength(1);
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
     await inspector.flush();
     expect(console.error).toHaveBeenCalledWith("Avo Inspector: schema sending failed: Request failed.");
 
-    await inspector.trackSchemaFromEvent("E3", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E3", eventProperties: {} });
     await inspector.flush();
 
     const eventNames = captured.map((c) => c.body.map((e: any) => e.eventName));
@@ -649,7 +657,7 @@ describe("batching", () => {
     let release: (status: number) => void = () => {};
     jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockImplementation(() => new Promise((resolve) => { release = resolve; }));
-    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
 
     let flushed = false;
     const flushing = inspector.flush(3e9).then(() => { flushed = true; });
@@ -667,14 +675,14 @@ describe("batching", () => {
     const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockImplementation(() => new Promise((resolve) => { releases.push(resolve); }));
 
-    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
     let flushed = false;
     const flushing = inspector.flush().then(() => { flushed = true; });
     expect(send).toHaveBeenCalledTimes(1);
 
     // A size-triggered send that starts after flush() was called, and never completes.
-    await inspector.trackSchemaFromEvent("E2", {});
-    await inspector.trackSchemaFromEvent("E3", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
+    await inspector.trackSchemaFromEvent({ eventName: "E3", eventProperties: {} });
     expect(send).toHaveBeenCalledTimes(2);
 
     releases[0](200);
@@ -687,7 +695,7 @@ describe("batching", () => {
   test("flush resolves after its timeout even when a send never completes", async () => {
     responders.push(() => {}); // never answers
     const inspector = staging({ batchSize: 30 });
-    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
 
     const started = Date.now();
     await expect(inspector.flush(100)).resolves.toBe(false);
@@ -702,7 +710,7 @@ describe("batching", () => {
     const inspector = staging({ batchSize: 30 });
     inspector._setSamplingRateForTesting(0.9);
     jest.spyOn(Math, "random").mockReturnValue(0);
-    await inspector.trackSchemaFromEvent("E1", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
     expect((inspector as any).batchQueue.hasScheduledFlush).toBe(true);
 
     inspector.destroy();
@@ -710,7 +718,7 @@ describe("batching", () => {
     expect((inspector as any).pendingCount).toBe(0);
     expect((inspector as any).batchQueue.length).toBe(0);
     expect((inspector as any).batchQueue.hasScheduledFlush).toBe(false);
-    await expect(inspector.trackSchemaFromEvent("E2", { a: 1 })).resolves.toEqual([]);
+    await expect(inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: { a: 1 } })).resolves.toEqual([]);
     await inspector.flush();
     expect(captured).toHaveLength(0);
     expect(inspector.avoNetworkCallsHandler.getSamplingRate()).toBe(0.9);
@@ -730,7 +738,7 @@ describe("batching", () => {
     responders.push(() => received()); // never answers
     const inspector = dev();
 
-    const tracked = inspector.trackSchemaFromEvent("E", { a: 1 });
+    const tracked = inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } });
     await arrived;
     inspector.destroy();
 
@@ -740,7 +748,7 @@ describe("batching", () => {
   test("settled tracks leave no destroy waiters behind", async () => {
     const inspector = dev();
     for (let i = 0; i < 5; i++) {
-      await inspector.trackSchemaFromEvent("E" + i, { a: i });
+      await inspector.trackSchemaFromEvent({ eventName: "E" + i, eventProperties: { a: i } });
     }
 
     expect((inspector as any).destroyWaiters.size).toBe(0);
@@ -752,7 +760,7 @@ describe("batching", () => {
     const fetch = jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation(() => {});
     const inspector = staging({ batchSize: 30 });
 
-    const tracked = inspector.trackSchemaFromEvent("E", { a: 1 });
+    const tracked = inspector.trackSchemaFromEvent({ eventName: "E", eventProperties: { a: 1 } });
     expect(fetch).toHaveBeenCalledTimes(1);
     inspector.destroy();
 
@@ -773,7 +781,7 @@ describe("batching", () => {
     const send = jest.spyOn(inspector.avoNetworkCallsHandler, "callInspectorWithBatchBody")
       .mockResolvedValue(200);
 
-    const tracked = inspector.trackSchemaFromEvent("Signed Up", { plan: "pro" }, "s1", { originHint: "web" });
+    const tracked = inspector.trackSchemaFromEvent({ eventName: "Signed Up", eventProperties: { plan: "pro" }, streamId: "s1", originHint: "web" });
     await inspector.flush();
 
     expect(send).toHaveBeenCalledTimes(1);
@@ -794,9 +802,9 @@ describe("batching", () => {
         "once 2 are buffered. Set batchSize to at most maxQueueSize."
     );
 
-    await inspector.trackSchemaFromEvent("E1", {});
-    await inspector.trackSchemaFromEvent("E2", {});
-    await inspector.trackSchemaFromEvent("E3", {});
+    await inspector.trackSchemaFromEvent({ eventName: "E1", eventProperties: {} });
+    await inspector.trackSchemaFromEvent({ eventName: "E2", eventProperties: {} });
+    await inspector.trackSchemaFromEvent({ eventName: "E3", eventProperties: {} });
     await inspector.flush();
     expect(captured.map((c) => c.body.map((e: any) => e.eventName))).toEqual([["E2", "E3"]]);
   });
@@ -817,9 +825,9 @@ describe("batching", () => {
       .mockResolvedValue(200);
 
     const calledAt = Date.now();
-    const slow = inspector.trackSchemaFromEvent("Slow", {});
+    const slow = inspector.trackSchemaFromEvent({ eventName: "Slow", eventProperties: {} });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    await inspector.trackSchemaFromEvent("Fast", {});
+    await inspector.trackSchemaFromEvent({ eventName: "Fast", eventProperties: {} });
     await slow;
     await inspector.flush();
 

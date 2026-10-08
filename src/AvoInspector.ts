@@ -4,7 +4,7 @@ import {
   AvoNetworkCallsHandler,
   EventSchemaBody,
   InspectorBody,
-  ResolvedGatewayOptions,
+  ResolvedGatewayFields,
 } from "./AvoNetworkCallsHandler";
 import { AvoBatchQueue, BACKPRESSURE_WAITING_EVENTS, MAX_TIMER_MS } from "./AvoBatchQueue";
 import { AvoDeduplicator } from "./AvoDeduplicator";
@@ -119,10 +119,16 @@ const NO_API_KEY_MESSAGE =
 
 
 /**
- * Gateway coordinates for a gateway-scoped Inspector API key. All optional; blank
- * values are treated as absent.
+ * One observed event, the single argument of `trackSchemaFromEvent`. The gateway fields
+ * are for a gateway-scoped Inspector API key; blank values are treated as absent.
  */
-export interface GatewayOptions {
+export interface InspectorEvent {
+  /** The event name. A missing, empty or whitespace-only name is sent as "Missing Event Name". */
+  eventName: string;
+  /** The event's properties. Absent or null: an event with no properties. */
+  eventProperties?: { [propName: string]: any } | null;
+  /** Optional stream id to correlate events. */
+  streamId?: string;
   /** Reference of the gateway output this observation was bound for. Absent = gateway checkpoint. */
   outputReference?: string;
   /** Low-cardinality label of the source the event came from (e.g. "web"). Never a user id. */
@@ -131,8 +137,19 @@ export interface GatewayOptions {
   originAppVersion?: string;
 }
 
-// The keys of GatewayOptions; any other key in a track call's options is warned about.
-const KNOWN_GATEWAY_OPTIONS = ["outputReference", "originHint", "originAppVersion"];
+/**
+ * The gateway fields of a Codegen call (`_avoFunctionTrackSchemaFromEvent`), with the same
+ * meaning as on InspectorEvent. Not re-exported from the package root, but not marked internal:
+ * stripInternal would drop it from the declarations while that public method still uses it.
+ */
+export interface CodegenGatewayFields {
+  outputReference?: string;
+  originHint?: string;
+  originAppVersion?: string;
+}
+
+// The keys of InspectorEvent; any other key in a tracked event is warned about.
+const KNOWN_EVENT_KEYS = ["eventName", "eventProperties", "streamId", "outputReference", "originHint", "originAppVersion"];
 
 type SchemaEntry = {
   propertyName: string;
@@ -605,14 +622,13 @@ export class AvoInspector {
    * omitted when blank; appVersion is the per-event override, null for a
    * source-scoped event without one, else the instance version.
    */
-  private resolveGatewayOptions(options?: GatewayOptions): ResolvedGatewayOptions {
+  private resolveGatewayFields(options?: CodegenGatewayFields): ResolvedGatewayFields {
     const opts: any = options !== null && typeof options === "object" ? options : {};
-    AvoInspector.warnUnknownOptions(opts);
     const outputReference = normalizeOption(opts.outputReference);
     const originHint = normalizeOption(opts.originHint);
     const originAppVersion = normalizeOption(opts.originAppVersion);
 
-    const resolved: ResolvedGatewayOptions = {
+    const resolved: ResolvedGatewayFields = {
       gatewayScoped:
         outputReference !== undefined ||
         originHint !== undefined ||
@@ -633,18 +649,18 @@ export class AvoInspector {
     return resolved;
   }
 
-  // Warns (always on, rate-limited) when the options object has keys other than the known
-  // ones, such as a typo; the known keys are still used and the event is still tracked.
+  // Warns (always on, rate-limited) when the event has keys other than InspectorEvent's,
+  // such as a typo; the known keys are still used and the event is still tracked.
   // Never throws: listing a proxy's keys can.
-  private static warnUnknownOptions(opts: object): void {
+  private static warnUnknownEventKeys(event: object): void {
     let unknown: string[];
     try {
-      unknown = Object.keys(opts).filter((key) => KNOWN_GATEWAY_OPTIONS.indexOf(key) < 0);
+      unknown = Object.keys(event).filter((key) => KNOWN_EVENT_KEYS.indexOf(key) < 0);
     } catch (e) {
       return;
     }
     if (unknown.length > 0) {
-      AvoLog.unknownGatewayOptions(unknown, KNOWN_GATEWAY_OPTIONS);
+      AvoLog.unknownEventKeys(unknown, KNOWN_EVENT_KEYS);
     }
   }
 
@@ -655,18 +671,37 @@ export class AvoInspector {
    * happens within the call and a non-200 response resolves `[]`; with batching the
    * batch's HTTP outcome is not observable here. Buffered events are only delivered
    * by a later size or time trigger, or by `flush()` — call `flush()` before exit.
+   *
+   * Anything but an object (such as a 1.x call `trackSchemaFromEvent(name, properties)`)
+   * sends nothing, prints an always-on error naming the fix, and resolves `[]`.
    */
-  trackSchemaFromEvent(
-    eventName: string,
-    eventProperties: { [propName: string]: any },
-    streamId?: string,
-    options?: GatewayOptions
-  ): Promise<Array<SchemaEntry>> {
+  trackSchemaFromEvent(event: InspectorEvent): Promise<Array<SchemaEntry>> {
+    if (event === null || typeof event !== "object" || Array.isArray(event)) {
+      AvoLog.notAnInspectorEvent();
+      return Promise.resolve([]);
+    }
+    AvoInspector.warnUnknownEventKeys(event);
     const call: TrackCall = { schema: [] };
-    return holdWhileAwaited(
-      this.track(eventName, eventProperties, false, null, null, streamId, options, call),
-      () => call.schema
-    );
+    let work: Promise<Array<SchemaEntry>>;
+    try {
+      // Each field is read once, here: a getter on the event runs only once.
+      const { eventName, eventProperties, streamId, outputReference, originHint, originAppVersion } = event;
+      work = this.track(
+        eventName,
+        // Absent or null: no properties. Every step below handles both, as for a JS caller.
+        eventProperties as { [propName: string]: any },
+        false,
+        null,
+        null,
+        streamId,
+        { outputReference, originHint, originAppVersion },
+        call
+      );
+    } catch (e) {
+      AvoLog.internal(e);
+      work = Promise.reject(INTERNAL_ERROR_MESSAGE);
+    }
+    return holdWhileAwaited(work, () => call.schema);
   }
 
   /**
@@ -679,7 +714,7 @@ export class AvoInspector {
     eventId: string,
     eventHash: string,
     streamId?: string,
-    options?: GatewayOptions
+    options?: CodegenGatewayFields
   ): Promise<Array<SchemaEntry>> {
     const call: TrackCall = { schema: [] };
     return holdWhileAwaited(
@@ -696,7 +731,7 @@ export class AvoInspector {
     eventId: string | null,
     eventHash: string | null,
     streamId: string | undefined,
-    options: GatewayOptions | undefined,
+    options: CodegenGatewayFields | undefined,
     call: TrackCall
   ): Promise<Array<SchemaEntry>> {
     AvoInspector.lastTrackAt = monotonicNowMs();
@@ -712,10 +747,10 @@ export class AvoInspector {
       }
       const avoStreamId = new AvoStreamId(streamId);
       const anonymousId = avoStreamId.streamId || this.generatedAnonymousId;
-      const gatewayOptions = this.resolveGatewayOptions(options);
+      const gatewayFields = this.resolveGatewayFields(options);
 
       if (
-        this.shouldRegisterEvent(eventName, eventProperties, fromAvoFunction, anonymousId, gatewayOptions)
+        this.shouldRegisterEvent(eventName, eventProperties, fromAvoFunction, anonymousId, gatewayFields)
       ) {
         let eventSchema = this.extractSchema(eventProperties, false);
         call.schema = eventSchema;
@@ -734,7 +769,7 @@ export class AvoInspector {
           eventHash,
           anonymousId,
           eventProperties,
-          gatewayOptions
+          gatewayFields
         );
       } else {
         if (AvoInspector.shouldLog) {
@@ -757,9 +792,9 @@ export class AvoInspector {
     eventProperties: { [propName: string]: any },
     fromAvoFunction: boolean,
     anonymousId: string,
-    gatewayOptions: ResolvedGatewayOptions
+    gatewayFields: ResolvedGatewayFields
   ): boolean {
-    if (gatewayOptions.gatewayScoped) {
+    if (gatewayFields.gatewayScoped) {
       return true;
     }
     return this.avoDeduplicator.shouldRegisterEvent(
@@ -782,7 +817,7 @@ export class AvoInspector {
     eventHash: string | null,
     anonymousId: string,
     rawEventProperties: { [propName: string]: any } | undefined,
-    gatewayOptions: ResolvedGatewayOptions
+    gatewayFields: ResolvedGatewayFields
   ): Promise<Array<SchemaEntry>> {
     const samplingRate = this.avoNetworkCallsHandler.getSamplingRate();
     // Stamped at the call: with validation active the event may join the queue later.
@@ -814,7 +849,7 @@ export class AvoInspector {
           eventHash,
           validationResult.metadata,
           validationResult.propertyResults,
-          gatewayOptions,
+          gatewayFields,
           stamp
         );
       } else {
@@ -825,7 +860,7 @@ export class AvoInspector {
           eventId,
           eventHash,
           rawEventProperties,
-          gatewayOptions,
+          gatewayFields,
           stamp
         );
       }
