@@ -127,6 +127,8 @@ describe("AVO_INSPECTOR_MOCK_ENDPOINT", () => {
 
     const logged = (console.log as jest.Mock).mock.calls.map((call) => call.join(" "));
     expect(logged).toContain(`Avo Inspector: [network] POST http://127.0.0.1:${port}`);
+    // The spec fetch's line shows the port too, and the fetch's own path, not the override's.
+    expect(logged).toContain(`Avo Inspector: [network] GET http://127.0.0.1:${port}/trackingPlan/eventSpec?eventName=E`);
     expect(logged.some((line) => line.includes("SECRET-TOKEN"))).toBe(false);
     inspector.destroy();
   });

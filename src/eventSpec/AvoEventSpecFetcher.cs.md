@@ -72,7 +72,7 @@ internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, r
 ## Non-functional requirements
 
 - **IMPORTANT:** callbacks are always invoked asynchronously and with `null` on any failure; `fetch` never throws for network, status or parse problems.
-- Logging (request URL without apiKey/streamId, status, raw body, parsed spec, errors) only when `AvoInspector.shouldLog` is true; non-200 bodies and the full response body are logged in that mode.
+- Logging (request URL as `<scheme>//<host>[:<port>]/trackingPlan/eventSpec?eventName=…`, without apiKey/streamId or an override's path, status, raw body, parsed spec, errors) only when `AvoInspector.shouldLog` is true; non-200 bodies and the full response body are logged in that mode.
 - A request that times out may also emit `error` afterwards (from `destroy`); that late event never settles a newer fetch of the same key.
 - At most 8 concurrent spec requests per process to the API host (across all instances); further requests queue in the agent. Every fetch settles within about `socketWaitTimeoutMs` of being requested if it gets no socket, or within about `fetchTimeoutMs` of getting one.
 

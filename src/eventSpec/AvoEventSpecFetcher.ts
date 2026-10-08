@@ -25,6 +25,8 @@ export class AvoEventSpecFetcher {
   private protocol: "http:" | "https:" = "https:";
   private hostname = "api.avo.app";
   private port: number = 443;
+  // Scheme, host and port (when not the default) for log lines: never the override's path.
+  private origin = "https://api.avo.app";
   private inFlight: Map<string, PendingFetch> = new Map();
   private agent: Agent = sharedAgent;
   private requests: Set<ClientRequest> = new Set();
@@ -49,6 +51,7 @@ export class AvoEventSpecFetcher {
       // URL keeps the brackets of an IPv6 host; request() takes the bare address.
       this.hostname = url.hostname.replace(/^\[(.*)\]$/, "$1");
       this.port = url.port ? Number(url.port) : this.protocol === "http:" ? 80 : 443;
+      this.origin = this.protocol + "//" + url.host;
     }
   }
 
@@ -107,7 +110,7 @@ export class AvoEventSpecFetcher {
       };
 
       if (AvoInspector.shouldLog) {
-        console.log("Avo Inspector: [network] GET " + this.protocol + "//" + options.hostname + AvoEventSpecFetcher.specEndpoint + "?eventName=" + eventName);
+        console.log("Avo Inspector: [network] GET " + this.origin + AvoEventSpecFetcher.specEndpoint + "?eventName=" + eventName);
       }
 
       const sent = this.send(options, eventName, settle);
