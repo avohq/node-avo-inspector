@@ -39,7 +39,7 @@ Then report each event where you track it:
 inspector.trackSchemaFromEvent("Purchase", { amount: 42 });
 ```
 
-With a gateway-scoped Inspector API key, pass all three gateway values in the options object, the fourth argument (see [Gateway options](#gateway-options)):
+With a gateway-scoped API key, always pass `originHint` and `originAppVersion`. Pass `outputReference` when the payload was bound for a specific output; leave it out for an observation at the gateway checkpoint. They go in the options object, the fourth argument (see [Gateway options](#gateway-options)):
 
 ```javascript
 inspector.trackSchemaFromEvent("Purchase", { amount: 42 }, undefined, {
