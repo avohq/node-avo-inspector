@@ -3,13 +3,14 @@ import { AvoInspectorEnv } from "../AvoInspectorEnv";
 
 import { error, defaultOptions } from "./constants";
 import { AvoNetworkCallsHandler } from "../AvoNetworkCallsHandler";
+import { VERSION } from "../AvoInspectorVersion";
 
 jest.mock("../AvoNetworkCallsHandler");
 
 describe("Initialization", () => {
 
   test("Network Handler is initialized on Inspector init", () => {
-    const inspectorVersion = process.env.npm_package_version || "";
+    const inspectorVersion = VERSION;
     const { apiKey, env, version, appName } = defaultOptions;
 
     let inspector = new AvoInspector(defaultOptions);
@@ -274,7 +275,7 @@ describe("Initialization", () => {
   });
 
   test("publicEncryptionKey is forwarded to AvoNetworkCallsHandler when provided", () => {
-    const inspectorVersion = process.env.npm_package_version || "";
+    const inspectorVersion = VERSION;
 
     (AvoNetworkCallsHandler as unknown as jest.Mock).mockClear();
 
@@ -296,7 +297,7 @@ describe("Initialization", () => {
   });
 
   test("publicEncryptionKey is forwarded as undefined to AvoNetworkCallsHandler when not provided", () => {
-    const inspectorVersion = process.env.npm_package_version || "";
+    const inspectorVersion = VERSION;
 
     (AvoNetworkCallsHandler as unknown as jest.Mock).mockClear();
 
