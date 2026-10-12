@@ -321,8 +321,11 @@ describe("wire protocol", () => {
     expect(captured).toHaveLength(1);
   });
 
-  test("VERSION matches the package version", () => {
-    expect(VERSION).toBe(require("../../package.json").version);
+  test("VERSION matches the package version, without a pre-release suffix", () => {
+    // libVersion must be plain SemVer on the wire, so a pre-release package (2.0.0-beta.0)
+    // still sends its release version (2.0.0).
+    expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(VERSION).toBe(require("../../package.json").version.replace(/-.*$/, ""));
   });
 });
 

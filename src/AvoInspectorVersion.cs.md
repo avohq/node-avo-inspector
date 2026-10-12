@@ -16,4 +16,4 @@ export const LIB_PLATFORM = "node";  // sent as `libPlatform` on every event and
 
 ## Non-functional requirements
 
-- **`VERSION` must equal `package.json` `version`**; both are updated together on every release.
+- **`VERSION` must equal `package.json` `version` without any pre-release suffix** (a `2.0.0-beta.0` package sends `2.0.0`, because `libVersion` must be plain SemVer); both are updated together on every release.
