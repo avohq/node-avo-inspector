@@ -10,7 +10,15 @@ afterEach(() => {
 });
 
 const spec = (eventName: string) => ({
-  eventSpec: { eventName, properties: [{ propertyName: "a", propertyType: "int" }, { propertyName: "b", propertyType: "list" }] },
+  eventSpec: {
+    eventName,
+    events: [{
+      branchId: "b",
+      baseEventId: "evt",
+      variantIds: [],
+      props: { a: { type: "int", required: false }, b: { type: "object", required: false, isList: true } },
+    }],
+  },
   metadata: { schemaId: "s", branchId: "b", latestActionId: "l", sourceId: "src" },
 });
 

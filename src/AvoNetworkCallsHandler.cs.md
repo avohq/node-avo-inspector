@@ -33,7 +33,7 @@ interface ResolvedGatewayFields {
 type EventProperty = (EventPropertyEncrypted | EventPropertyPlain) & EventPropertyValidation;
 // EventPropertyPlain:     { propertyName; propertyType; children? }
 // EventPropertyEncrypted: EventPropertyPlain & { encryptedPropertyValue: string }
-// EventPropertyValidation:{ failedEventIds?: string[]; passedEventIds?: string[] }
+// EventPropertyValidation:{ failedEventIds?: string[] }
 interface EventSchemaBody extends BaseBody {
   type: "event"; eventName: string; eventProperties: EventProperty[];
   avoFunction: boolean; eventId: string | null; eventHash: string | null;
@@ -106,7 +106,7 @@ Same encryption decision as above, returning just the property list.
 ### bodyForValidatedEventSchemaCall(anonymousId, eventName, eventProperties, eventId, eventHash, eventSpecMetadata, propertyResults, gatewayFields?, stamp?): EventSchemaBody
 
 1. Index `propertyResults` by `propertyName` (last one wins).
-2. For each property with a result, copy it and attach `failedEventIds` / `passedEventIds` only when the respective array is non-empty; properties without a result pass through unchanged.
+2. For each property with a result, copy it and attach `failedEventIds` when non-empty; properties without a result pass through unchanged. When the result has `children` outcomes, the copy's `children` are rebuilt the same way, recursively: an object child (with a string `propertyName`) gets its own outcome; an array child (a list's element schema) has each of its object entries merged by name, so every element schema of a list of objects carries the failure; anything else passes through. **IMPORTANT:** `passedEventIds` is never sent: Avo's ingestion reads only `failedEventIds`, so a "passed" list would hide the failures it stands for.
 3. Base body plus `type: "event"`, `eventName`, merged `eventProperties`, `eventSpecMetadata`, and the same Avo-function fields as above. Properties are not encrypted here (callers pass already-built properties).
 
 ### encryptProperties (private)

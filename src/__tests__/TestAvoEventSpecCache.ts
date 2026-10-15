@@ -5,7 +5,12 @@ function makeSpec(eventName: string): EventSpecResponse {
   return {
     eventSpec: {
       eventName,
-      properties: [{ propertyName: "prop1", propertyType: "string" }],
+      events: [{
+        branchId: "branch1",
+        baseEventId: "event1",
+        variantIds: [],
+        props: { prop1: { type: "string", required: false, allowedValues: { '["a"]': ["event1"] } } },
+      }],
     },
     metadata: {
       schemaId: "schema1",
