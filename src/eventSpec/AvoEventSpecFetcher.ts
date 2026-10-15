@@ -1,8 +1,42 @@
 import { request, Agent, RequestOptions } from "https";
 import { request as httpRequest, Agent as HttpAgent, ClientRequest } from "http";
-import { EventSpecResponse, EventSpec, EventSpecMetadata, PropertyConstraint } from "./AvoEventSpecFetchTypes";
+import {
+  EventSpecResponse,
+  EventSpecEntry,
+  EventSpecMetadata,
+  PropertyConstraints,
+} from "./AvoEventSpecFetchTypes";
 import { AvoInspector } from "../AvoInspector";
 import { AvoLog } from "../AvoLog";
+
+// Nesting the parser follows in a spec's children; deeper levels are left empty. Validation
+// itself stops at the second level (EventValidator), so this only bounds the parse.
+const MAX_PARSE_DEPTH = 10;
+
+const isWireObject = (value: unknown): value is { [key: string]: any } =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+// A constraint key -> event IDs mapping; IDs that are not strings, and keys left with none,
+// are dropped. Undefined when nothing is left.
+const parseIdMapping = (wire: unknown): Record<string, string[]> | undefined => {
+  if (!isWireObject(wire)) {
+    return undefined;
+  }
+  const result: Record<string, string[]> = Object.create(null);
+  let found = false;
+  for (const key of Object.keys(wire)) {
+    const ids = wire[key];
+    if (!Array.isArray(ids)) {
+      continue;
+    }
+    const eventIds = ids.filter((id: unknown): id is string => typeof id === "string");
+    if (eventIds.length > 0) {
+      result[key] = eventIds;
+      found = true;
+    }
+  }
+  return found ? result : undefined;
+};
 
 type FetchCallback = (result: EventSpecResponse | null) => void;
 
@@ -261,11 +295,12 @@ export class AvoEventSpecFetcher {
    * Parse the wire format from /trackingPlan/eventSpec into our internal types.
    *
    * Wire format:
-   *   { events: [{ b, id, vids, p: { "PropName": { t: "string", r: true, v: {...}, rx: {...} } } }],
+   *   { events: [{ b, id, vids, p: { "PropName": { t, r, l?, p?, v?, rx?, minmax?, children? } } }],
    *     metadata: { schemaId, branchId, latestActionId, sourceId } }
+   *   where p, v, rx and minmax each map a constraint key to the event IDs that require it.
    *
    * Internal format:
-   *   { eventSpec: { eventName, properties: [{ propertyName, propertyType, regex? }] } | null,
+   *   { eventSpec: { eventName, events: [{ branchId, baseEventId, variantIds, props }] } | null,
    *     metadata: { schemaId, branchId, latestActionId, sourceId } }
    */
   static parseWireResponse(wire: any, eventName: string): EventSpecResponse {
@@ -276,38 +311,83 @@ export class AvoEventSpecFetcher {
       sourceId: wire.metadata?.sourceId ?? "",
     };
 
-    if (!wire.events || !Array.isArray(wire.events) || wire.events.length === 0) {
-      return { eventSpec: null, metadata };
-    }
-
-    // Use the first event entry (the endpoint returns specs for the requested event)
-    const entry = wire.events[0];
-    const properties: PropertyConstraint[] = [];
-
-    if (entry.p && typeof entry.p === "object") {
-      for (const propName of Object.keys(entry.p)) {
-        const constraint = entry.p[propName];
-        const prop: PropertyConstraint = {
-          propertyName: propName,
-          propertyType: constraint?.t ?? "unknown",
-        };
-        // Extract regex pattern if present (rx field maps regex patterns to event IDs)
-        if (constraint?.rx && typeof constraint.rx === "object") {
-          const patterns = Object.keys(constraint.rx);
-          if (patterns.length > 0) {
-            prop.regex = patterns[0];
-          }
+    const events: EventSpecEntry[] = [];
+    if (Array.isArray(wire.events)) {
+      for (const entry of wire.events) {
+        const parsed = AvoEventSpecFetcher.parseEventEntry(entry);
+        if (parsed !== null) {
+          events.push(parsed);
         }
-        properties.push(prop);
       }
     }
 
-    const eventSpec: EventSpec = {
-      eventName,
-      properties,
-    };
+    if (events.length === 0) {
+      return { eventSpec: null, metadata };
+    }
+    return { eventSpec: { eventName, events }, metadata };
+  }
 
-    return { eventSpec, metadata };
+  // An entry without a string id has no event to attribute results to, so it is skipped.
+  private static parseEventEntry(entry: any): EventSpecEntry | null {
+    if (!isWireObject(entry) || typeof entry.id !== "string") {
+      return null;
+    }
+    return {
+      branchId: typeof entry.b === "string" ? entry.b : "",
+      baseEventId: entry.id,
+      variantIds: Array.isArray(entry.vids)
+        ? entry.vids.filter((id: unknown): id is string => typeof id === "string")
+        : [],
+      props: AvoEventSpecFetcher.parseConstraintsByName(entry.p, 0),
+    };
+  }
+
+  // Null-prototype, so a property named "constructor" or "__proto__" is an ordinary key.
+  private static parseConstraintsByName(wire: any, depth: number): Record<string, PropertyConstraints> {
+    const result: Record<string, PropertyConstraints> = Object.create(null);
+    if (!isWireObject(wire) || depth >= MAX_PARSE_DEPTH) {
+      return result;
+    }
+    for (const name of Object.keys(wire)) {
+      const constraints = AvoEventSpecFetcher.parseConstraints(wire[name], depth);
+      if (constraints !== null) {
+        result[name] = constraints;
+      }
+    }
+    return result;
+  }
+
+  private static parseConstraints(wire: any, depth: number): PropertyConstraints | null {
+    if (!isWireObject(wire)) {
+      return null;
+    }
+    const constraints: PropertyConstraints = {
+      type: typeof wire.t === "string" ? wire.t : "unknown",
+      required: wire.r === true,
+    };
+    if (wire.l === true) {
+      constraints.isList = true;
+    }
+    const pinnedValues = parseIdMapping(wire.p);
+    if (pinnedValues) {
+      constraints.pinnedValues = pinnedValues;
+    }
+    const allowedValues = parseIdMapping(wire.v);
+    if (allowedValues) {
+      constraints.allowedValues = allowedValues;
+    }
+    const regexPatterns = parseIdMapping(wire.rx);
+    if (regexPatterns) {
+      constraints.regexPatterns = regexPatterns;
+    }
+    const minMaxRanges = parseIdMapping(wire.minmax);
+    if (minMaxRanges) {
+      constraints.minMaxRanges = minMaxRanges;
+    }
+    if (isWireObject(wire.children)) {
+      constraints.children = AvoEventSpecFetcher.parseConstraintsByName(wire.children, depth + 1);
+    }
+    return constraints;
   }
 
   /** Aborts this instance's in-flight requests; the shared agent stays usable. */

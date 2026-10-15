@@ -7,7 +7,11 @@ import { formatSchema, hasHeaderControlChar, hasNonLatin1Char } from "./utils";
 import { request as httpsRequest } from "https";
 import { request as httpRequest, ClientRequest } from "http";
 import { gzip } from "zlib";
-import { EventSpecMetadata, PropertyValidationResult } from "./eventSpec/AvoEventSpecFetchTypes";
+import {
+  EventSpecMetadata,
+  PropertyValidationOutcome,
+  PropertyValidationResult,
+} from "./eventSpec/AvoEventSpecFetchTypes";
 
 export interface BaseBody {
   apiKey: string;
@@ -54,7 +58,6 @@ export interface EventPropertyPlain {
 
 export interface EventPropertyValidation {
   failedEventIds?: string[];
-  passedEventIds?: string[];
 }
 
 export type EventProperty = (EventPropertyEncrypted | EventPropertyPlain) & EventPropertyValidation;
@@ -421,27 +424,15 @@ export class AvoNetworkCallsHandler {
     gatewayFields?: ResolvedGatewayFields,
     stamp?: CallStamp
   ): EventSchemaBody {
-    // Build a map of validation results by property name
-    const validationMap = new Map<string, PropertyValidationResult>();
+    const validationMap = new Map<string, PropertyValidationOutcome>();
     for (const result of propertyResults) {
       validationMap.set(result.propertyName, result);
     }
 
     // Merge validation results into eventProperties (matching Android)
-    const mergedProperties: Array<EventProperty> = eventProperties.map((prop) => {
-      const validation = validationMap.get(prop.propertyName);
-      if (validation) {
-        const merged: EventProperty = { ...prop };
-        if (validation.failedEventIds.length > 0) {
-          merged.failedEventIds = validation.failedEventIds;
-        }
-        if (validation.passedEventIds.length > 0) {
-          merged.passedEventIds = validation.passedEventIds;
-        }
-        return merged;
-      }
-      return prop;
-    });
+    const mergedProperties: Array<EventProperty> = eventProperties.map((prop) =>
+      AvoNetworkCallsHandler.withValidation(prop, validationMap.get(prop.propertyName))
+    );
 
     let body = this.createBaseCallBody(anonymousId, gatewayFields, stamp) as EventSchemaBody;
     body.type = "event";
@@ -452,6 +443,41 @@ export class AvoNetworkCallsHandler {
     AvoNetworkCallsHandler.applyAvoFunctionFields(body, eventId, eventHash);
 
     return body;
+  }
+
+  /**
+   * A property with its failed event IDs, and those of its object properties merged into its
+   * children. A list's children are its element schemas; each object element gets the
+   * results of the properties it has (a list of objects is validated across all its items).
+   */
+  private static withValidation<P extends { children?: any }>(
+    prop: P,
+    outcome: PropertyValidationOutcome | undefined
+  ): P & EventPropertyValidation {
+    if (outcome === undefined) {
+      return prop;
+    }
+    const merged: P & EventPropertyValidation = { ...prop };
+    if (outcome.failedEventIds.length > 0) {
+      merged.failedEventIds = outcome.failedEventIds;
+    }
+    const childOutcomes = outcome.children;
+    if (childOutcomes !== undefined && Array.isArray(prop.children)) {
+      const mergeChild = (child: any): any => {
+        if (Array.isArray(child)) {
+          return child.map(mergeChild);
+        }
+        if (child !== null && typeof child === "object" && typeof child.propertyName === "string") {
+          const childOutcome = Object.prototype.hasOwnProperty.call(childOutcomes, child.propertyName)
+            ? childOutcomes[child.propertyName]
+            : undefined;
+          return AvoNetworkCallsHandler.withValidation(child, childOutcome);
+        }
+        return child;
+      };
+      merged.children = prop.children.map(mergeChild);
+    }
+    return merged;
   }
 
   // An event with an eventId came from an Avo function (Codegen): it carries the id and hash.

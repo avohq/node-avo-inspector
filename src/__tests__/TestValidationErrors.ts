@@ -12,7 +12,15 @@ beforeEach(() => {
   // The spec delivered asynchronously.
   jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((eventName, _s, callback) => {
     setImmediate(() => callback({
-      eventSpec: { eventName, properties: [{ propertyName: "a", propertyType: "string", regex: ".*" }] },
+      eventSpec: {
+        eventName,
+        events: [{
+          branchId: "b",
+          baseEventId: "evt",
+          variantIds: [],
+          props: { a: { type: "string", required: false, regexPatterns: { ".*": ["evt"] } } },
+        }],
+      },
       metadata: { schemaId: "s", branchId: "b", latestActionId: "a", sourceId: "src" },
     }));
   });

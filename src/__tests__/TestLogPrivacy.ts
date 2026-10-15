@@ -56,7 +56,15 @@ test("log lines show schema types and never property values or the API key", asy
   // Event spec validation, with a regex the value fails.
   jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((eventName, _s, callback) =>
     callback({
-      eventSpec: { eventName, properties: [{ propertyName: "email", propertyType: "string", regex: "^nope$" }] },
+      eventSpec: {
+        eventName,
+        events: [{
+          branchId: "b",
+          baseEventId: "evt",
+          variantIds: [],
+          props: { email: { type: "string", required: false, regexPatterns: { "^nope$": ["evt"] } } },
+        }],
+      },
       metadata: { schemaId: "s", branchId: "b", latestActionId: "a", sourceId: "src" },
     })
   );
@@ -104,7 +112,7 @@ describe("caught errors never print their message", () => {
 
   test("an event spec validation that throws with a property value logs only the error's type", async () => {
     jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((_e, _s, callback) =>
-      callback({ eventSpec: { eventName: "E", properties: [] }, metadata: {} } as any)
+      callback({ eventSpec: { eventName: "E", events: [] }, metadata: {} } as any)
     );
     const inspector = new AvoInspector({ apiKey: API_KEY, env: "staging", version: "1.0.0", disableBatchTimer: true });
     inspector.enableLogging(true);

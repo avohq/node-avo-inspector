@@ -92,7 +92,12 @@ describe("AvoEventSpecFetcher", () => {
     const expectedParsed: EventSpecResponse = {
       eventSpec: {
         eventName: "click",
-        properties: [{ propertyName: "target", propertyType: "string" }],
+        events: [{
+          branchId: "b1",
+          baseEventId: "evt1",
+          variantIds: [],
+          props: { target: { type: "string", required: true } },
+        }],
       },
       metadata,
     };
@@ -115,7 +120,10 @@ describe("AvoEventSpecFetcher", () => {
     const wire = wireResponse("purchase", {}, metadata);
 
     const expectedParsed: EventSpecResponse = {
-      eventSpec: { eventName: "purchase", properties: [] },
+      eventSpec: {
+        eventName: "purchase",
+        events: [{ branchId: "b1", baseEventId: "evt1", variantIds: [], props: {} }],
+      },
       metadata,
     };
 
@@ -302,7 +310,10 @@ describe("AvoEventSpecFetcher", () => {
     const wire = wireResponse("click", {}, metadata);
 
     const expectedParsed: EventSpecResponse = {
-      eventSpec: { eventName: "click", properties: [] },
+      eventSpec: {
+        eventName: "click",
+        events: [{ branchId: "b1", baseEventId: "evt1", variantIds: [], props: {} }],
+      },
       metadata,
     };
 
@@ -328,29 +339,101 @@ describe("AvoEventSpecFetcher", () => {
     });
   });
 
-  test("parseWireResponse transforms wire format correctly", () => {
+  test("parseWireResponse keeps every value constraint, event and variant", () => {
     const wire = {
-      events: [{
-        b: "main",
-        id: "evt1",
-        vids: [],
-        p: {
-          "Cli Action": { t: "string", r: true, v: { '["Status","Pull"]': ["evt1"] } },
-          "Client": { t: "string", r: true },
+      events: [
+        {
+          b: "main",
+          id: "evt1",
+          vids: ["evt1.v1"],
+          p: {
+            "Cli Action": { t: "string", r: true, v: { '["Pull","Status"]': ["evt1"], '["Pull"]': ["evt1.v1"] } },
+            "Method": { t: "string", r: false, p: { email: ["evt1.v1"] } },
+            "Code": { t: "string", r: false, rx: { "^[A-Z]+$": ["evt1", "evt1.v1"] } },
+            "Amount": { t: "float", r: false, minmax: { "0,100": ["evt1"] } },
+            "Tags": { t: "string", r: false, l: true, v: { '["a"]': ["evt1"] } },
+            "Cart": {
+              t: "object",
+              r: false,
+              children: { "Currency": { t: "string", r: true, v: { '["EUR"]': ["evt1"] } } },
+            },
+          },
         },
-      }],
+        { b: "main", id: "evt2", vids: [], p: { "Cli Action": { t: "string", r: true, v: { '["Init"]': ["evt2"] } } } },
+      ],
       metadata: { schemaId: "s1", branchId: "main", latestActionId: "a1", sourceId: "src1" },
     };
 
     const result = AvoEventSpecFetcher.parseWireResponse(wire, "Cli Invoked");
 
     expect(result.metadata).toEqual({ schemaId: "s1", branchId: "main", latestActionId: "a1", sourceId: "src1" });
-    expect(result.eventSpec).not.toBeNull();
-    expect(result.eventSpec!.eventName).toBe("Cli Invoked");
-    expect(result.eventSpec!.properties).toEqual([
-      { propertyName: "Cli Action", propertyType: "string" },
-      { propertyName: "Client", propertyType: "string" },
-    ]);
+    expect(result.eventSpec).toEqual({
+      eventName: "Cli Invoked",
+      events: [
+        {
+          branchId: "main",
+          baseEventId: "evt1",
+          variantIds: ["evt1.v1"],
+          props: {
+            "Cli Action": {
+              type: "string",
+              required: true,
+              allowedValues: { '["Pull","Status"]': ["evt1"], '["Pull"]': ["evt1.v1"] },
+            },
+            "Method": { type: "string", required: false, pinnedValues: { email: ["evt1.v1"] } },
+            "Code": { type: "string", required: false, regexPatterns: { "^[A-Z]+$": ["evt1", "evt1.v1"] } },
+            "Amount": { type: "float", required: false, minMaxRanges: { "0,100": ["evt1"] } },
+            "Tags": { type: "string", required: false, isList: true, allowedValues: { '["a"]': ["evt1"] } },
+            "Cart": {
+              type: "object",
+              required: false,
+              children: { "Currency": { type: "string", required: true, allowedValues: { '["EUR"]': ["evt1"] } } },
+            },
+          },
+        },
+        {
+          branchId: "main",
+          baseEventId: "evt2",
+          variantIds: [],
+          props: { "Cli Action": { type: "string", required: true, allowedValues: { '["Init"]': ["evt2"] } } },
+        },
+      ],
+    });
+  });
+
+  test("parseWireResponse skips malformed entries, IDs and constraints", () => {
+    const wire = {
+      events: [
+        null,
+        { b: "main", vids: [], p: {} },
+        {
+          id: "evt1",
+          vids: ["evt1.v1", 7],
+          p: {
+            "Plan": { t: 5, v: { '["free"]': ["evt1", 3], '["pro"]': "evt1", '["x"]': [] }, rx: [] },
+            "Broken": "not an object",
+          },
+        },
+      ],
+      metadata: {},
+    };
+
+    const result = AvoEventSpecFetcher.parseWireResponse(wire, "E");
+
+    expect(result.eventSpec).toEqual({
+      eventName: "E",
+      events: [{
+        branchId: "",
+        baseEventId: "evt1",
+        variantIds: ["evt1.v1"],
+        props: { "Plan": { type: "unknown", required: false, allowedValues: { '["free"]': ["evt1"] } } },
+      }],
+    });
+  });
+
+  test("parseWireResponse returns null eventSpec when no entry has an id", () => {
+    const result = AvoEventSpecFetcher.parseWireResponse({ events: [{ p: {} }], metadata: {} }, "E");
+    expect(result.eventSpec).toBeNull();
   });
 
   test("parseWireResponse returns null eventSpec for empty events array", () => {

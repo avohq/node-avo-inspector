@@ -104,7 +104,7 @@ const VALIDATION_GRACE_MS = 1_000;
 // 8-socket pool, so past this an event is sent without validation rather than queued.
 const MAX_WAITING_VALIDATIONS = 1_000;
 
-// String() for regex validation; a value with no string conversion (a null-prototype object)
+// String() for a warning; a value with no string conversion (a null-prototype object)
 // falls back to its tag, e.g. "[object Object]", which String() gives a plain object.
 const valueToString = (value: unknown): string => {
   try {
@@ -876,7 +876,7 @@ export class AvoInspector {
     // that settles in the same event-loop turn, and flush() waits for that send.
     const validation = { flushRequested: false };
     const outcome = this.untilDestroyed<ValidationResult | null>(
-      this.untilGivenUp(this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId)),
+      this.untilGivenUp(this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties)),
       null
     )
       .catch((err): ValidationResult | null => {
@@ -1131,8 +1131,7 @@ export class AvoInspector {
       children?: any;
     }>,
     anonymousId: string,
-    rawEventProperties?: { [propName: string]: any },
-    eventId?: string | null
+    rawEventProperties?: { [propName: string]: any }
   ): Promise<ValidationResult | null> {
     if (!this.eventSpecFetcher || !this.eventSpecCache || !this.eventValidator) {
       if (AvoInspector.shouldLog) {
@@ -1156,30 +1155,18 @@ export class AvoInspector {
         return null;
       }
 
-      const eventProperties = eventSchema.map((prop) => ({
-        propertyName: prop.propertyName,
-        propertyType: prop.propertyType,
-        ...(rawEventProperties && rawEventProperties[prop.propertyName] !== undefined
-          ? { propertyValue: valueToString(rawEventProperties[prop.propertyName]) }
-          : {}),
-      }));
-
+      const specEventCount = specResponse.eventSpec.events.length;
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: Validating event: " + eventName
-          + " with " + eventProperties.length + " properties"
-          + " against " + specResponse.eventSpec.properties.length + " spec properties");
+          + " with " + eventSchema.length + " properties"
+          + " against " + specEventCount + " spec event" + (specEventCount === 1 ? "" : "s"));
       }
 
-      const validationId = eventId || eventName;
-      const results = validator.validate(
-        specResponse.eventSpec,
-        eventProperties,
-        validationId
-      );
+      const results = validator.validate(specResponse.eventSpec, eventSchema, rawEventProperties);
 
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: Validation complete for event: " + eventName
-          + " with " + results.length + " property results");
+          + " with " + results.length + " failed propert" + (results.length === 1 ? "y" : "ies"));
       }
 
       return { metadata: specResponse.metadata, propertyResults: results };

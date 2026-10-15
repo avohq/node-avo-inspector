@@ -30,9 +30,9 @@ class AvoEventSpecFetcher {
 Wire format (input) and internal format (output):
 
 ```
-wire:     { events: [{ b, id, vids, p: { "<prop>": { t, r, v, rx: { "<pattern>": [...] } } } }],
+wire:     { events: [{ b, id, vids, p: { "<prop>": { t, r, l?, p?, v?, rx?, minmax?, children? } } }],
             metadata: { schemaId, branchId, latestActionId, sourceId } }
-internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, regex? }] } | null,
+internal: { eventSpec: { eventName, events: [{ branchId, baseEventId, variantIds, props }] } | null,
             metadata: { schemaId, branchId, latestActionId, sourceId } }
 ```
 
@@ -60,9 +60,11 @@ internal: { eventSpec: { eventName, properties: [{ propertyName, propertyType, r
 ### parseWireResponse
 
 1. `metadata` fields default to `""` when missing.
-2. Missing, non-array or empty `events` -> `{ eventSpec: null, metadata }`.
-3. Otherwise only `events[0]` is used. Each key of its `p` object becomes a property: `propertyType = t ?? "unknown"`; if `rx` is a non-empty object its **first key** becomes `regex`. Other constraint fields (`r`, `v`, ...) are ignored.
-4. `eventSpec.eventName` is the requested `eventName`, not a value from the wire.
+2. Every entry of `events` that is an object with a string `id` becomes an `EventSpecEntry`: `branchId = b` (or `""`), `baseEventId = id`, `variantIds` = the string items of `vids`, `props` from `p`. Other entries are skipped. Several entries arise when name mapping matches several events; all are kept.
+3. Each key of `p` (or of a property's `children`) whose value is an object becomes `PropertyConstraints`: `type = t` when a string, else `"unknown"`; `required = (r === true)`; `isList` only when `l === true`; `pinnedValues` from `p`, `allowedValues` from `v`, `regexPatterns` from `rx`, `minMaxRanges` from `minmax`, `children` (recursively) from `children`. Each mapping keeps, per key, only the string event IDs, drops keys left with none, and is absent when nothing is left.
+4. **IMPORTANT:** every parsed name-keyed record is null-prototype, so a property named `constructor` or `__proto__` is an ordinary key. `children` nesting is parsed to at most 10 levels (deeper ones are empty); `EventValidator` checks only one level of it.
+5. No usable entry -> `{ eventSpec: null, metadata }` (missing, non-array or empty `events` included).
+6. `eventSpec.eventName` is the requested `eventName`, not a value from the wire.
 
 ### destroy
 
