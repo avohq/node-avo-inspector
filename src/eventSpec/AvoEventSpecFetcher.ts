@@ -5,7 +5,9 @@ import {
   EventSpecEntry,
   EventSpecMetadata,
   PropertyConstraints,
+  EventSpecCoordinates,
 } from "./AvoEventSpecFetchTypes";
+import { coordinatesKeySuffix, normalizeCoordinates } from "./AvoEventSpecCache";
 import { AvoInspector } from "../AvoInspector";
 import { AvoLog } from "../AvoLog";
 
@@ -89,12 +91,18 @@ export class AvoEventSpecFetcher {
     }
   }
 
+  /**
+   * `coordinates`: the event's gateway coordinates. Each non-blank one is sent as a query
+   * parameter and is part of the dedupe key; without any, the request and key are those of
+   * a plain source fetch.
+   */
   fetch(
     eventName: string,
     streamId: string,
-    callback: FetchCallback
+    callback: FetchCallback,
+    coordinates?: EventSpecCoordinates
   ): void {
-    const dedupeKey = `${this.apiKey}:${streamId}:${eventName}`;
+    const dedupeKey = `${this.apiKey}:${streamId}:${eventName}` + coordinatesKeySuffix(coordinates);
 
     // In-flight dedup: if there's already a request in flight for this key,
     // queue the callback
@@ -131,6 +139,14 @@ export class AvoEventSpecFetcher {
         eventName,
         streamId,
       });
+      // Appended after the source params, so a fetch without coordinates is unchanged.
+      const { originHint, outputReference } = normalizeCoordinates(coordinates);
+      if (originHint !== undefined) {
+        queryParams.append("originHint", originHint);
+      }
+      if (outputReference !== undefined) {
+        queryParams.append("outputReference", outputReference);
+      }
 
       const options = {
         hostname: this.hostname,

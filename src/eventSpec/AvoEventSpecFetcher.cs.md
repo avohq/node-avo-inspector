@@ -13,13 +13,14 @@ Fetches the tracking-plan event spec for one event from the Avo API over HTTPS, 
 type FetchCallback = (result: EventSpecResponse | null) => void;
 class AvoEventSpecFetcher {
   constructor(apiKey: string, mockEndpoint?: string | null);
-  fetch(eventName: string, streamId: string, callback: FetchCallback): void;
+  fetch(eventName: string, streamId: string, callback: FetchCallback, coordinates?: EventSpecCoordinates): void;
   static parseWireResponse(wire: any, eventName: string): EventSpecResponse;
   destroy(): void;
 }
 ```
 
-- In-flight map: dedupe key `"<apiKey>:<streamId>:<eventName>"` -> `{ callbacks, owner }`: the waiting callbacks and an owner token identifying the request that serves the key.
+- `EventSpecCoordinates` (`AvoEventSpecFetchTypes`): `{ originHint?, outputReference? }`, the event's gateway coordinates. Normalized here as on the track body (`normalizeCoordinates` in `AvoEventSpecCache`): trimmed, and a blank or non-string one is absent.
+- In-flight map: dedupe key `"<apiKey>:<streamId>:<eventName>"` plus `coordinatesKeySuffix(coordinates)` (`""` without coordinates, else `"\0"` + JSON `[originHint|null, outputReference|null]`) -> `{ callbacks, owner }`: the waiting callbacks and an owner token identifying the request that serves the key.
 - Target: `https://api.avo.app:443` by default. With a `mockEndpoint` (the valid `AVO_INSPECTOR_MOCK_ENDPOINT` override, as read by `AvoNetworkCallsHandler`), that URL's scheme, host and port (default 80/443); its path and query are not used.
 - Per-fetch deadline: `private static fetchTimeoutMs = 10_000` (overridable in tests), counted from the moment the request is assigned a socket.
 - Socket-wait deadline: `private static socketWaitTimeoutMs = 10_000` (overridable in tests), counted from the request until it is assigned a socket.
@@ -45,7 +46,7 @@ internal: { eventSpec: { eventName, events: [{ branchId, baseEventId, variantIds
 ### fetch
 
 1. Build the dedupe key. If a request for that key is already in flight, append the callback and return (no new request).
-2. Otherwise register `{ callbacks: [callback], owner }` with a fresh owner token, then send `GET <target>/trackingPlan/eventSpec?apiKey=&eventName=&streamId=` with `Accept: application/json` (over `http` for an `http:` mock endpoint, `https` otherwise), through the shared agent, and add the request to the instance's request set. Start the socket-wait timer (unref'd) at once. When the request is assigned a socket (and has not settled yet), replace it with the fetch's deadline timer (unref'd).
+2. Otherwise register `{ callbacks: [callback], owner }` with a fresh owner token, then send `GET <target>/trackingPlan/eventSpec?apiKey=&eventName=&streamId=`, then `&originHint=` and `&outputReference=` for each normalized coordinate present (never an empty one), with `Accept: application/json` (over `http` for an `http:` mock endpoint, `https` otherwise), through the shared agent, and add the request to the instance's request set. Start the socket-wait timer (unref'd) at once. When the request is assigned a socket (and has not settled yet), replace it with the fetch's deadline timer (unref'd).
    **IMPORTANT:** everything after the key is registered runs inside one try: any synchronous throw (building the query or the debug line, `request()` itself, wiring the listeners) destroys the request if one was created and settles the key with `null` (callbacks deferred). Otherwise the key would stay registered with no request behind it, and every later fetch of it would wait forever. The debug line prints the event name as is, never `encodeURIComponent` (which throws for a lone surrogate).
 3. On response end:
    - status != 200 -> settle with `null`.
@@ -72,6 +73,8 @@ internal: { eventSpec: { eventName, events: [{ branchId, baseEventId, variantIds
 - **IMPORTANT:** the shared agent is left intact, so other instances (and later instances) keep working.
 
 ## Non-functional requirements
+
+- **IMPORTANT:** a fetch without coordinates (absent, `{}`, or only blank values) sends exactly the source request, `?apiKey=&eventName=&streamId=`, and uses the plain dedupe key. Source keys ignore the coordinates; a gateway key answers 404 without `originHint`, which settles with `null` like any non-200.
 
 - **IMPORTANT:** callbacks are always invoked asynchronously and with `null` on any failure; `fetch` never throws for network, status or parse problems.
 - Logging (request URL as `<scheme>//<host>[:<port>]/trackingPlan/eventSpec?eventName=…`, without apiKey/streamId or an override's path, status, raw body, parsed spec, errors) only when `AvoInspector.shouldLog` is true; non-200 bodies and the full response body are logged in that mode.

@@ -150,7 +150,8 @@ Called by application code (manual tracking) and by Avo Codegen (`_avoFunctionTr
 ### Event spec validation (fetchAndValidate)
 
 - Returns null without fetching when validation is not set up (prod, or after `destroy()`).
-- Cache key: `AvoEventSpecCache.makeKey(apiKey, anonymousId, eventName)`.
+- Gateway coordinates: the event's resolved `originHint` / `outputReference` (the values on the track body; absent when blank) are passed to the fetch and to the cache key, so a gateway key returns the spec of that checkpoint and each checkpoint's spec is cached and fetched on its own. Without them both are those of a source fetch.
+- Cache key: `AvoEventSpecCache.makeKey(apiKey, anonymousId, eventName, coordinates)`: `"apiKey\0streamId\0eventName"`, plus `"\0"` and JSON `[originHint|null, outputReference|null]` when either coordinate is present.
 - Cache hit: validates against the cached response. Cache miss: fetches; a non-null response is cached and validated; a null response returns null. Every track sharing one fetch stores the same response object; the cache ignores a store of the value a key already holds, so such a burst counts as one cache operation and does not rotate unrelated entries out.
 - **Waiting cap:** at most 1,000 events wait for a spec fetch at once, counted across every instance (the fetches share one 8-socket pool). A cache miss past the cap returns null at once (sent without validation; logged only when logging is on) instead of fetching. A waiting event frees its place when its fetch settles, when `fetch()` throws synchronously (the call then falls back to an unvalidated send), or when its instance is destroyed.
 - A response whose `eventSpec` is null returns null.

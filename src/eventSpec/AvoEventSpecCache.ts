@@ -1,4 +1,5 @@
-import { EventSpecResponse } from "./AvoEventSpecFetchTypes";
+import { EventSpecCoordinates, EventSpecResponse } from "./AvoEventSpecFetchTypes";
+import { normalizeOption } from "../utils";
 
 interface CacheEntry {
   value: EventSpecResponse;
@@ -8,14 +9,54 @@ interface CacheEntry {
 }
 
 const MAX_EVENT_COUNT = 50;
+
+/**
+ * "" without coordinates; otherwise "\0" and both normalized coordinates as a JSON array
+ * (null for an absent one), which tells hint-only, output-only and both apart.
+ * Shared by the spec cache key and the fetcher's in-flight dedupe key.
+ */
+export const coordinatesKeySuffix = (coordinates?: EventSpecCoordinates): string => {
+  const { originHint, outputReference } = normalizeCoordinates(coordinates);
+  if (originHint === undefined && outputReference === undefined) {
+    return "";
+  }
+  return "\0" + JSON.stringify([originHint ?? null, outputReference ?? null]);
+};
+
+/** Trims each coordinate and drops a blank or non-string one. */
+export const normalizeCoordinates = (coordinates?: EventSpecCoordinates): EventSpecCoordinates => {
+  const result: EventSpecCoordinates = {};
+  if (coordinates === null || typeof coordinates !== "object") {
+    return result;
+  }
+  const originHint = normalizeOption(coordinates.originHint);
+  const outputReference = normalizeOption(coordinates.outputReference);
+  if (originHint !== undefined) {
+    result.originHint = originHint;
+  }
+  if (outputReference !== undefined) {
+    result.outputReference = outputReference;
+  }
+  return result;
+};
 const TTL_MS = 60_000;
 
 export class AvoEventSpecCache {
   private cache: Map<string, CacheEntry> = new Map();
   private globalEventCount = 0;
 
-  static makeKey(apiKey: string, streamId: string, eventName: string): string {
-    return `${apiKey}\0${streamId}\0${eventName}`;
+  /**
+   * The key of one spec. Gateway coordinates are part of it, so a gateway-input spec and an
+   * output spec for the same event name never share an entry; without coordinates the key
+   * is the plain `apiKey\0streamId\0eventName`.
+   */
+  static makeKey(
+    apiKey: string,
+    streamId: string,
+    eventName: string,
+    coordinates?: EventSpecCoordinates
+  ): string {
+    return `${apiKey}\0${streamId}\0${eventName}` + coordinatesKeySuffix(coordinates);
   }
 
   /**
