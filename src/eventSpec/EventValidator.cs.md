@@ -57,7 +57,7 @@ class EventValidator {
 ## Non-functional requirements
 
 - **IMPORTANT:** only `failedEventIds` are produced. Avo's ingestion reads only `failedEventIds`, so a smaller "passed" list (as the web SDK sends) would hide the failures it stands for.
-- **IMPORTANT:** types and required properties are not checked (Avo compares the reported schema with the plan). A missing property is not validated.
+- **IMPORTANT:** types are not checked (Avo compares the reported schema with the plan). `required` only decides whether a `null` or missing value is checked against the constraints: a required property sent as `null`, or a required object property whose parent is `null`, not an object, or a list item without it, fails. A property absent from the event is not validated.
 - Log lines never contain property values: warnings name only patterns, allowed-value lists or ranges from the spec.
 - A getter or proxy that throws while a value is read propagates; `AvoInspector` then sends the event without validation.
 - Name-keyed records built here are null-prototype, so `constructor`, `toString` or `__proto__` are ordinary names.
