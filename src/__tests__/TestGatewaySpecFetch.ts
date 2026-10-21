@@ -101,6 +101,12 @@ describe("spec fetch URL", () => {
     expect(requestedPaths()).toEqual([sourcePath, sourcePath + "&originHint=web"]);
   });
 
+  test("in-flight dedupe never joins an event with coordinates to another event's fetch", async () => {
+    const odd = new Promise((resolve) => fetcher.fetch('Checkout\0["web",null]', "stream1", resolve));
+    await Promise.all([odd, fetchOnce(fetcher, { originHint: "web" })]);
+    expect(requestedPaths()).toHaveLength(2);
+  });
+
   test("in-flight dedupe is per coordinates", async () => {
     await Promise.all([
       fetchOnce(fetcher),
@@ -138,6 +144,15 @@ describe("spec cache key", () => {
     ];
     expect(new Set(keys).size).toBe(keys.length);
     expect(AvoEventSpecCache.makeKey("k", "s", "e", { originHint: " a " })).toBe(keys[1]);
+  });
+
+  test("no event name makes a key equal to another event's key with coordinates", () => {
+    const withHint = AvoEventSpecCache.makeKey("k", "s", "e", { originHint: "a" });
+    expect(AvoEventSpecCache.makeKey("k", "s", 'e\0["a",null]')).not.toBe(withHint);
+    expect(AvoEventSpecCache.makeKey("k", "s", 'e\0["a",null]', {})).not.toBe(withHint);
+    expect(AvoEventSpecCache.makeKey("k", "s", 'e","a', { outputReference: "x" })).not.toBe(
+      AvoEventSpecCache.makeKey("k", "s", "e", { originHint: "a", outputReference: "x" })
+    );
   });
 });
 

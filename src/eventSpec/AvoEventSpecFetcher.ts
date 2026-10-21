@@ -7,7 +7,7 @@ import {
   PropertyConstraints,
   EventSpecCoordinates,
 } from "./AvoEventSpecFetchTypes";
-import { coordinatesKeySuffix, normalizeCoordinates } from "./AvoEventSpecCache";
+import { coordinatesKey, normalizeCoordinates } from "./AvoEventSpecCache";
 import { AvoInspector } from "../AvoInspector";
 import { AvoLog } from "../AvoLog";
 
@@ -106,7 +106,8 @@ export class AvoEventSpecFetcher {
     callback: FetchCallback,
     coordinates?: EventSpecCoordinates
   ): void {
-    const dedupeKey = `${this.apiKey}:${streamId}:${eventName}` + coordinatesKeySuffix(coordinates);
+    const dedupeKey =
+      coordinatesKey([this.apiKey, streamId, eventName], coordinates) ?? `${this.apiKey}:${streamId}:${eventName}`;
 
     // In-flight dedup: if there's already a request in flight for this key,
     // queue the callback

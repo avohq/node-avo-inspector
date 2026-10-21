@@ -20,7 +20,7 @@ class AvoEventSpecFetcher {
 ```
 
 - `EventSpecCoordinates` (`AvoEventSpecFetchTypes`): `{ originHint?, outputReference? }`, the event's gateway coordinates. Normalized here as on the track body (`normalizeCoordinates` in `AvoEventSpecCache`): trimmed, and a blank or non-string one is absent.
-- In-flight map: dedupe key `"<apiKey>:<streamId>:<eventName>"` plus `coordinatesKeySuffix(coordinates)` (`""` without coordinates, else `"\0"` + JSON `[originHint|null, outputReference|null]`) -> `{ callbacks, owner }`: the waiting callbacks and an owner token identifying the request that serves the key.
+- In-flight map: dedupe key `"<apiKey>:<streamId>:<eventName>"` without coordinates, else `coordinatesKey` (`"\0"` + JSON `[apiKey, streamId, eventName, originHint|null, outputReference|null]`; the apiKey never contains NUL, so it cannot equal a key without coordinates) -> `{ callbacks, owner }`: the waiting callbacks and an owner token identifying the request that serves the key.
 - Target: `https://api.avo.app:443` by default. With a `mockEndpoint` (the valid `AVO_INSPECTOR_MOCK_ENDPOINT` override, as read by `AvoNetworkCallsHandler`), that URL's scheme, host and port (default 80/443); its path and query are not used.
 - Per-fetch deadline: `private static fetchTimeoutMs = 10_000` (overridable in tests), counted from the moment the request is assigned a socket.
 - Socket-wait deadline: `private static socketWaitTimeoutMs = 10_000` (overridable in tests), counted from the request until it is assigned a socket.

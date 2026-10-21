@@ -12,16 +12,18 @@ interface CacheEntry {
 const MAX_EVENT_COUNT = 50;
 
 /**
- * "" without coordinates; otherwise "\0" and both normalized coordinates as a JSON array
- * (null for an absent one), which tells hint-only, output-only and both apart.
+ * The key of a fetch with gateway coordinates, or undefined without any: "\0" and a JSON
+ * array of `parts` then both normalized coordinates (null for an absent one). JSON encodes
+ * every part on its own, so no event name can make it equal another key; and as the
+ * apiKey never contains NUL, no key without coordinates starts with "\0".
  * Shared by the spec cache key and the fetcher's in-flight dedupe key.
  */
-export const coordinatesKeySuffix = (coordinates?: EventSpecCoordinates): string => {
+export const coordinatesKey = (parts: string[], coordinates?: EventSpecCoordinates): string | undefined => {
   const { originHint, outputReference } = normalizeCoordinates(coordinates);
   if (originHint === undefined && outputReference === undefined) {
-    return "";
+    return undefined;
   }
-  return "\0" + JSON.stringify([originHint ?? null, outputReference ?? null]);
+  return "\0" + JSON.stringify([...parts, originHint ?? null, outputReference ?? null]);
 };
 
 /** Trims each coordinate and drops a blank or non-string one. */
@@ -59,7 +61,7 @@ export class AvoEventSpecCache {
     eventName: string,
     coordinates?: EventSpecCoordinates
   ): string {
-    return `${apiKey}\0${streamId}\0${eventName}` + coordinatesKeySuffix(coordinates);
+    return coordinatesKey([apiKey, streamId, eventName], coordinates) ?? `${apiKey}\0${streamId}\0${eventName}`;
   }
 
   /**
