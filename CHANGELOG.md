@@ -15,6 +15,7 @@ Event spec validation (dev and staging):
 - **Every event and variant in the spec is checked.** 1.x used only the first event the endpoint returned and ignored variants. Each constraint applies to the event and variant IDs the spec gives it, so a value can fail for one variant and pass for another.
 - **Failures are reported against tracking-plan event IDs.** 1.x reported a failure against the Codegen event id, or the event name for a manual track, which the Debugger cannot match to an event. The wire now carries the failed event and variant IDs from the spec, and object properties' failures in their `children`. `passedEventIds` is no longer sent.
 - **The property type is no longer compared with the spec.** Avo already compares the reported schema with the tracking plan, and the spec's type names differ from the schema's (`bool` and `boolean`, a list's element type and `list(…)`), so 1.x reported false failures for booleans, lists and whole numbers sent for `float` properties. A value of the wrong type still fails a constraint it cannot meet: a regex needs a string, a range a number.
+- **Validation is bounded.** It runs synchronously in the track call, so a list of more than 1,000 items is not checked, and a string longer than 10,000 characters is not checked against regex patterns (each logged when logging is on). The event is still sent.
 
 Input handling. All of these behaved the same way in 1.x:
 

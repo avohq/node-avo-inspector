@@ -128,6 +128,13 @@ describe("EventValidator", () => {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("regex pattern skipped: [unclosed-invalid"));
     });
 
+    test("does not check a string longer than 10,000 characters", () => {
+      const codes = spec(entry({ code: string({ regexPatterns: { "^a+$": ["evt"] } }) }));
+
+      expect(failedIds(validate(codes, { code: "b".repeat(10_000) }), "code")).toEqual(["evt"]);
+      expect(validate(codes, { code: "b".repeat(10_001) })).toEqual([]);
+    });
+
     test("skips an unsafe pattern with a warning, once per pattern", () => {
       const unsafe = spec(entry({ code: string({ regexPatterns: { "(a+)+unsafe$": ["evt"] } }) }));
 
@@ -267,6 +274,43 @@ describe("EventValidator", () => {
       const tags = spec(entry({ tags: string({ isList: true, allowedValues: { '["a"]': ["evt"] } }) }));
 
       expect(validate(tags, { tags: "c" })).toEqual([]);
+    });
+ 
+    test("does not check a list of more than 1,000 items", () => {
+      const tags = spec(entry({ tags: string({ isList: true, allowedValues: { '["a"]': ["evt"] } }) }));
+
+      expect(failedIds(validate(tags, { tags: new Array(1_000).fill("c") }), "tags")).toEqual(["evt"]);
+      expect(validate(tags, { tags: new Array(1_001).fill("c") })).toEqual([]);
+    });
+
+    test("checks one level into the objects of a list, not deeper", () => {
+      const items = spec(
+        entry({
+          items: {
+            type: "object",
+            required: false,
+            isList: true,
+            children: {
+              meta: {
+                type: "object",
+                required: false,
+                children: { kind: string({ allowedValues: { '["a"]': ["evt"] } }) },
+              },
+            },
+          },
+        })
+      );
+
+      expect(validate(items, { items: [{ meta: { kind: "b" } }] })).toEqual([]);
+    });
+
+    test("treats a property as a list when any matching event does", () => {
+      const tags = spec(
+        entry({ tags: string({ isList: true, allowedValues: { '["a"]': ["e1"] } }) }, "e1"),
+        entry({ tags: string({ allowedValues: { '["a"]': ["e2"] } }) }, "e2")
+      );
+
+      expect(failedIds(validate(tags, { tags: ["c"] }), "tags")).toEqual(["e1", "e2"]);
     });
   });
 
