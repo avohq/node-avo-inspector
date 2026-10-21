@@ -16,6 +16,12 @@ const MAX_CHILD_DEPTH = 2;
 // the tracking plan, so they stay few; the bound only guards a long-lived process against a
 // plan that keeps changing. null marks a pattern that was skipped (unsafe or invalid).
 const MAX_CACHED_CONSTRAINTS = 1_000;
+
+// Validation runs synchronously on the track path, so a value past these bounds is not
+// checked: a list with more items, or a string longer than this against a regex (safe-regex2
+// rejects exponential patterns, not quadratic ones).
+const MAX_VALIDATED_LIST_ITEMS = 1_000;
+const MAX_REGEX_INPUT_LENGTH = 10_000;
 const regexCache = new Map<string, RegExp | null>();
 const allowedValuesCache = new Map<string, Set<string> | null>();
 
@@ -173,6 +179,14 @@ function validateList(
   if (!Array.isArray(value)) {
     return null;
   }
+  if (value.length > MAX_VALIDATED_LIST_ITEMS) {
+    if (AvoInspector.shouldLog) {
+      console.warn(
+        `[Avo Inspector] Warning: List of ${value.length} items not validated (limit ${MAX_VALIDATED_LIST_ITEMS})`
+      );
+    }
+    return null;
+  }
 
   if (constraints.children) {
     const children: Record<string, PropertyValidationOutcome> = Object.create(null);
@@ -237,11 +251,14 @@ function ownValue(container: { [key: string]: unknown }, name: string): unknown 
 
 /** Adds to failedIds the event IDs whose constraints the value breaks. */
 function checkValue(value: unknown, constraints: PropertyConstraints, failedIds: Set<string>): Set<string> {
-  if (constraints.pinnedValues) {
-    checkPinnedValues(value, constraints.pinnedValues, failedIds);
-  }
-  if (constraints.allowedValues) {
-    checkAllowedValues(value, constraints.allowedValues, failedIds);
+  if (constraints.pinnedValues || constraints.allowedValues) {
+    const actual = comparableString(value);
+    if (constraints.pinnedValues) {
+      checkPinnedValues(actual, constraints.pinnedValues, failedIds);
+    }
+    if (constraints.allowedValues) {
+      checkAllowedValues(actual, constraints.allowedValues, failedIds);
+    }
   }
   if (constraints.regexPatterns) {
     checkRegexPatterns(value, constraints.regexPatterns, failedIds);
@@ -281,8 +298,7 @@ function comparableString(value: unknown): string {
   }
 }
 
-function checkPinnedValues(value: unknown, pinnedValues: Record<string, string[]>, failedIds: Set<string>): void {
-  const actual = comparableString(value);
+function checkPinnedValues(actual: string, pinnedValues: Record<string, string[]>, failedIds: Set<string>): void {
   for (const pinned of Object.keys(pinnedValues)) {
     if (actual !== pinned) {
       addAll(pinnedValues[pinned], failedIds);
@@ -290,8 +306,7 @@ function checkPinnedValues(value: unknown, pinnedValues: Record<string, string[]
   }
 }
 
-function checkAllowedValues(value: unknown, allowedValues: Record<string, string[]>, failedIds: Set<string>): void {
-  const actual = comparableString(value);
+function checkAllowedValues(actual: string, allowedValues: Record<string, string[]>, failedIds: Set<string>): void {
   for (const json of Object.keys(allowedValues)) {
     const allowed = parseAllowedValues(json);
     // A list that is not a JSON array of strings is skipped: nothing fails it.
@@ -302,6 +317,14 @@ function checkAllowedValues(value: unknown, allowedValues: Record<string, string
 }
 
 function checkRegexPatterns(value: unknown, regexPatterns: Record<string, string[]>, failedIds: Set<string>): void {
+  if (typeof value === "string" && value.length > MAX_REGEX_INPUT_LENGTH) {
+    if (AvoInspector.shouldLog) {
+      console.warn(
+        `[Avo Inspector] Warning: String of ${value.length} characters not checked against regex patterns (limit ${MAX_REGEX_INPUT_LENGTH})`
+      );
+    }
+    return;
+  }
   for (const pattern of Object.keys(regexPatterns)) {
     // Only a string can match; an unsafe or invalid pattern is skipped (nothing fails it).
     if (typeof value !== "string") {

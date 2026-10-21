@@ -39,7 +39,7 @@ class EventValidator {
 ### Per value (depth d)
 
 1. `d >= MAX_CHILD_DEPTH` -> no outcome.
-2. **List** (`isList`): a non-array value -> no outcome.
+2. **List** (`isList`): a non-array value, or one of more than 1,000 items (logged when logging is on), -> no outcome.
    - With `children`: for each child name, the union of the failed IDs of `item[name]` (own property of a plain or null-prototype object item, else `undefined`) at depth d+1 over every item. Outcome `{ failedEventIds: [], children }` with the child names that failed; none -> no outcome.
    - Without: every item is checked against the constraints; the union of failed IDs.
 3. **Object** (`children`, not a list): each child's own value at depth d+1 (a value that is not a plain object has none). Outcome `{ failedEventIds: [], children }` with the children that have an outcome; none -> no outcome.
@@ -50,14 +50,15 @@ class EventValidator {
 
 - **Pinned values** `value -> ids`: the value's comparable string must equal the key, else those IDs fail.
 - **Allowed values** `JSON array -> ids`: the comparable string must be in the parsed list, else those IDs fail. A key that is not a JSON array of strings is skipped (logged when logging is on).
-- **Regex** `pattern -> ids`: a non-string value fails every pattern's IDs. A string must match (`new RegExp(pattern)`, no flags), else those IDs fail. A pattern `safe-regex2` rejects, or that does not compile, is skipped with a `console.warn` (always on) the first time it is seen.
+- **Regex** `pattern -> ids`: a non-string value fails every pattern's IDs. A string longer than 10,000 characters is not checked against any pattern (logged when logging is on). A string must match (`new RegExp(pattern)`, no flags), else those IDs fail. A pattern `safe-regex2` rejects, or that does not compile, is skipped with a `console.warn` (always on) the first time it is seen.
 - **Min/max** `"min,max" -> ids`: either bound may be empty (no limit). A number is compared as is, a bigint as `Number(value)`; anything else, and `NaN`, fails every range. A key that does not parse is skipped (logged when logging is on).
-- **Comparable string**: an object or array -> `JSON.stringify`; otherwise, or when that throws or gives `undefined`, `String(value)`; when that throws too, the `Object.prototype.toString` tag.
+- **Comparable string** (computed once per value, shared by pinned and allowed values): an object or array -> `JSON.stringify`; otherwise, or when that throws or gives `undefined`, `String(value)`; when that throws too, the `Object.prototype.toString` tag.
 
 ## Non-functional requirements
 
+- **IMPORTANT:** validation runs synchronously on the track path, so the list and string bounds above keep one value from blocking the event loop; `safe-regex2` rejects exponential patterns, not quadratic ones.
 - **IMPORTANT:** only `failedEventIds` are produced. Avo's ingestion reads only `failedEventIds`, so a smaller "passed" list (as the web SDK sends) would hide the failures it stands for.
-- **IMPORTANT:** types and required properties are not checked (Avo compares the reported schema with the plan). A missing property is not validated.
+- **IMPORTANT:** types are not checked (Avo compares the reported schema with the plan). `required` only decides whether a `null` or missing value is checked against the constraints: a required property sent as `null`, or a required object property whose parent is `null`, not an object, or a list item without it, fails. A property absent from the event is not validated.
 - Log lines never contain property values: warnings name only patterns, allowed-value lists or ranges from the spec.
 - A getter or proxy that throws while a value is read propagates; `AvoInspector` then sends the event without validation.
 - Name-keyed records built here are null-prototype, so `constructor`, `toString` or `__proto__` are ordinary names.
