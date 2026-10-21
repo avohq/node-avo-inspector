@@ -208,4 +208,22 @@ describe("tracking a gateway event", () => {
     expect(sent[0].eventSpecMetadata).toBeUndefined();
     expect(sent[0].eventProperties[0].failedEventIds).toBeUndefined();
   });
+
+  test("a 404 is cached, so later events of that checkpoint do not fetch again", async () => {
+    answerEveryRequest(404, { error: "event_not_found", name: "Checkout" });
+    const inspector = staging();
+
+    await inspector.trackSchemaFromEvent({ eventName: "Checkout", eventProperties: { plan: "pro" }, outputReference: "out-1" });
+    await inspector.trackSchemaFromEvent({ eventName: "Checkout", eventProperties: { plan: "free" }, outputReference: "out-1" });
+    await inspector.trackSchemaFromEvent({ eventName: "Checkout", eventProperties: { plan: "pro" }, originHint: "ios" });
+    await inspector.flush();
+    inspector.destroy();
+
+    expect(requestedPaths()).toEqual([
+      expect.stringMatching(/&outputReference=out-1$/),
+      expect.stringMatching(/&originHint=ios$/),
+    ]);
+    expect(sent).toHaveLength(3);
+    sent.forEach((event) => expect(event.eventSpecMetadata).toBeUndefined());
+  });
 });

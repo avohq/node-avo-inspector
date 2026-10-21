@@ -57,6 +57,13 @@ describe("AvoEventSpecCache", () => {
     expect(cache.get("null-key")).toEqual(nullSpec);
   });
 
+  test("stores a failed fetch as null, apart from a miss", () => {
+    cache.set("failed-key", null);
+    expect(cache.get("failed-key")).toBeNull();
+    expect(cache.contains("failed-key")).toBe(true);
+    expect(cache.get("missing-key")).toBeUndefined();
+  });
+
   test("TTL eviction: entries older than 60s removed on next sweep", () => {
     cache.set("old-key", makeSpec("old"));
 

@@ -1185,6 +1185,12 @@ export class AvoInspector {
 
     // Check cache first
     const cached = cache.get(cacheKey);
+    if (cached === null) {
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: Event spec cache hit (empty) for event: " + eventName + ". Sending without validation.");
+      }
+      return null;
+    }
     if (cached !== undefined) {
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: Event spec cache hit for event: " + eventName);
@@ -1228,6 +1234,9 @@ export class AvoInspector {
             reject(err);
           }
         } else {
+          // Cached like a spec, for the same TTL, so a failing fetch (such as a gateway key's
+          // 404 without originHint) is not repeated for every event.
+          cache.set(cacheKey, null);
           if (AvoInspector.shouldLog) {
             console.log("Avo Inspector: Event spec fetch returned null for event: " + eventName + ". Cached empty response. Sending without validation.");
           }

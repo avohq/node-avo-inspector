@@ -2,7 +2,7 @@ import { EventSpecCoordinates, EventSpecResponse } from "./AvoEventSpecFetchType
 import { normalizeOption } from "../utils";
 
 interface CacheEntry {
-  value: EventSpecResponse;
+  value: EventSpecResponse | null;
   timestamp: number;
   eventCount: number;
   lastAccessed: number;
@@ -61,9 +61,10 @@ export class AvoEventSpecCache {
 
   /**
    * Returns the cached EventSpecResponse, or undefined on cache miss.
-   * A cached response with eventSpec: null means "no spec exists for this event".
+   * A cached response with eventSpec: null means "no spec exists for this event";
+   * a cached null means the fetch failed (such as a 404), so the event is not validated.
    */
-  get(key: string): EventSpecResponse | undefined {
+  get(key: string): EventSpecResponse | null | undefined {
     const entry = this.cache.get(key);
     if (entry === undefined) {
       return undefined;
@@ -105,7 +106,7 @@ export class AvoEventSpecCache {
     return true;
   }
 
-  set(key: string, value: EventSpecResponse): void {
+  set(key: string, value: EventSpecResponse | null): void {
     // Every track sharing one fetch stores its response: only the first store counts, or a
     // burst of such tracks would rotate unrelated entries out of the cache.
     const existing = this.cache.get(key);
