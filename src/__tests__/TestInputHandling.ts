@@ -119,13 +119,23 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
   });
 
   test.each([
-    // The value is checked as "[object Object]", the string a plain object gives.
-    ["^\\[object Object\\]$", undefined],
-    ["^nope$", ["E"]],
-  ])("event spec validation checks a null-prototype property value against %p", async (regex, failedEventIds) => {
+    // A whole object is compared as its JSON, which a null-prototype object has too.
+    ["its JSON, allowed", { allowedValues: { '["{\\"a\\":\\"1\\"}"]': ["evt"] } }, undefined, undefined],
+    ["its JSON, not allowed", { allowedValues: { '["nope"]': ["evt"] } }, ["evt"], undefined],
+    // Its own properties are read like a plain object's.
+    ["a property", { children: { a: { type: "string", required: true, allowedValues: { '["2"]': ["evt"] } } } }, undefined, { a: { failedEventIds: ["evt"] } }],
+  ])("event spec validation checks a null-prototype property value: %s", async (_label, constraints, failedEventIds, children) => {
     jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((eventName, _s, callback) =>
       callback({
-        eventSpec: { eventName, properties: [{ propertyName: "query", propertyType: "object", regex }] },
+        eventSpec: {
+          eventName,
+          events: [{
+            branchId: "b",
+            baseEventId: "evt",
+            variantIds: [],
+            props: { query: { type: "object", required: false, ...constraints } },
+          }],
+        },
         metadata: { schemaId: "s", branchId: "b", latestActionId: "a", sourceId: "src" },
       })
     );
@@ -140,6 +150,8 @@ describe("null-prototype objects and objects with an own hasOwnProperty key", ()
     const event = send.mock.calls[0][0][0];
     expect(event.eventSpecMetadata).toBeDefined();
     expect(event.eventProperties[0].failedEventIds).toEqual(failedEventIds);
+    const child = event.eventProperties[0].children.find((c: any) => c.propertyName === "a");
+    expect(child.failedEventIds).toEqual(children?.a.failedEventIds);
   });
 
   test("encryption handles a null-prototype property value", async () => {
