@@ -76,9 +76,10 @@ export class AvoEventSpecCache {
       return undefined;
     }
 
-    // Per-entry access count eviction
+    // Per-entry access count eviction, which refreshes a spec after MAX_EVENT_COUNT uses.
+    // A cached failure has nothing to refresh: it stays until its TTL.
     entry.eventCount++;
-    if (entry.eventCount >= MAX_EVENT_COUNT) {
+    if (entry.value !== null && entry.eventCount >= MAX_EVENT_COUNT) {
       this.cache.delete(key);
       return undefined;
     }
@@ -99,13 +100,17 @@ export class AvoEventSpecCache {
       this.cache.delete(key);
       return false;
     }
-    if (entry.eventCount >= MAX_EVENT_COUNT) {
+    if (entry.value !== null && entry.eventCount >= MAX_EVENT_COUNT) {
       this.cache.delete(key);
       return false;
     }
     return true;
   }
 
+  /**
+   * Stores a fetched spec, or null for a failed fetch. A spec is kept until its TTL or
+   * MAX_EVENT_COUNT uses; a null until its TTL only.
+   */
   set(key: string, value: EventSpecResponse | null): void {
     // Every track sharing one fetch stores its response: only the first store counts, or a
     // burst of such tracks would rotate unrelated entries out of the cache.

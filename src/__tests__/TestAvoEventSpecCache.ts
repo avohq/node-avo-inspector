@@ -64,6 +64,17 @@ describe("AvoEventSpecCache", () => {
     expect(cache.get("missing-key")).toBeUndefined();
   });
 
+  test("a cached failure is not evicted by use count, only by TTL", () => {
+    cache.set("failed-key", null);
+    for (let i = 0; i < 100; i++) {
+      expect(cache.get("failed-key")).toBeNull();
+    }
+    expect(cache.contains("failed-key")).toBe(true);
+
+    jest.advanceTimersByTime(60_001);
+    expect(cache.get("failed-key")).toBeUndefined();
+  });
+
   test("TTL eviction: entries older than 60s removed on next sweep", () => {
     cache.set("old-key", makeSpec("old"));
 
