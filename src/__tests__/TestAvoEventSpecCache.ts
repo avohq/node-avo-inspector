@@ -64,6 +64,15 @@ describe("AvoEventSpecCache", () => {
     expect(cache.get("missing-key")).toBeUndefined();
   });
 
+  test("a value stored with its own TTL expires after that TTL", () => {
+    cache.set("transient-key", null, 10_000);
+    jest.advanceTimersByTime(9_000);
+    expect(cache.get("transient-key")).toBeNull();
+    jest.advanceTimersByTime(1_001);
+    expect(cache.get("transient-key")).toBeUndefined();
+    expect(cache.contains("transient-key")).toBe(false);
+  });
+
   test("a cached failure is not evicted by use count, only by TTL", () => {
     cache.set("failed-key", null);
     for (let i = 0; i < 100; i++) {

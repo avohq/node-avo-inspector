@@ -10,7 +10,7 @@ import { AvoBatchQueue, BACKPRESSURE_WAITING_EVENTS, MAX_TIMER_MS } from "./AvoB
 import { AvoDeduplicator } from "./AvoDeduplicator";
 import { AvoStreamId } from "./AvoStreamId";
 import { AvoEventSpecFetcher } from "./eventSpec/AvoEventSpecFetcher";
-import { AvoEventSpecCache } from "./eventSpec/AvoEventSpecCache";
+import { AvoEventSpecCache, TRANSIENT_FAILURE_TTL_MS } from "./eventSpec/AvoEventSpecCache";
 import { EventValidator } from "./eventSpec/EventValidator";
 import {
   EventSpecCoordinates,
@@ -1222,7 +1222,7 @@ export class AvoInspector {
 
     const fetcher = this.eventSpecFetcher;
     return new Promise((resolve, reject) => {
-      const onSpec = (result: EventSpecResponse | null) => {
+      const onSpec = (result: EventSpecResponse | null, notFound?: boolean) => {
         release();
         if (result !== null) {
           cache.set(cacheKey, result);
@@ -1234,9 +1234,9 @@ export class AvoInspector {
             reject(err);
           }
         } else {
-          // Cached like a spec, for the same TTL, so a failing fetch (such as a gateway key's
-          // 404 without originHint) is not repeated for every event.
-          cache.set(cacheKey, null);
+          // Cached so a failing fetch is not repeated for every event: a 404 (no spec, such
+          // as a gateway key without originHint) for the spec TTL, any other failure briefly.
+          cache.set(cacheKey, null, notFound === true ? undefined : TRANSIENT_FAILURE_TTL_MS);
           if (AvoInspector.shouldLog) {
             console.log("Avo Inspector: Event spec fetch returned null for event: " + eventName + ". Cached empty response. Sending without validation.");
           }

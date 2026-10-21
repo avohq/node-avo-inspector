@@ -4,6 +4,7 @@ import { normalizeOption } from "../utils";
 interface CacheEntry {
   value: EventSpecResponse | null;
   timestamp: number;
+  ttlMs: number;
   eventCount: number;
   lastAccessed: number;
 }
@@ -40,6 +41,8 @@ export const normalizeCoordinates = (coordinates?: EventSpecCoordinates): EventS
   return result;
 };
 const TTL_MS = 60_000;
+/** TTL of a fetch that failed other than with a 404, so a blip skips validation only briefly. */
+export const TRANSIENT_FAILURE_TTL_MS = 5_000;
 
 export class AvoEventSpecCache {
   private cache: Map<string, CacheEntry> = new Map();
@@ -71,7 +74,7 @@ export class AvoEventSpecCache {
     }
 
     // TTL check
-    if (Date.now() - entry.timestamp > TTL_MS) {
+    if (Date.now() - entry.timestamp > entry.ttlMs) {
       this.cache.delete(key);
       return undefined;
     }
@@ -96,7 +99,7 @@ export class AvoEventSpecCache {
     if (entry === undefined) {
       return false;
     }
-    if (Date.now() - entry.timestamp > TTL_MS) {
+    if (Date.now() - entry.timestamp > entry.ttlMs) {
       this.cache.delete(key);
       return false;
     }
@@ -109,9 +112,10 @@ export class AvoEventSpecCache {
 
   /**
    * Stores a fetched spec, or null for a failed fetch. A spec is kept until its TTL or
-   * MAX_EVENT_COUNT uses; a null until its TTL only.
+   * MAX_EVENT_COUNT uses; a null until its TTL only. `ttlMs` defaults to 60 s; a transient
+   * failure passes TRANSIENT_FAILURE_TTL_MS.
    */
-  set(key: string, value: EventSpecResponse | null): void {
+  set(key: string, value: EventSpecResponse | null, ttlMs: number = TTL_MS): void {
     // Every track sharing one fetch stores its response: only the first store counts, or a
     // burst of such tracks would rotate unrelated entries out of the cache.
     const existing = this.cache.get(key);
@@ -130,6 +134,7 @@ export class AvoEventSpecCache {
     this.cache.set(key, {
       value,
       timestamp: Date.now(),
+      ttlMs,
       eventCount: 0,
       lastAccessed: Date.now(),
     });
@@ -148,7 +153,7 @@ export class AvoEventSpecCache {
   private purgeExpired(): void {
     const now = Date.now();
     for (const [key, entry] of this.cache.entries()) {
-      if (now - entry.timestamp > TTL_MS) {
+      if (now - entry.timestamp > entry.ttlMs) {
         this.cache.delete(key);
       }
     }

@@ -141,6 +141,42 @@ describe("spec cache key", () => {
   });
 });
 
+describe("a failed fetch tells a 404 from other failures", () => {
+  let fetcher: AvoEventSpecFetcher;
+  beforeEach(() => {
+    fetcher = new AvoEventSpecFetcher("key");
+  });
+  afterEach(() => fetcher.destroy());
+
+  const settle = (): Promise<[EventSpecResponse | null, boolean | undefined]> =>
+    new Promise((resolve) =>
+      fetcher.fetch("Checkout", "stream1", (result, notFound) => resolve([result, notFound]), { originHint: "web" })
+    );
+
+  test("a 404 settles null with notFound", async () => {
+    answerEveryRequest(404, { error: "event_not_found", name: "Checkout" });
+    expect(await settle()).toEqual([null, true]);
+  });
+
+  test("a 5xx or a network error settles null without notFound", async () => {
+    answerEveryRequest(500, { error: "internal" });
+    expect(await settle()).toEqual([null, false]);
+
+    (mockedHttps.request as jest.Mock).mockImplementation(() => {
+      const req = new MockClientRequest();
+      setTimeout(() => req.emit("error", new Error("ECONNRESET")), 1);
+      return req;
+    });
+    expect(await settle()).toEqual([null, false]);
+  });
+
+  test("a spec settles without notFound", async () => {
+    const [result, notFound] = await settle();
+    expect(result).not.toBeNull();
+    expect(notFound).toBe(false);
+  });
+});
+
 describe("tracking a gateway event", () => {
   let sent: any[];
   // Spec fetches go through the mocked https module, not the suite's local mock endpoint.
@@ -207,6 +243,52 @@ describe("tracking a gateway event", () => {
     expect(sent[0].outputReference).toBe("out-1");
     expect(sent[0].eventSpecMetadata).toBeUndefined();
     expect(sent[0].eventProperties[0].failedEventIds).toBeUndefined();
+  });
+
+  describe("how long a failed fetch is cached", () => {
+    let now: number;
+    beforeEach(() => {
+      now = Date.now();
+      jest.spyOn(Date, "now").mockImplementation(() => now);
+    });
+    const trackGatewayEvent = (inspector: AvoInspector) =>
+      inspector.trackSchemaFromEvent({ eventName: "Checkout", eventProperties: { plan: "pro" }, outputReference: "out-1" });
+
+    test("a 404 (no spec) stays cached for 60 s", async () => {
+      answerEveryRequest(404, { error: "event_not_found", name: "Checkout" });
+      const inspector = staging();
+
+      await trackGatewayEvent(inspector);
+      now += 59_000;
+      await trackGatewayEvent(inspector);
+      expect(requestedPaths()).toHaveLength(1);
+
+      now += 2_000;
+      await trackGatewayEvent(inspector);
+      await inspector.flush();
+      inspector.destroy();
+      expect(requestedPaths()).toHaveLength(2);
+      expect(sent).toHaveLength(3);
+    });
+
+    test("any other failure is fetched again after 5 s", async () => {
+      answerEveryRequest(503, { error: "unavailable" });
+      const inspector = staging();
+
+      await trackGatewayEvent(inspector);
+      now += 4_000;
+      await trackGatewayEvent(inspector);
+      expect(requestedPaths()).toHaveLength(1);
+
+      now += 2_000;
+      answerEveryRequest(200, wire);
+      await trackGatewayEvent(inspector);
+      await inspector.flush();
+      inspector.destroy();
+      expect(requestedPaths()).toHaveLength(2);
+      expect(sent).toHaveLength(3);
+      expect(sent[2].eventSpecMetadata).toEqual(wire.metadata);
+    });
   });
 
   test("a 404 is cached, so later events of that checkpoint do not fetch again", async () => {
