@@ -318,6 +318,8 @@ To test against a local mock server, set the `AVO_INSPECTOR_MOCK_ENDPOINT` envir
 
 Update the `VERSION` constant in `src/AvoInspectorVersion.ts` and the `version` in `package.json` on every release. `VERSION` is sent to Avo as `libVersion`, and a unit test fails if the two differ.
 
+`npm pack` and `npm publish` run the `prepack` script, which deletes `dist/` and rebuilds it from `src/`, so a stale local `dist/` (it is git-ignored) is not packed. This needs npm lifecycle scripts enabled: with `ignore-scripts` set, `prepack` is skipped and whatever is in `dist/` is packed. Before publishing, run `npm pack --dry-run` and check that it prints the `prepack` build and lists the files you expect.
+
 ## Conformance suite
 
 `scripts/run-conformance.sh` builds the SDK and runs the spec's conformance suite (36 fixtures) against the harness in `conformance/avo-inspector-conformance.js` (runner contract 1.1.0). It fetches the spec at the pinned commit into `.spec-repo/`; set `SPEC_DIR` to use a local checkout instead.
