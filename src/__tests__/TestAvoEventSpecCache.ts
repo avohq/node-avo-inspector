@@ -5,7 +5,12 @@ function makeSpec(eventName: string): EventSpecResponse {
   return {
     eventSpec: {
       eventName,
-      properties: [{ propertyName: "prop1", propertyType: "string" }],
+      events: [{
+        branchId: "branch1",
+        baseEventId: "event1",
+        variantIds: [],
+        props: { prop1: { type: "string", required: false, allowedValues: { '["a"]': ["event1"] } } },
+      }],
     },
     metadata: {
       schemaId: "schema1",
@@ -50,6 +55,33 @@ describe("AvoEventSpecCache", () => {
     };
     cache.set("null-key", nullSpec);
     expect(cache.get("null-key")).toEqual(nullSpec);
+  });
+
+  test("stores a failed fetch as null, apart from a miss", () => {
+    cache.set("failed-key", null);
+    expect(cache.get("failed-key")).toBeNull();
+    expect(cache.contains("failed-key")).toBe(true);
+    expect(cache.get("missing-key")).toBeUndefined();
+  });
+
+  test("a value stored with its own TTL expires after that TTL", () => {
+    cache.set("transient-key", null, 10_000);
+    jest.advanceTimersByTime(9_000);
+    expect(cache.get("transient-key")).toBeNull();
+    jest.advanceTimersByTime(1_001);
+    expect(cache.get("transient-key")).toBeUndefined();
+    expect(cache.contains("transient-key")).toBe(false);
+  });
+
+  test("a cached failure is not evicted by use count, only by TTL", () => {
+    cache.set("failed-key", null);
+    for (let i = 0; i < 100; i++) {
+      expect(cache.get("failed-key")).toBeNull();
+    }
+    expect(cache.contains("failed-key")).toBe(true);
+
+    jest.advanceTimersByTime(60_001);
+    expect(cache.get("failed-key")).toBeUndefined();
   });
 
   test("TTL eviction: entries older than 60s removed on next sweep", () => {

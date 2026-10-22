@@ -776,7 +776,15 @@ describe("batching", () => {
     jest.spyOn(AvoNetworkCallsHandler, "mockEndpointFor").mockReturnValue(null);
     jest.spyOn(AvoEventSpecFetcher.prototype, "fetch").mockImplementation((eventName, _streamId, callback) => {
       setTimeout(() => callback({
-        eventSpec: { eventName, properties: [{ propertyName: "plan", propertyType: "int" }] },
+        eventSpec: {
+          eventName,
+          events: [{
+            branchId: "b",
+            baseEventId: "evt",
+            variantIds: [],
+            props: { plan: { type: "string", required: true, allowedValues: { '["free"]': ["evt"] } } },
+          }],
+        },
         metadata: { schemaId: "s", branchId: "b", latestActionId: "a", sourceId: "src" },
       }), 20);
     });
@@ -790,7 +798,7 @@ describe("batching", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [event] = send.mock.calls[0][0];
     expect(event.eventSpecMetadata).toEqual({ schemaId: "s", branchId: "b", latestActionId: "a", sourceId: "src" });
-    expect(event.eventProperties[0].failedEventIds).toEqual(["Signed Up"]);
+    expect(event.eventProperties[0].failedEventIds).toEqual(["evt"]);
     expect(event.originHint).toBe("web");
     expect(event.appVersion).toBeNull();
     await expect(tracked).resolves.toEqual([{ propertyName: "plan", propertyType: "string" }]);

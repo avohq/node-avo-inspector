@@ -2,19 +2,44 @@
  * Type definitions for Event Spec validation responses.
  */
 
-/** A single property constraint from the spec. */
-export interface PropertyConstraint {
-  propertyName: string;
-  /** Expected type, e.g. "string", "int", "float", "boolean", "object", "list(string)" */
-  propertyType: string;
-  /** Optional regex pattern that the value must match */
-  regex?: string;
+/**
+ * The value constraints the spec sets on one property. Each constraint maps a key to the
+ * tracking-plan event IDs (base event or variant) that require it, so one property can carry
+ * different rules for different variants.
+ */
+export interface PropertyConstraints {
+  /** Tracking-plan type name, e.g. "string", "int", "float", "bool", "object" (not validated) */
+  type: string;
+  /** Whether the property is required (a missing value fails only when it is) */
+  required: boolean;
+  /** True when the property is a list of `type` */
+  isList?: boolean;
+  /** Pinned values: exact value -> event IDs that require it */
+  pinnedValues?: Record<string, string[]>;
+  /** Allowed values: JSON array of strings -> event IDs that accept only those values */
+  allowedValues?: Record<string, string[]>;
+  /** Regex patterns: pattern -> event IDs that require a match */
+  regexPatterns?: Record<string, string[]>;
+  /** Ranges: "min,max" (either bound may be empty) -> event IDs that require it */
+  minMaxRanges?: Record<string, string[]>;
+  /** Constraints on the properties of an object, or of each object in a list */
+  children?: Record<string, PropertyConstraints>;
 }
 
-/** The spec for a single event, as returned by the API. */
+/** One tracking-plan event matching the requested name: its base event and variants. */
+export interface EventSpecEntry {
+  branchId: string;
+  baseEventId: string;
+  variantIds: string[];
+  /** Only the properties that carry value constraints */
+  props: Record<string, PropertyConstraints>;
+}
+
+/** The spec for an event name, as returned by the API. */
 export interface EventSpec {
   eventName: string;
-  properties: PropertyConstraint[];
+  /** Several entries when name mapping matches more than one event */
+  events: EventSpecEntry[];
 }
 
 /** Metadata identifying the spec source. */
@@ -31,17 +56,26 @@ export interface EventSpecResponse {
   metadata: EventSpecMetadata;
 }
 
-/** Per-property validation result. */
-export interface PropertyValidationResult {
-  propertyName: string;
+/**
+ * The outcome for one property: the tracking-plan event IDs whose constraints the value
+ * breaks, and the outcome for the object's properties when it has any.
+ */
+export interface PropertyValidationOutcome {
   failedEventIds: string[];
-  passedEventIds: string[];
+  children?: Record<string, PropertyValidationOutcome>;
 }
 
-/** Payload sent to reportValidatedEvent. */
-export interface ValidatedEventPayload {
-  streamId: string;
-  eventName: string;
-  eventSpecMetadata: EventSpecMetadata;
-  propertyResults: PropertyValidationResult[];
+/** Per-property validation result. */
+export interface PropertyValidationResult extends PropertyValidationOutcome {
+  propertyName: string;
+}
+
+/**
+ * The gateway coordinates of a spec fetch, as the event carries them on the track body:
+ * trimmed, blank omitted. With `originHint` a gateway key answers the gateway-input
+ * checkpoint's spec, with both that output's spec; a source key ignores them.
+ */
+export interface EventSpecCoordinates {
+  originHint?: string;
+  outputReference?: string;
 }

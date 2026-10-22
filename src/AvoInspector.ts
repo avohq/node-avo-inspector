@@ -10,9 +10,10 @@ import { AvoBatchQueue, BACKPRESSURE_WAITING_EVENTS, MAX_TIMER_MS } from "./AvoB
 import { AvoDeduplicator } from "./AvoDeduplicator";
 import { AvoStreamId } from "./AvoStreamId";
 import { AvoEventSpecFetcher } from "./eventSpec/AvoEventSpecFetcher";
-import { AvoEventSpecCache } from "./eventSpec/AvoEventSpecCache";
+import { AvoEventSpecCache, TRANSIENT_FAILURE_TTL_MS } from "./eventSpec/AvoEventSpecCache";
 import { EventValidator } from "./eventSpec/EventValidator";
 import {
+  EventSpecCoordinates,
   EventSpecMetadata,
   EventSpecResponse,
   PropertyValidationResult,
@@ -104,7 +105,7 @@ const VALIDATION_GRACE_MS = 1_000;
 // 8-socket pool, so past this an event is sent without validation rather than queued.
 const MAX_WAITING_VALIDATIONS = 1_000;
 
-// String() for regex validation; a value with no string conversion (a null-prototype object)
+// String() for a warning; a value with no string conversion (a null-prototype object)
 // falls back to its tag, e.g. "[object Object]", which String() gives a plain object.
 const valueToString = (value: unknown): string => {
   try {
@@ -876,7 +877,7 @@ export class AvoInspector {
     // that settles in the same event-loop turn, and flush() waits for that send.
     const validation = { flushRequested: false };
     const outcome = this.untilDestroyed<ValidationResult | null>(
-      this.untilGivenUp(this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, eventId)),
+      this.untilGivenUp(this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, gatewayFields)),
       null
     )
       .catch((err): ValidationResult | null => {
@@ -1132,7 +1133,7 @@ export class AvoInspector {
     }>,
     anonymousId: string,
     rawEventProperties?: { [propName: string]: any },
-    eventId?: string | null
+    gatewayFields?: ResolvedGatewayFields
   ): Promise<ValidationResult | null> {
     if (!this.eventSpecFetcher || !this.eventSpecCache || !this.eventValidator) {
       if (AvoInspector.shouldLog) {
@@ -1144,7 +1145,16 @@ export class AvoInspector {
       return null;
     }
 
-    const cacheKey = AvoEventSpecCache.makeKey(this.apiKey, anonymousId, eventName);
+    // The same normalized coordinates as on the track body: a gateway key answers the spec
+    // of that checkpoint, and each checkpoint's spec has its own cache entry and fetch.
+    const coordinates: EventSpecCoordinates = {};
+    if (gatewayFields && gatewayFields.originHint !== undefined) {
+      coordinates.originHint = gatewayFields.originHint;
+    }
+    if (gatewayFields && gatewayFields.outputReference !== undefined) {
+      coordinates.outputReference = gatewayFields.outputReference;
+    }
+    const cacheKey = AvoEventSpecCache.makeKey(this.apiKey, anonymousId, eventName, coordinates);
     const cache = this.eventSpecCache;
     const validator = this.eventValidator;
 
@@ -1156,30 +1166,18 @@ export class AvoInspector {
         return null;
       }
 
-      const eventProperties = eventSchema.map((prop) => ({
-        propertyName: prop.propertyName,
-        propertyType: prop.propertyType,
-        ...(rawEventProperties && rawEventProperties[prop.propertyName] !== undefined
-          ? { propertyValue: valueToString(rawEventProperties[prop.propertyName]) }
-          : {}),
-      }));
-
+      const specEventCount = specResponse.eventSpec.events.length;
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: Validating event: " + eventName
-          + " with " + eventProperties.length + " properties"
-          + " against " + specResponse.eventSpec.properties.length + " spec properties");
+          + " with " + eventSchema.length + " properties"
+          + " against " + specEventCount + " spec event" + (specEventCount === 1 ? "" : "s"));
       }
 
-      const validationId = eventId || eventName;
-      const results = validator.validate(
-        specResponse.eventSpec,
-        eventProperties,
-        validationId
-      );
+      const results = validator.validate(specResponse.eventSpec, eventSchema, rawEventProperties);
 
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: Validation complete for event: " + eventName
-          + " with " + results.length + " property results");
+          + " with " + results.length + " failed propert" + (results.length === 1 ? "y" : "ies"));
       }
 
       return { metadata: specResponse.metadata, propertyResults: results };
@@ -1187,6 +1185,12 @@ export class AvoInspector {
 
     // Check cache first
     const cached = cache.get(cacheKey);
+    if (cached === null) {
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: Event spec cache hit (empty) for event: " + eventName + ". Sending without validation.");
+      }
+      return null;
+    }
     if (cached !== undefined) {
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: Event spec cache hit for event: " + eventName);
@@ -1218,7 +1222,7 @@ export class AvoInspector {
 
     const fetcher = this.eventSpecFetcher;
     return new Promise((resolve, reject) => {
-      const onSpec = (result: EventSpecResponse | null) => {
+      const onSpec = (result: EventSpecResponse | null, notFound?: boolean) => {
         release();
         if (result !== null) {
           cache.set(cacheKey, result);
@@ -1230,6 +1234,9 @@ export class AvoInspector {
             reject(err);
           }
         } else {
+          // Cached so a failing fetch is not repeated for every event: a 404 (no spec, such
+          // as a gateway key without originHint) for the spec TTL, any other failure briefly.
+          cache.set(cacheKey, null, notFound === true ? undefined : TRANSIENT_FAILURE_TTL_MS);
           if (AvoInspector.shouldLog) {
             console.log("Avo Inspector: Event spec fetch returned null for event: " + eventName + ". Cached empty response. Sending without validation.");
           }
@@ -1237,7 +1244,7 @@ export class AvoInspector {
         }
       };
       try {
-        fetcher.fetch(eventName, anonymousId, onSpec);
+        fetcher.fetch(eventName, anonymousId, onSpec, coordinates);
       } catch (err) {
         // No callback will come: free the slot and fall back to an unvalidated send.
         release();

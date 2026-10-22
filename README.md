@@ -223,6 +223,26 @@ inspector.trackSchemaFromEvent({
 - A misspelt field (such as `outputRef`) is ignored with a warning, like any unknown `InspectorEvent` key (see [Sending event schemas](#sending-event-schemas-for-events-reported-outside-of-codegen)).
 - `originAppVersion` replaces the constructor `version` for that event. If you pass `originHint` without `originAppVersion`, the event is sent without an app version (`null`), because the constructor version belongs to a different source.
 
+# Property value validation
+
+In `dev` and `staging`, the SDK fetches each event's spec from your tracking plan and checks property values against the constraints set there: pinned values, allowed values, regex patterns and min/max ranges. It checks each property and the properties of an object, or of each object in a list, one level deep. The results go out with the event, and value issues show up in the [Inspector Debugger](https://www.avo.app/docs/inspector/inspector-debugger). In `prod` no spec is fetched and only the schema is sent.
+
+To use it, enable property value validation in your Avo workspace's Inspector settings. To see the values themselves in the Debugger, also pass a `publicEncryptionKey` (a hex P-256 public key): values are encrypted with it before they leave your process, and only you can decrypt them, with your private key. See [Generating encryption keys](https://www.avo.app/docs/inspector/inspector-debugger#generating-encryption-keys).
+
+```javascript
+let inspector = new Inspector.AvoInspector({
+  apiKey: "your api key",
+  env: Inspector.AvoInspectorEnv.Dev,
+  version: "1.0.0",
+  appName: "My app",
+  publicEncryptionKey: "your hex public key",
+});
+```
+
+An event whose spec cannot be fetched (an error, a timeout, or an event that is not in the tracking plan) is sent without validation.
+
+With a gateway-scoped API key, the spec fetch carries the event's `originHint` and `outputReference` (see [Gateway options](#gateway-options)), so values are checked against the event as expected at that checkpoint: `originHint` alone selects the gateway-input checkpoint, and both select that output. Without `originHint`, a gateway key has no spec for the event, which is then sent without validation. Each checkpoint's spec is cached separately. Source keys ignore these fields.
+
 # Enabling logs
 
 Logs are enabled by default in the dev mode and disabled in prod mode. You can enable and disable logs by calling the `enableLogging` method:
@@ -260,6 +280,7 @@ Each kind prints at most one line per 10 seconds (per reason or status): the fir
   ```
 
   TypeScript flags a 1.x call at compile time. In JavaScript, a call whose argument is not an object sends nothing, resolves `[]` and prints `[Avo Inspector] Error: since 2.0.0, trackSchemaFromEvent takes one InspectorEvent object; nothing was sent. …` on stderr, whatever the logging flag (at most once per 10 seconds). Avo Codegen's generated calls are unchanged.
+- **Property values are checked against every value constraint of the event spec, not the type** (see [Property value validation](#property-value-validation)). 1.x compared the property type and one regex. Failures are now reported against the tracking plan's event and variant IDs.
 - **The promise resolves when the event is queued (or dropped by sampling), not when it is delivered.** Outside `dev`, events are batched (see [Batching options](#batching-options)), so `await inspector.trackSchemaFromEvent(...)` no longer means the event reached Avo. In `dev` each event is still sent within the call.
 - **The SDK no longer keeps your process alive.** 1.x ran a keep-alive timer while sends were pending; it is gone. Buffered events are still sent, best-effort, when the process ends naturally (on `beforeExit`), but not on `process.exit()`, on signals, or when a serverless function is frozen. Call `await inspector.flush()` in those cases (see [Flushing before exit](#flushing-before-exit-required)).
 - **A non-200 response in `dev` resolves `[]`.** 1.x resolved the extracted schema whatever the status. Outside `dev` the promise resolves the schema, because the send happens later.
@@ -286,7 +307,7 @@ To test against a local mock server, set the `AVO_INSPECTOR_MOCK_ENDPOINT` envir
 - Track requests and event spec fetches go to that URL exactly as they would go to Avo, including your real API key (in the `api-key` header and the spec query), so point it only at a server you control.
 - Don't set it in shared `staging` or `dev` environments (a CI image or base environment that many services inherit, for example): every non-prod instance there would send its API key and events to that host. Only `prod` instances ignore it.
 - It is ignored when `env` is `prod`, whatever its value.
-- Event spec fetches (`dev` and `staging`) go to the same server: `GET <scheme>://<host>:<port>/trackingPlan/eventSpec?apiKey=…&eventName=…&streamId=…`, with the API key in the query. A mock that has no specs to serve can answer `200` with `{"events": [], "metadata": {}}` (events are then sent without validation); any other answer, such as a 404, also sends them without validation.
+- Event spec fetches (`dev` and `staging`) go to the same server: `GET <scheme>://<host>:<port>/trackingPlan/eventSpec?apiKey=…&eventName=…&streamId=…`, with the API key in the query, followed by `&originHint=…` and `&outputReference=…` for an event that carries them. A mock that has no specs to serve can answer `200` with `{"events": [], "metadata": {}}` (events are then sent without validation); any other answer, such as a 404, also sends them without validation.
 - The variable is read once, when an instance is created; set it before constructing your instances.
 - The first redirected send prints a one-time warning naming the scheme, host and port (never the path, the query or the API key).
 - A value that is not an `http` or `https` URL is ignored with a one-time warning that gives the reason but never the value, and requests go to Avo as usual.
