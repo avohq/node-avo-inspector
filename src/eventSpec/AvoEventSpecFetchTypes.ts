@@ -69,3 +69,13 @@ export interface PropertyValidationOutcome {
 export interface PropertyValidationResult extends PropertyValidationOutcome {
   propertyName: string;
 }
+
+/**
+ * The gateway coordinates of a spec fetch, as the event carries them on the track body:
+ * trimmed, blank omitted. With `originHint` a gateway key answers the gateway-input
+ * checkpoint's spec, with both that output's spec; a source key ignores them.
+ */
+export interface EventSpecCoordinates {
+  originHint?: string;
+  outputReference?: string;
+}

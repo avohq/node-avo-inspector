@@ -5,7 +5,9 @@ import {
   EventSpecEntry,
   EventSpecMetadata,
   PropertyConstraints,
+  EventSpecCoordinates,
 } from "./AvoEventSpecFetchTypes";
+import { coordinatesKey, normalizeCoordinates } from "./AvoEventSpecCache";
 import { AvoInspector } from "../AvoInspector";
 import { AvoLog } from "../AvoLog";
 
@@ -38,7 +40,11 @@ const parseIdMapping = (wire: unknown): Record<string, string[]> | undefined => 
   return found ? result : undefined;
 };
 
-type FetchCallback = (result: EventSpecResponse | null) => void;
+/**
+ * `notFound` is true when a null result is the endpoint's 404 (no spec for these keys),
+ * false for any other failure (status, timeout, network error, unparseable body).
+ */
+type FetchCallback = (result: EventSpecResponse | null, notFound?: boolean) => void;
 
 // The callbacks waiting on one key, and the request that owns the key.
 interface PendingFetch {
@@ -89,12 +95,19 @@ export class AvoEventSpecFetcher {
     }
   }
 
+  /**
+   * `coordinates`: the event's gateway coordinates. Each non-blank one is sent as a query
+   * parameter and is part of the dedupe key; without any, the request and key are those of
+   * a plain source fetch.
+   */
   fetch(
     eventName: string,
     streamId: string,
-    callback: FetchCallback
+    callback: FetchCallback,
+    coordinates?: EventSpecCoordinates
   ): void {
-    const dedupeKey = `${this.apiKey}:${streamId}:${eventName}`;
+    const dedupeKey =
+      coordinatesKey([this.apiKey, streamId, eventName], coordinates) ?? `${this.apiKey}:${streamId}:${eventName}`;
 
     // In-flight dedup: if there's already a request in flight for this key,
     // queue the callback
@@ -113,13 +126,13 @@ export class AvoEventSpecFetcher {
     // deadline cleared at once, but callbacks still run asynchronously.
     let settled = false;
     let deadline: ReturnType<typeof setTimeout> | undefined;
-    const settle = (result: EventSpecResponse | null, deferCallbacks = false) => {
+    const settle = (result: EventSpecResponse | null, deferCallbacks = false, notFound = false) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(deadline);
-      this.resolveCallbacks(dedupeKey, owner, result, deferCallbacks);
+      this.resolveCallbacks(dedupeKey, owner, result, deferCallbacks, result === null && notFound);
     };
 
     // Anything that throws from here on would leave the key registered with no request
@@ -131,6 +144,14 @@ export class AvoEventSpecFetcher {
         eventName,
         streamId,
       });
+      // Appended after the source params, so a fetch without coordinates is unchanged.
+      const { originHint, outputReference } = normalizeCoordinates(coordinates);
+      if (originHint !== undefined) {
+        queryParams.append("originHint", originHint);
+      }
+      if (outputReference !== undefined) {
+        queryParams.append("outputReference", outputReference);
+      }
 
       const options = {
         hostname: this.hostname,
@@ -203,7 +224,7 @@ export class AvoEventSpecFetcher {
   private send(
     options: RequestOptions,
     eventName: string,
-    settle: (result: EventSpecResponse | null) => void
+    settle: (result: EventSpecResponse | null, deferCallbacks?: boolean, notFound?: boolean) => void
   ): ClientRequest {
     const send = this.protocol === "http:" ? httpRequest : request;
     const req = send(options, (res) => {
@@ -219,7 +240,7 @@ export class AvoEventSpecFetcher {
             const body = Buffer.concat(chunks).toString();
             console.warn("Avo Inspector: [network] Spec fetch failed with status " + res.statusCode + ": " + body);
           }
-          settle(null);
+          settle(null, false, res.statusCode === 404);
           return;
         }
         try {
@@ -267,7 +288,8 @@ export class AvoEventSpecFetcher {
     key: string,
     owner: object,
     result: EventSpecResponse | null,
-    deferCallbacks = false
+    deferCallbacks = false,
+    notFound = false
   ): void {
     const pending = this.inFlight.get(key);
     if (!pending || pending.owner !== owner) {
@@ -278,7 +300,7 @@ export class AvoEventSpecFetcher {
     const invoke = () => {
       for (const cb of pending.callbacks) {
         try {
-          cb(result);
+          cb(result, notFound);
         } catch (e) {
           // Don't let one callback failure affect others
         }

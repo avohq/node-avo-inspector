@@ -241,6 +241,8 @@ let inspector = new Inspector.AvoInspector({
 
 An event whose spec cannot be fetched (an error, a timeout, or an event that is not in the tracking plan) is sent without validation.
 
+With a gateway-scoped API key, the spec fetch carries the event's `originHint` and `outputReference` (see [Gateway options](#gateway-options)), so values are checked against the event as expected at that checkpoint: `originHint` alone selects the gateway-input checkpoint, and both select that output. Without `originHint`, a gateway key has no spec for the event, which is then sent without validation. Each checkpoint's spec is cached separately. Source keys ignore these fields.
+
 # Enabling logs
 
 Logs are enabled by default in the dev mode and disabled in prod mode. You can enable and disable logs by calling the `enableLogging` method:
@@ -305,7 +307,7 @@ To test against a local mock server, set the `AVO_INSPECTOR_MOCK_ENDPOINT` envir
 - Track requests and event spec fetches go to that URL exactly as they would go to Avo, including your real API key (in the `api-key` header and the spec query), so point it only at a server you control.
 - Don't set it in shared `staging` or `dev` environments (a CI image or base environment that many services inherit, for example): every non-prod instance there would send its API key and events to that host. Only `prod` instances ignore it.
 - It is ignored when `env` is `prod`, whatever its value.
-- Event spec fetches (`dev` and `staging`) go to the same server: `GET <scheme>://<host>:<port>/trackingPlan/eventSpec?apiKey=…&eventName=…&streamId=…`, with the API key in the query. A mock that has no specs to serve can answer `200` with `{"events": [], "metadata": {}}` (events are then sent without validation); any other answer, such as a 404, also sends them without validation.
+- Event spec fetches (`dev` and `staging`) go to the same server: `GET <scheme>://<host>:<port>/trackingPlan/eventSpec?apiKey=…&eventName=…&streamId=…`, with the API key in the query, followed by `&originHint=…` and `&outputReference=…` for an event that carries them. A mock that has no specs to serve can answer `200` with `{"events": [], "metadata": {}}` (events are then sent without validation); any other answer, such as a 404, also sends them without validation.
 - The variable is read once, when an instance is created; set it before constructing your instances.
 - The first redirected send prints a one-time warning naming the scheme, host and port (never the path, the query or the API key).
 - A value that is not an `http` or `https` URL is ignored with a one-time warning that gives the reason but never the value, and requests go to Avo as usual.

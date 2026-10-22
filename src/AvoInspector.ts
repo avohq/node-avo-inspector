@@ -10,9 +10,10 @@ import { AvoBatchQueue, BACKPRESSURE_WAITING_EVENTS, MAX_TIMER_MS } from "./AvoB
 import { AvoDeduplicator } from "./AvoDeduplicator";
 import { AvoStreamId } from "./AvoStreamId";
 import { AvoEventSpecFetcher } from "./eventSpec/AvoEventSpecFetcher";
-import { AvoEventSpecCache } from "./eventSpec/AvoEventSpecCache";
+import { AvoEventSpecCache, TRANSIENT_FAILURE_TTL_MS } from "./eventSpec/AvoEventSpecCache";
 import { EventValidator } from "./eventSpec/EventValidator";
 import {
+  EventSpecCoordinates,
   EventSpecMetadata,
   EventSpecResponse,
   PropertyValidationResult,
@@ -876,7 +877,7 @@ export class AvoInspector {
     // that settles in the same event-loop turn, and flush() waits for that send.
     const validation = { flushRequested: false };
     const outcome = this.untilDestroyed<ValidationResult | null>(
-      this.untilGivenUp(this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties)),
+      this.untilGivenUp(this.fetchAndValidate(eventName, eventSchema, anonymousId, rawEventProperties, gatewayFields)),
       null
     )
       .catch((err): ValidationResult | null => {
@@ -1131,7 +1132,8 @@ export class AvoInspector {
       children?: any;
     }>,
     anonymousId: string,
-    rawEventProperties?: { [propName: string]: any }
+    rawEventProperties?: { [propName: string]: any },
+    gatewayFields?: ResolvedGatewayFields
   ): Promise<ValidationResult | null> {
     if (!this.eventSpecFetcher || !this.eventSpecCache || !this.eventValidator) {
       if (AvoInspector.shouldLog) {
@@ -1143,7 +1145,16 @@ export class AvoInspector {
       return null;
     }
 
-    const cacheKey = AvoEventSpecCache.makeKey(this.apiKey, anonymousId, eventName);
+    // The same normalized coordinates as on the track body: a gateway key answers the spec
+    // of that checkpoint, and each checkpoint's spec has its own cache entry and fetch.
+    const coordinates: EventSpecCoordinates = {};
+    if (gatewayFields && gatewayFields.originHint !== undefined) {
+      coordinates.originHint = gatewayFields.originHint;
+    }
+    if (gatewayFields && gatewayFields.outputReference !== undefined) {
+      coordinates.outputReference = gatewayFields.outputReference;
+    }
+    const cacheKey = AvoEventSpecCache.makeKey(this.apiKey, anonymousId, eventName, coordinates);
     const cache = this.eventSpecCache;
     const validator = this.eventValidator;
 
@@ -1174,6 +1185,12 @@ export class AvoInspector {
 
     // Check cache first
     const cached = cache.get(cacheKey);
+    if (cached === null) {
+      if (AvoInspector.shouldLog) {
+        console.log("Avo Inspector: Event spec cache hit (empty) for event: " + eventName + ". Sending without validation.");
+      }
+      return null;
+    }
     if (cached !== undefined) {
       if (AvoInspector.shouldLog) {
         console.log("Avo Inspector: Event spec cache hit for event: " + eventName);
@@ -1205,7 +1222,7 @@ export class AvoInspector {
 
     const fetcher = this.eventSpecFetcher;
     return new Promise((resolve, reject) => {
-      const onSpec = (result: EventSpecResponse | null) => {
+      const onSpec = (result: EventSpecResponse | null, notFound?: boolean) => {
         release();
         if (result !== null) {
           cache.set(cacheKey, result);
@@ -1217,6 +1234,9 @@ export class AvoInspector {
             reject(err);
           }
         } else {
+          // Cached so a failing fetch is not repeated for every event: a 404 (no spec, such
+          // as a gateway key without originHint) for the spec TTL, any other failure briefly.
+          cache.set(cacheKey, null, notFound === true ? undefined : TRANSIENT_FAILURE_TTL_MS);
           if (AvoInspector.shouldLog) {
             console.log("Avo Inspector: Event spec fetch returned null for event: " + eventName + ". Cached empty response. Sending without validation.");
           }
@@ -1224,7 +1244,7 @@ export class AvoInspector {
         }
       };
       try {
-        fetcher.fetch(eventName, anonymousId, onSpec);
+        fetcher.fetch(eventName, anonymousId, onSpec, coordinates);
       } catch (err) {
         // No callback will come: free the slot and fall back to an unvalidated send.
         release();
