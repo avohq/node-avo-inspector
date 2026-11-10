@@ -504,8 +504,15 @@ export class AvoNetworkCallsHandler {
     const result: Array<EventProperty> = [];
 
     for (const prop of properties) {
-      // List-type properties: omit entirely
+      // List-type properties are sent without a value: name, type and children only,
+      // as the web SDK does and as every property is sent in prod. Dropping them made the
+      // Debugger report the list as a missing property.
       if (AvoEncryption.isListType(prop.propertyType)) {
+        result.push({
+          propertyName: prop.propertyName,
+          propertyType: prop.propertyType,
+          ...(prop.children !== undefined ? { children: prop.children } : {}),
+        });
         continue;
       }
 
