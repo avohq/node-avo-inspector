@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **List properties are no longer dropped when values are encrypted.** With a public encryption key set in dev or staging, a list property (such as `item_ids: ["a", "b"]`) was left out of the event entirely, so the Inspector Debugger showed it as a missing property and the event as not validated. It is now sent with its name, type and children, without a value, as the web SDK sends lists and as every property is sent in prod. Other properties are unchanged.
+
 ## 2.0.0 (2026-10-22)
 
 Implements [avohq/spec-first-inspector-server-sdk](https://github.com/avohq/spec-first-inspector-server-sdk) v3.0.1: the `/inspector/v2/track` endpoint, batching with `flush()` and `destroy()`, gzip, and gateway fields. This is a breaking release; see [Upgrading from 1.x to 2.0](README.md#upgrading-from-1x-to-20) in the README.

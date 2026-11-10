@@ -290,7 +290,7 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
     expect((body.eventProperties[0] as any).encryptedPropertyValue).toBeUndefined();
   });
 
-  test("list-type properties are omitted entirely when encryption is active", () => {
+  test("list-type properties are sent without a value when encryption is active", () => {
     const ecdh = crypto.createECDH("prime256v1");
     ecdh.generateKeys();
     const pubKey = ecdh.getPublicKey("hex");
@@ -309,7 +309,7 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
       "test-event",
       [
         { propertyName: "name", propertyType: "string" },
-        { propertyName: "tags", propertyType: "list(string)" },
+        { propertyName: "tags", propertyType: "list(string)", children: ["string"] },
         { propertyName: "scores", propertyType: "list(int)" },
       ],
       null,
@@ -317,9 +317,19 @@ describe("AvoNetworkCallsHandler encryption integration", () => {
       { name: "Alice", tags: ["a", "b"], scores: [1, 2] }
     );
 
-    // List types should be omitted
-    expect(body.eventProperties.length).toBe(1);
+    // Lists keep their name, type and children, with no value
+    expect(body.eventProperties.length).toBe(3);
     expect(body.eventProperties[0].propertyName).toBe("name");
+    expect((body.eventProperties[0] as any).encryptedPropertyValue).toBeDefined();
+    expect(body.eventProperties[1]).toEqual({
+      propertyName: "tags",
+      propertyType: "list(string)",
+      children: ["string"],
+    });
+    expect(body.eventProperties[2]).toEqual({
+      propertyName: "scores",
+      propertyType: "list(int)",
+    });
   });
 
   test("encryption failure: property is omitted, warning logged", () => {
