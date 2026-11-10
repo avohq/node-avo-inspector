@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.1 (2026-11-10)
 
 - **List properties are no longer dropped when values are encrypted.** With a public encryption key set in dev or staging, a list property (such as `item_ids: ["a", "b"]`) was left out of the event entirely, so the Inspector Debugger showed it as a missing property and the event as not validated. It is now sent with its name, type and children, without a value, as the web SDK sends lists and as every property is sent in prod. Other properties are unchanged.
 
